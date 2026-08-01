@@ -16,22 +16,27 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/lib/supabase/client";
 
-type FulfillmentType = "delivery" | "collection";
+type FulfilmentMethod = "delivery" | "collection";
 
 type QuoteRequestInsert = {
   company_id: string;
   requested_by: string;
   project_name: string;
-  project_description: string;
-  fulfillment_type: FulfillmentType;
-  required_date: string;
-  required_time: string | null;
-  delivery_address: string | null;
+  description: string;
+  fulfilment_method: FulfilmentMethod;
+  requested_date: string;
+  requested_time: string | null;
+  delivery_address_line_1: string | null;
+  delivery_address_line_2: string | null;
+  delivery_city: string | null;
+  delivery_county: string | null;
+  delivery_postcode: string | null;
   delivery_contact_name: string | null;
   delivery_contact_phone: string | null;
   purchase_order_number: string | null;
   notes: string | null;
-  status: "draft";
+  deadline_status: "pending";
+  request_status: "submitted";
 };
 
 type QuoteRequestFormProps = {
@@ -61,6 +66,16 @@ function formatReviewDate(dateString: string) {
   });
 }
 
+function formatDeliveryAddress(
+  line1: string,
+  line2: string,
+  city: string,
+  county: string,
+  postcode: string
+) {
+  return [line1, line2, city, county, postcode].filter(Boolean).join(", ");
+}
+
 export function QuoteRequestForm({
   companyId,
   requestedBy,
@@ -74,16 +89,20 @@ export function QuoteRequestForm({
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const [projectName, setProjectName] = useState("");
-  const [projectDescription, setProjectDescription] = useState("");
-  const [fulfillmentType, setFulfillmentType] =
-    useState<FulfillmentType>("delivery");
-  const [requiredDate, setRequiredDate] = useState("");
-  const [requiredTime, setRequiredTime] = useState("");
-  const [deliveryAddress, setDeliveryAddress] = useState("");
+  const [description, setDescription] = useState("");
+  const [fulfilmentMethod, setFulfilmentMethod] =
+    useState<FulfilmentMethod>("delivery");
+  const [requestedDate, setRequestedDate] = useState("");
+  const [requestedTime, setRequestedTime] = useState("");
+  const [deliveryAddressLine1, setDeliveryAddressLine1] = useState("");
+  const [deliveryAddressLine2, setDeliveryAddressLine2] = useState("");
+  const [deliveryCity, setDeliveryCity] = useState("");
+  const [deliveryCounty, setDeliveryCounty] = useState("");
+  const [deliveryPostcode, setDeliveryPostcode] = useState("");
   const [deliveryContactName, setDeliveryContactName] = useState("");
   const [deliveryContactPhone, setDeliveryContactPhone] = useState("");
   const [purchaseOrderNumber, setPurchaseOrderNumber] = useState("");
-  const [additionalNotes, setAdditionalNotes] = useState("");
+  const [notes, setNotes] = useState("");
 
   const minDate = useMemo(() => getTodayString(), []);
 
@@ -107,21 +126,25 @@ export function QuoteRequestForm({
         errors.projectName = "Project name is required.";
       }
 
-      if (!projectDescription.trim()) {
-        errors.projectDescription = "Project description is required.";
+      if (!description.trim()) {
+        errors.description = "Project description is required.";
       }
     }
 
     if (currentStep === 2) {
-      if (!requiredDate) {
-        errors.requiredDate = "Required date is required.";
-      } else if (requiredDate < minDate) {
-        errors.requiredDate = "Required date cannot be in the past.";
+      if (!requestedDate) {
+        errors.requestedDate = "Required date is required.";
+      } else if (requestedDate < minDate) {
+        errors.requestedDate = "Required date cannot be in the past.";
       }
 
-      if (fulfillmentType === "delivery") {
-        if (!deliveryAddress.trim()) {
-          errors.deliveryAddress = "Delivery address is required.";
+      if (fulfilmentMethod === "delivery") {
+        if (!deliveryAddressLine1.trim()) {
+          errors.deliveryAddressLine1 = "Address line 1 is required.";
+        }
+
+        if (!deliveryPostcode.trim()) {
+          errors.deliveryPostcode = "Postcode is required.";
         }
 
         if (!deliveryContactName.trim()) {
@@ -157,30 +180,42 @@ export function QuoteRequestForm({
     event.preventDefault();
     setError("");
 
+    if (step !== 3) {
+      return;
+    }
+
     if (!validateStep(1) || !validateStep(2)) {
-      setStep(!projectName.trim() || !projectDescription.trim() ? 1 : 2);
+      setStep(!projectName.trim() || !description.trim() ? 1 : 2);
       return;
     }
 
     setIsSubmitting(true);
 
+    const isDelivery = fulfilmentMethod === "delivery";
+
     const insertPayload: QuoteRequestInsert = {
       company_id: companyId,
       requested_by: requestedBy,
       project_name: projectName.trim(),
-      project_description: projectDescription.trim(),
-      fulfillment_type: fulfillmentType,
-      required_date: requiredDate,
-      required_time: requiredTime.trim() || null,
-      delivery_address:
-        fulfillmentType === "delivery" ? deliveryAddress.trim() : null,
-      delivery_contact_name:
-        fulfillmentType === "delivery" ? deliveryContactName.trim() : null,
-      delivery_contact_phone:
-        fulfillmentType === "delivery" ? deliveryContactPhone.trim() : null,
+      description: description.trim(),
+      fulfilment_method: fulfilmentMethod,
+      requested_date: requestedDate,
+      requested_time: requestedTime.trim() || null,
+      delivery_address_line_1: isDelivery
+        ? deliveryAddressLine1.trim()
+        : null,
+      delivery_address_line_2: isDelivery
+        ? deliveryAddressLine2.trim() || null
+        : null,
+      delivery_city: isDelivery ? deliveryCity.trim() || null : null,
+      delivery_county: isDelivery ? deliveryCounty.trim() || null : null,
+      delivery_postcode: isDelivery ? deliveryPostcode.trim() : null,
+      delivery_contact_name: isDelivery ? deliveryContactName.trim() : null,
+      delivery_contact_phone: isDelivery ? deliveryContactPhone.trim() : null,
       purchase_order_number: purchaseOrderNumber.trim() || null,
-      notes: additionalNotes.trim() || null,
-      status: "draft",
+      notes: notes.trim() || null,
+      deadline_status: "pending",
+      request_status: "submitted",
     };
 
     const { error: insertError } = await supabase
@@ -250,22 +285,22 @@ export function QuoteRequestForm({
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="projectDescription">Project description</Label>
+                <Label htmlFor="description">Project description</Label>
                 <textarea
-                  id="projectDescription"
-                  value={projectDescription}
+                  id="description"
+                  value={description}
                   onChange={(event) => {
-                    setProjectDescription(event.target.value);
-                    clearFieldError("projectDescription");
+                    setDescription(event.target.value);
+                    clearFieldError("description");
                   }}
                   rows={5}
                   placeholder="Describe the project scope, quantities, and specifications."
                   className={fieldClassName}
-                  aria-invalid={Boolean(fieldErrors.projectDescription)}
+                  aria-invalid={Boolean(fieldErrors.description)}
                 />
-                {fieldErrors.projectDescription && (
+                {fieldErrors.description && (
                   <p className="text-sm text-red-600">
-                    {fieldErrors.projectDescription}
+                    {fieldErrors.description}
                   </p>
                 )}
               </div>
@@ -275,17 +310,17 @@ export function QuoteRequestForm({
           {step === 2 && (
             <div className="space-y-5">
               <div className="space-y-2">
-                <Label>Fulfillment</Label>
+                <Label>Fulfilment</Label>
                 <div className="grid grid-cols-2 gap-2">
                   {(["delivery", "collection"] as const).map((option) => (
                     <Button
                       key={option}
                       type="button"
                       variant={
-                        fulfillmentType === option ? "default" : "outline"
+                        fulfilmentMethod === option ? "default" : "outline"
                       }
                       onClick={() => {
-                        setFulfillmentType(option);
+                        setFulfilmentMethod(option);
                         setFieldErrors({});
                       }}
                     >
@@ -297,54 +332,106 @@ export function QuoteRequestForm({
 
               <div className="grid gap-5 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="requiredDate">Required date</Label>
+                  <Label htmlFor="requestedDate">Required date</Label>
                   <Input
-                    id="requiredDate"
+                    id="requestedDate"
                     type="date"
                     min={minDate}
-                    value={requiredDate}
+                    value={requestedDate}
                     onChange={(event) => {
-                      setRequiredDate(event.target.value);
-                      clearFieldError("requiredDate");
+                      setRequestedDate(event.target.value);
+                      clearFieldError("requestedDate");
                     }}
-                    aria-invalid={Boolean(fieldErrors.requiredDate)}
+                    aria-invalid={Boolean(fieldErrors.requestedDate)}
                   />
-                  {fieldErrors.requiredDate && (
+                  {fieldErrors.requestedDate && (
                     <p className="text-sm text-red-600">
-                      {fieldErrors.requiredDate}
+                      {fieldErrors.requestedDate}
                     </p>
                   )}
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="requiredTime">Preferred time</Label>
+                  <Label htmlFor="requestedTime">Preferred time</Label>
                   <Input
-                    id="requiredTime"
-                    value={requiredTime}
-                    onChange={(event) => setRequiredTime(event.target.value)}
+                    id="requestedTime"
+                    value={requestedTime}
+                    onChange={(event) => setRequestedTime(event.target.value)}
                     placeholder="e.g. 09:00–12:00"
                   />
                 </div>
               </div>
 
-              {fulfillmentType === "delivery" && (
+              {fulfilmentMethod === "delivery" && (
                 <div className="space-y-5 rounded-xl border border-neutral-200 bg-neutral-50/50 p-4">
                   <div className="space-y-2">
-                    <Label htmlFor="deliveryAddress">Delivery address</Label>
-                    <textarea
-                      id="deliveryAddress"
-                      value={deliveryAddress}
+                    <Label htmlFor="deliveryAddressLine1">Address line 1</Label>
+                    <Input
+                      id="deliveryAddressLine1"
+                      value={deliveryAddressLine1}
                       onChange={(event) => {
-                        setDeliveryAddress(event.target.value);
-                        clearFieldError("deliveryAddress");
+                        setDeliveryAddressLine1(event.target.value);
+                        clearFieldError("deliveryAddressLine1");
                       }}
-                      rows={3}
-                      className={fieldClassName}
-                      aria-invalid={Boolean(fieldErrors.deliveryAddress)}
+                      aria-invalid={Boolean(fieldErrors.deliveryAddressLine1)}
                     />
-                    {fieldErrors.deliveryAddress && (
+                    {fieldErrors.deliveryAddressLine1 && (
                       <p className="text-sm text-red-600">
-                        {fieldErrors.deliveryAddress}
+                        {fieldErrors.deliveryAddressLine1}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="deliveryAddressLine2">
+                      Address line 2
+                    </Label>
+                    <Input
+                      id="deliveryAddressLine2"
+                      value={deliveryAddressLine2}
+                      onChange={(event) =>
+                        setDeliveryAddressLine2(event.target.value)
+                      }
+                      placeholder="Optional"
+                    />
+                  </div>
+
+                  <div className="grid gap-5 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="deliveryCity">City</Label>
+                      <Input
+                        id="deliveryCity"
+                        value={deliveryCity}
+                        onChange={(event) => setDeliveryCity(event.target.value)}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="deliveryCounty">County</Label>
+                      <Input
+                        id="deliveryCounty"
+                        value={deliveryCounty}
+                        onChange={(event) =>
+                          setDeliveryCounty(event.target.value)
+                        }
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="deliveryPostcode">Postcode</Label>
+                    <Input
+                      id="deliveryPostcode"
+                      value={deliveryPostcode}
+                      onChange={(event) => {
+                        setDeliveryPostcode(event.target.value);
+                        clearFieldError("deliveryPostcode");
+                      }}
+                      aria-invalid={Boolean(fieldErrors.deliveryPostcode)}
+                    />
+                    {fieldErrors.deliveryPostcode && (
+                      <p className="text-sm text-red-600">
+                        {fieldErrors.deliveryPostcode}
                       </p>
                     )}
                   </div>
@@ -407,11 +494,11 @@ export function QuoteRequestForm({
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="additionalNotes">Additional notes</Label>
+                <Label htmlFor="notes">Additional notes</Label>
                 <textarea
-                  id="additionalNotes"
-                  value={additionalNotes}
-                  onChange={(event) => setAdditionalNotes(event.target.value)}
+                  id="notes"
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
                   rows={4}
                   placeholder="Optional delivery instructions or project notes"
                   className={fieldClassName}
@@ -433,13 +520,13 @@ export function QuoteRequestForm({
 
                   <div>
                     <dt className="text-neutral-500">Project description</dt>
-                    <dd className="text-neutral-950">{projectDescription}</dd>
+                    <dd className="text-neutral-950">{description}</dd>
                   </div>
 
                   <div>
-                    <dt className="text-neutral-500">Fulfillment</dt>
+                    <dt className="text-neutral-500">Fulfilment</dt>
                     <dd className="font-medium text-neutral-950">
-                      {fulfillmentType === "delivery"
+                      {fulfilmentMethod === "delivery"
                         ? "Delivery"
                         : "Collection"}
                     </dd>
@@ -448,16 +535,24 @@ export function QuoteRequestForm({
                   <div>
                     <dt className="text-neutral-500">Required date</dt>
                     <dd className="font-medium text-neutral-950">
-                      {formatReviewDate(requiredDate)}
-                      {requiredTime ? `, ${requiredTime}` : ""}
+                      {formatReviewDate(requestedDate)}
+                      {requestedTime ? `, ${requestedTime}` : ""}
                     </dd>
                   </div>
 
-                  {fulfillmentType === "delivery" && (
+                  {fulfilmentMethod === "delivery" && (
                     <>
                       <div>
                         <dt className="text-neutral-500">Delivery address</dt>
-                        <dd className="text-neutral-950">{deliveryAddress}</dd>
+                        <dd className="text-neutral-950">
+                          {formatDeliveryAddress(
+                            deliveryAddressLine1,
+                            deliveryAddressLine2,
+                            deliveryCity,
+                            deliveryCounty,
+                            deliveryPostcode
+                          )}
+                        </dd>
                       </div>
 
                       <div>
@@ -478,10 +573,10 @@ export function QuoteRequestForm({
                     </div>
                   )}
 
-                  {additionalNotes && (
+                  {notes && (
                     <div>
                       <dt className="text-neutral-500">Additional notes</dt>
-                      <dd className="text-neutral-950">{additionalNotes}</dd>
+                      <dd className="text-neutral-950">{notes}</dd>
                     </div>
                   )}
                 </dl>
