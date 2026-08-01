@@ -105,9 +105,9 @@ function formatMoney(value: number) {
   return roundMoney(value).toFixed(2);
 }
 
-function createEmptyLineItem(): LineItemFormState {
+function createEmptyLineItem(clientKey: string): LineItemFormState {
   return {
-    clientKey: crypto.randomUUID(),
+    clientKey,
     title: "",
     description: "",
     quantity: "1",
@@ -116,9 +116,13 @@ function createEmptyLineItem(): LineItemFormState {
   };
 }
 
-function toLineItemFormState(item: QuoteBuilderLineItem): LineItemFormState {
+function toLineItemFormState(
+  item: QuoteBuilderLineItem,
+  index: number
+): LineItemFormState {
   return {
-    clientKey: crypto.randomUUID(),
+    clientKey: item.id ?? `new-${index}`,
+    id: item.id,
     title: item.title,
     description: item.description,
     quantity: String(item.quantity),
@@ -190,10 +194,12 @@ export function QuoteBuilderForm({
   const [internalNotes, setInternalNotes] = useState(
     initialValues.internalNotes
   );
-  const [lineItems, setLineItems] = useState<LineItemFormState[]>(
+  const [lineItems, setLineItems] = useState<LineItemFormState[]>(() =>
     initialValues.lineItems.length > 0
-      ? initialValues.lineItems.map(toLineItemFormState)
-      : [createEmptyLineItem()]
+      ? initialValues.lineItems.map((item, index) =>
+          toLineItemFormState(item, index)
+        )
+      : [createEmptyLineItem("new-0")]
   );
   const [isSaving, setIsSaving] = useState(false);
   const [isSending, setIsSending] = useState(false);
@@ -211,13 +217,16 @@ export function QuoteBuilderForm({
   const isReadOnly = !canEdit;
 
   function handleAddLineItem() {
-    setLineItems((current) => [...current, createEmptyLineItem()]);
+    setLineItems((current) => [
+      ...current,
+      createEmptyLineItem(crypto.randomUUID()),
+    ]);
   }
 
   function handleRemoveLineItem(clientKey: string) {
     setLineItems((current) =>
       current.length === 1
-        ? [createEmptyLineItem()]
+        ? [createEmptyLineItem("new-0")]
         : current.filter((item) => item.clientKey !== clientKey)
     );
   }

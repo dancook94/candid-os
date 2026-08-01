@@ -121,6 +121,7 @@ export default async function QuoteDetailPage({
     customerNotes: quoteVersion.customer_notes ?? "",
     internalNotes: quoteVersion.internal_notes ?? "",
     lineItems: (quoteItems ?? []).map((item) => ({
+      id: item.id,
       title: item.title,
       description: item.description ?? "",
       quantity: Number(item.quantity),
