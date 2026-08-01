@@ -17,6 +17,17 @@ import { createClient } from "@/lib/supabase/client";
 
 const VAT_RATE = 0.2;
 
+type LineItemFormState = {
+  clientKey: string;
+  id?: string;
+  title: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  isOptional: boolean;
+  isSelected: boolean;
+};
+
 export type QuoteBuilderLineItem = {
   id?: string;
   title: string;
@@ -24,6 +35,7 @@ export type QuoteBuilderLineItem = {
   quantity: number;
   unitPrice: number;
   isOptional: boolean;
+  isSelected?: boolean;
 };
 
 export type QuoteBuilderInitialValues = {
@@ -47,16 +59,6 @@ type QuoteRequestOption = {
   id: string;
   company_id: string;
   project_name: string;
-};
-
-type LineItemFormState = {
-  clientKey: string;
-  id?: string;
-  title: string;
-  description: string;
-  quantity: string;
-  unitPrice: string;
-  isOptional: boolean;
 };
 
 type QuoteBuilderFormProps = {
@@ -113,6 +115,7 @@ function createEmptyLineItem(clientKey: string): LineItemFormState {
     quantity: "1",
     unitPrice: "0.00",
     isOptional: false,
+    isSelected: true,
   };
 }
 
@@ -128,6 +131,7 @@ function toLineItemFormState(
     quantity: String(item.quantity),
     unitPrice: item.unitPrice.toFixed(2),
     isOptional: item.isOptional,
+    isSelected: item.isSelected ?? true,
   };
 }
 
@@ -229,6 +233,31 @@ export function QuoteBuilderForm({
         ? [createEmptyLineItem("new-0")]
         : current.filter((item) => item.clientKey !== clientKey)
     );
+  }
+
+  function handleDuplicateLineItem(clientKey: string) {
+    setLineItems((current) => {
+      const sourceIndex = current.findIndex((item) => item.clientKey === clientKey);
+
+      if (sourceIndex === -1) {
+        return current;
+      }
+
+      const source = current[sourceIndex];
+      const duplicate: LineItemFormState = {
+        clientKey: crypto.randomUUID(),
+        title: source.title,
+        description: source.description,
+        quantity: source.quantity,
+        unitPrice: source.unitPrice,
+        isOptional: source.isOptional,
+        isSelected: source.isSelected,
+      };
+
+      const next = [...current];
+      next.splice(sourceIndex + 1, 0, duplicate);
+      return next;
+    });
   }
 
   function updateLineItem(
@@ -419,11 +448,8 @@ export function QuoteBuilderForm({
         throw new Error("Quote details are missing.");
       }
 
-      if (
-        selectedVersionNumber !== currentVersionNumber ||
-        versionStatus !== "draft"
-      ) {
-        throw new Error("Only the current draft version can be saved.");
+      if (versionStatus !== "draft") {
+        throw new Error("Only draft versions can be saved.");
       }
 
       console.log("[quote-save] selectedQuoteVersionId", selectedQuoteVersionId);
@@ -463,6 +489,9 @@ export function QuoteBuilderForm({
           quote_request_id: quoteRequestId || null,
           project_name: trimmedProjectName,
           status: targetStatus,
+          ...(targetStatus === "sent" && selectedVersionNumber !== undefined
+            ? { current_version: selectedVersionNumber }
+            : {}),
           updated_at: new Date().toISOString(),
         })
         .eq("id", quoteId);
@@ -539,10 +568,8 @@ export function QuoteBuilderForm({
             {mode === "create"
               ? "Create a draft quote with line items and customer details."
               : isReadOnly
-                ? selectedVersionNumber !== currentVersionNumber
-                  ? "This version is read-only."
-                  : "This version is no longer editable."
-                : "Edit the current draft version."}
+                ? "This version is read-only."
+                : "Edit this draft version."}
           </CardDescription>
         </CardHeader>
 
@@ -728,15 +755,26 @@ export function QuoteBuilderForm({
                   </p>
 
                   {!isReadOnly && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={isBusy}
-                      onClick={() => handleRemoveLineItem(item.clientKey)}
-                    >
-                      Remove
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={isBusy}
+                        onClick={() => handleDuplicateLineItem(item.clientKey)}
+                      >
+                        Duplicate
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        disabled={isBusy}
+                        onClick={() => handleRemoveLineItem(item.clientKey)}
+                      >
+                        Remove
+                      </Button>
+                    </div>
                   )}
                 </div>
 

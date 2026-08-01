@@ -130,10 +130,7 @@ export default async function QuoteDetailPage({
     })),
   };
 
-  const isViewingCurrentVersion =
-    selectedVersionNumber === quote.current_version;
-  const canEdit =
-    isViewingCurrentVersion && quoteVersion.version_status === "draft";
+  const canEdit = quoteVersion.version_status === "draft";
   const versionOptions: QuoteVersionOption[] = allVersions.map((version) => ({
     version_number: version.version_number,
     version_status: version.version_status,
@@ -164,15 +161,9 @@ export default async function QuoteDetailPage({
               quoteId={quote.id}
               versions={versionOptions}
               selectedVersion={selectedVersionNumber}
+              selectedVersionStatus={quoteVersion.version_status}
               currentVersion={quote.current_version}
             />
-
-            {!isViewingCurrentVersion && (
-              <p className="text-sm text-neutral-500">
-                Viewing version {selectedVersionNumber}. Only the current
-                draft version can be edited.
-              </p>
-            )}
 
             <CreateQuoteVersionButton
               quoteId={quote.id}
