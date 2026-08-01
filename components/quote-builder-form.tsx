@@ -3,6 +3,7 @@
 import { FormEvent, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { QuoteBuilderLineItemCard } from "@/components/quote-builder-line-item";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -103,8 +104,11 @@ function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
 }
 
-function formatMoney(value: number) {
-  return roundMoney(value).toFixed(2);
+function formatGbp(value: number) {
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "GBP",
+  }).format(roundMoney(value));
 }
 
 function createEmptyLineItem(clientKey: string): LineItemFormState {
@@ -209,6 +213,9 @@ export function QuoteBuilderForm({
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [focusTitleClientKey, setFocusTitleClientKey] = useState<string | null>(
+    null
+  );
 
   const isBusy = isSaving || isSending;
 
@@ -221,10 +228,9 @@ export function QuoteBuilderForm({
   const isReadOnly = !canEdit;
 
   function handleAddLineItem() {
-    setLineItems((current) => [
-      ...current,
-      createEmptyLineItem(crypto.randomUUID()),
-    ]);
+    const clientKey = crypto.randomUUID();
+    setLineItems((current) => [...current, createEmptyLineItem(clientKey)]);
+    setFocusTitleClientKey(clientKey);
   }
 
   function handleRemoveLineItem(clientKey: string) {
@@ -256,6 +262,26 @@ export function QuoteBuilderForm({
 
       const next = [...current];
       next.splice(sourceIndex + 1, 0, duplicate);
+      return next;
+    });
+  }
+
+  function handleMoveLineItem(clientKey: string, direction: -1 | 1) {
+    setLineItems((current) => {
+      const index = current.findIndex((item) => item.clientKey === clientKey);
+
+      if (index === -1) {
+        return current;
+      }
+
+      const targetIndex = index + direction;
+
+      if (targetIndex < 0 || targetIndex >= current.length) {
+        return current;
+      }
+
+      const next = [...current];
+      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
       return next;
     });
   }
@@ -714,207 +740,80 @@ export function QuoteBuilderForm({
       </Card>
 
       <Card className="rounded-2xl border-neutral-200 shadow-sm ring-0">
-        <CardHeader className="border-b border-neutral-200">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <CardTitle className="text-lg font-semibold text-neutral-950">
-                Line items
-              </CardTitle>
-              <CardDescription>
-                Quantities and unit prices exclude VAT.
-              </CardDescription>
-            </div>
-
-            {!isReadOnly && (
-              <Button
-                type="button"
-                variant="outline"
-                disabled={isBusy}
-                onClick={handleAddLineItem}
-              >
-                Add line item
-              </Button>
-            )}
-          </div>
+        <CardHeader className="border-b border-neutral-200 pb-4">
+          <CardTitle className="text-lg font-semibold text-neutral-950">
+            Line items
+          </CardTitle>
+          <CardDescription>
+            Quantities and unit prices exclude VAT.
+          </CardDescription>
         </CardHeader>
 
-        <CardContent className="space-y-4 pt-6">
+        <CardContent className="space-y-3 pt-4">
           {lineItems.map((item, index) => {
             const quantity = Number.parseFloat(item.quantity) || 0;
             const unitPrice = Number.parseFloat(item.unitPrice) || 0;
             const lineTotal = calculateLineTotal(quantity, unitPrice);
 
             return (
-              <div
+              <QuoteBuilderLineItemCard
                 key={item.clientKey}
-                className="rounded-xl border border-neutral-200 bg-neutral-50/50 p-4"
-              >
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <p className="text-sm font-medium text-neutral-950">
-                    Item {index + 1}
-                  </p>
-
-                  {!isReadOnly && (
-                    <div className="flex gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={isBusy}
-                        onClick={() => handleDuplicateLineItem(item.clientKey)}
-                      >
-                        Duplicate
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={isBusy}
-                        onClick={() => handleRemoveLineItem(item.clientKey)}
-                      >
-                        Remove
-                      </Button>
-                    </div>
-                  )}
-                </div>
-
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2 md:col-span-2">
-                    <Label htmlFor={`title-${item.clientKey}`}>Title</Label>
-                    <Input
-                      id={`title-${item.clientKey}`}
-                      value={item.title}
-                      onChange={(event) =>
-                        updateLineItem(item.clientKey, {
-                          title: event.target.value,
-                        })
-                      }
-                      disabled={isBusy || isReadOnly}
-                    />
-                  </div>
-
-                  <div className="space-y-2 md:col-span-2">
-                    <Label htmlFor={`description-${item.clientKey}`}>
-                      Description
-                    </Label>
-                    <textarea
-                      id={`description-${item.clientKey}`}
-                      value={item.description}
-                      onChange={(event) =>
-                        updateLineItem(item.clientKey, {
-                          description: event.target.value,
-                        })
-                      }
-                      disabled={isBusy || isReadOnly}
-                      rows={3}
-                      className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor={`quantity-${item.clientKey}`}>
-                      Quantity
-                    </Label>
-                    <Input
-                      id={`quantity-${item.clientKey}`}
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={item.quantity}
-                      onChange={(event) =>
-                        updateLineItem(item.clientKey, {
-                          quantity: event.target.value,
-                        })
-                      }
-                      disabled={isBusy || isReadOnly}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor={`unit-price-${item.clientKey}`}>
-                      Unit price ex VAT
-                    </Label>
-                    <Input
-                      id={`unit-price-${item.clientKey}`}
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={item.unitPrice}
-                      onChange={(event) =>
-                        updateLineItem(item.clientKey, {
-                          unitPrice: event.target.value,
-                        })
-                      }
-                      disabled={isBusy || isReadOnly}
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-2 md:col-span-2">
-                    <input
-                      id={`optional-${item.clientKey}`}
-                      type="checkbox"
-                      checked={item.isOptional}
-                      onChange={(event) =>
-                        updateLineItem(item.clientKey, {
-                          isOptional: event.target.checked,
-                        })
-                      }
-                      disabled={isBusy || isReadOnly}
-                      className="h-4 w-4 rounded border-neutral-300"
-                    />
-                    <Label htmlFor={`optional-${item.clientKey}`}>
-                      Optional item
-                    </Label>
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <p className="text-sm text-neutral-500">
-                      Line total:{" "}
-                      <span className="font-medium text-neutral-950">
-                        £{formatMoney(lineTotal)}
-                      </span>
-                      {item.isOptional && (
-                        <span className="ml-2 text-neutral-500">
-                          (excluded from quote total)
-                        </span>
-                      )}
-                    </p>
-                  </div>
-                </div>
-              </div>
+                item={item}
+                index={index}
+                totalItems={lineItems.length}
+                lineTotal={lineTotal}
+                formatGbp={formatGbp}
+                isBusy={isBusy}
+                isReadOnly={isReadOnly}
+                shouldFocusTitle={focusTitleClientKey === item.clientKey}
+                onFocusTitle={() => setFocusTitleClientKey(null)}
+                onUpdate={updateLineItem}
+                onDuplicate={handleDuplicateLineItem}
+                onMoveUp={(clientKey) => handleMoveLineItem(clientKey, -1)}
+                onMoveDown={(clientKey) => handleMoveLineItem(clientKey, 1)}
+                onDelete={handleRemoveLineItem}
+              />
             );
           })}
-        </CardContent>
-      </Card>
 
-      <Card className="rounded-2xl border-neutral-200 shadow-sm ring-0">
-        <CardHeader className="border-b border-neutral-200">
-          <CardTitle className="text-lg font-semibold text-neutral-950">
-            Totals
-          </CardTitle>
-        </CardHeader>
+          {!isReadOnly && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isBusy}
+              onClick={handleAddLineItem}
+              className="w-full sm:w-auto"
+            >
+              Add line item
+            </Button>
+          )}
 
-        <CardContent className="pt-6">
-          <dl className="space-y-3 text-sm">
-            <div className="flex items-center justify-between">
-              <dt className="text-neutral-500">Subtotal</dt>
-              <dd className="font-medium text-neutral-950">
-                £{formatMoney(totals.subtotal)}
-              </dd>
+          <div className="flex justify-end pt-2">
+            <div className="w-full max-w-sm rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+              <dl className="space-y-2 text-sm">
+                <div className="flex items-center justify-between gap-4">
+                  <dt className="text-neutral-500">Subtotal</dt>
+                  <dd className="font-medium text-neutral-950">
+                    {formatGbp(totals.subtotal)}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-4">
+                  <dt className="text-neutral-500">VAT (20%)</dt>
+                  <dd className="font-medium text-neutral-950">
+                    {formatGbp(totals.vatAmount)}
+                  </dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 border-t border-neutral-200 pt-3">
+                  <dt className="font-medium text-neutral-950">
+                    Total including VAT
+                  </dt>
+                  <dd className="text-lg font-semibold text-neutral-950">
+                    {formatGbp(totals.total)}
+                  </dd>
+                </div>
+              </dl>
             </div>
-            <div className="flex items-center justify-between">
-              <dt className="text-neutral-500">VAT (20%)</dt>
-              <dd className="font-medium text-neutral-950">
-                £{formatMoney(totals.vatAmount)}
-              </dd>
-            </div>
-            <div className="flex items-center justify-between border-t border-neutral-200 pt-3">
-              <dt className="font-medium text-neutral-950">Total</dt>
-              <dd className="text-base font-semibold text-neutral-950">
-                £{formatMoney(totals.total)}
-              </dd>
-            </div>
-          </dl>
+          </div>
         </CardContent>
       </Card>
 
