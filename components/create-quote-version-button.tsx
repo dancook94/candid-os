@@ -36,6 +36,28 @@ type CreateQuoteVersionButtonProps = {
   sourceItems: SourceItem[];
 };
 
+function formatSupabaseError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return "Unable to create quote version.";
+  }
+
+  const parts = [
+    "message" in error && typeof error.message === "string"
+      ? error.message
+      : null,
+    "details" in error && typeof error.details === "string"
+      ? error.details
+      : null,
+    "hint" in error && typeof error.hint === "string" ? error.hint : null,
+  ].filter(Boolean);
+
+  if (parts.length > 0) {
+    return parts.join(" — ");
+  }
+
+  return "Unable to create quote version.";
+}
+
 export function CreateQuoteVersionButton({
   quoteId,
   sourceVersion,
@@ -49,7 +71,7 @@ export function CreateQuoteVersionButton({
 
   async function handleCreateVersion() {
     const confirmed = window.confirm(
-      `Create version ${sourceVersion.version_number + 1} from version ${sourceVersion.version_number}? The previous version will remain unchanged.`
+      "Create a new quote version? The current version will be preserved."
     );
 
     if (!confirmed) {
@@ -68,10 +90,12 @@ export function CreateQuoteVersionButton({
         .limit(1)
         .maybeSingle();
 
-      if (latestVersionError || !latestVersion) {
-        throw new Error(
-          latestVersionError?.message ?? "Unable to determine latest version."
-        );
+      if (latestVersionError) {
+        throw latestVersionError;
+      }
+
+      if (!latestVersion) {
+        throw new Error("Unable to determine latest version.");
       }
 
       const nextVersionNumber = latestVersion.version_number + 1;
@@ -95,10 +119,12 @@ export function CreateQuoteVersionButton({
         .select("id, version_number")
         .single();
 
-      if (createVersionError || !createdVersion) {
-        throw new Error(
-          createVersionError?.message ?? "Unable to create quote version."
-        );
+      if (createVersionError) {
+        throw createVersionError;
+      }
+
+      if (!createdVersion) {
+        throw new Error("Unable to create quote version.");
       }
 
       if (sourceItems.length > 0) {
@@ -120,7 +146,7 @@ export function CreateQuoteVersionButton({
             .from("quote_versions")
             .delete()
             .eq("id", createdVersion.id);
-          throw new Error(copyItemsError.message);
+          throw copyItemsError;
         }
       }
 
@@ -134,19 +160,18 @@ export function CreateQuoteVersionButton({
         .eq("id", quoteId);
 
       if (quoteUpdateError) {
-        await supabase.from("quote_items").delete().eq("quote_version_id", createdVersion.id);
+        await supabase
+          .from("quote_items")
+          .delete()
+          .eq("quote_version_id", createdVersion.id);
         await supabase.from("quote_versions").delete().eq("id", createdVersion.id);
-        throw new Error(quoteUpdateError.message);
+        throw quoteUpdateError;
       }
 
       router.push(`/admin/quotes/${quoteId}?version=${nextVersionNumber}`);
       router.refresh();
     } catch (createError) {
-      setError(
-        createError instanceof Error
-          ? createError.message
-          : "Unable to create quote version."
-      );
+      setError(formatSupabaseError(createError));
     } finally {
       setIsCreating(false);
     }
@@ -160,7 +185,7 @@ export function CreateQuoteVersionButton({
         disabled={isCreating}
         onClick={handleCreateVersion}
       >
-        {isCreating ? "Creating version..." : "Create new version"}
+        {isCreating ? "Creating version..." : "Create New Version"}
       </Button>
 
       {error && (

@@ -91,28 +91,12 @@ export default async function QuoteDetailPage({
     notFound();
   }
 
-  const currentVersionRecord = allVersions.find(
-    (version) => version.version_number === quote.current_version
-  );
-
-  if (!currentVersionRecord) {
-    notFound();
-  }
-
   const { data: quoteItems } = await supabase
     .from("quote_items")
     .select(
       "id, title, description, quantity, unit_price, is_optional, line_total, sort_order"
     )
     .eq("quote_version_id", quoteVersion.id)
-    .order("sort_order", { ascending: true });
-
-  const { data: currentVersionItems } = await supabase
-    .from("quote_items")
-    .select(
-      "title, description, quantity, unit_price, is_optional, line_total, sort_order"
-    )
-    .eq("quote_version_id", currentVersionRecord.id)
     .order("sort_order", { ascending: true });
 
   const [{ data: companies }, { data: quoteRequests }] = await Promise.all([
@@ -150,12 +134,6 @@ export default async function QuoteDetailPage({
     selectedVersionNumber === quote.current_version;
   const canEdit =
     isViewingCurrentVersion && quoteVersion.version_status === "draft";
-  const showCreateVersionButton =
-    isViewingCurrentVersion &&
-    !(
-      quote.status === "draft" && quoteVersion.version_status === "draft"
-    );
-
   const versionOptions: QuoteVersionOption[] = allVersions.map((version) => ({
     version_number: version.version_number,
     version_status: version.version_status,
@@ -186,6 +164,7 @@ export default async function QuoteDetailPage({
               quoteId={quote.id}
               versions={versionOptions}
               selectedVersion={selectedVersionNumber}
+              currentVersion={quote.current_version}
             />
 
             {!isViewingCurrentVersion && (
@@ -195,33 +174,31 @@ export default async function QuoteDetailPage({
               </p>
             )}
 
-            {showCreateVersionButton && (
-              <CreateQuoteVersionButton
-                quoteId={quote.id}
-                sourceVersion={{
-                  id: currentVersionRecord.id,
-                  version_number: currentVersionRecord.version_number,
-                  introduction: currentVersionRecord.introduction,
-                  customer_notes: currentVersionRecord.customer_notes,
-                  internal_notes: currentVersionRecord.internal_notes,
-                  expiry_date: currentVersionRecord.expiry_date,
-                  payment_terms_days: currentVersionRecord.payment_terms_days,
-                  subtotal: currentVersionRecord.subtotal,
-                  vat_rate: currentVersionRecord.vat_rate,
-                  vat_amount: currentVersionRecord.vat_amount,
-                  total: currentVersionRecord.total,
-                }}
-                sourceItems={(currentVersionItems ?? []).map((item) => ({
-                  title: item.title,
-                  description: item.description,
-                  quantity: Number(item.quantity),
-                  unit_price: Number(item.unit_price),
-                  is_optional: Boolean(item.is_optional),
-                  line_total: Number(item.line_total),
-                  sort_order: Number(item.sort_order),
-                }))}
-              />
-            )}
+            <CreateQuoteVersionButton
+              quoteId={quote.id}
+              sourceVersion={{
+                id: quoteVersion.id,
+                version_number: quoteVersion.version_number,
+                introduction: quoteVersion.introduction,
+                customer_notes: quoteVersion.customer_notes,
+                internal_notes: quoteVersion.internal_notes,
+                expiry_date: quoteVersion.expiry_date,
+                payment_terms_days: quoteVersion.payment_terms_days,
+                subtotal: quoteVersion.subtotal,
+                vat_rate: quoteVersion.vat_rate,
+                vat_amount: quoteVersion.vat_amount,
+                total: quoteVersion.total,
+              }}
+              sourceItems={(quoteItems ?? []).map((item) => ({
+                title: item.title,
+                description: item.description,
+                quantity: Number(item.quantity),
+                unit_price: Number(item.unit_price),
+                is_optional: Boolean(item.is_optional),
+                line_total: Number(item.line_total),
+                sort_order: Number(item.sort_order),
+              }))}
+            />
           </CardContent>
         </Card>
 

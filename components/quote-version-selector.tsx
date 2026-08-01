@@ -14,6 +14,7 @@ type QuoteVersionSelectorProps = {
   quoteId: string;
   versions: QuoteVersionOption[];
   selectedVersion: number;
+  currentVersion: number;
 };
 
 function formatDate(dateString: string) {
@@ -35,6 +36,7 @@ export function QuoteVersionSelector({
   quoteId,
   versions,
   selectedVersion,
+  currentVersion,
 }: QuoteVersionSelectorProps) {
   const router = useRouter();
 
@@ -54,7 +56,9 @@ export function QuoteVersionSelector({
       >
         {versions.map((version) => (
           <option key={version.version_number} value={version.version_number}>
-            v{version.version_number} · {formatStatusLabel(version.version_status)} ·{" "}
+            v{version.version_number}
+            {version.version_number === currentVersion ? " (current)" : ""} ·{" "}
+            {formatStatusLabel(version.version_status)} ·{" "}
             {formatDate(version.created_at)}
           </option>
         ))}
