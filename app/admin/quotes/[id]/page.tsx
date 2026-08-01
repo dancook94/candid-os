@@ -121,7 +121,6 @@ export default async function QuoteDetailPage({
     customerNotes: quoteVersion.customer_notes ?? "",
     internalNotes: quoteVersion.internal_notes ?? "",
     lineItems: (quoteItems ?? []).map((item) => ({
-      id: item.id,
       title: item.title,
       description: item.description ?? "",
       quantity: Number(item.quantity),
@@ -203,13 +202,14 @@ export default async function QuoteDetailPage({
         </Card>
 
         <QuoteBuilderForm
+          key={quoteVersion.id}
           mode="edit"
           createdBy={user.id}
           companies={companies ?? []}
           quoteRequests={quoteRequests ?? []}
           initialValues={initialValues}
           quoteId={quote.id}
-          quoteVersionId={quoteVersion.id}
+          selectedQuoteVersionId={quoteVersion.id}
           quoteNumber={quote.quote_number}
           quoteStatus={quote.status}
           versionStatus={quoteVersion.version_status}

@@ -66,7 +66,7 @@ type QuoteBuilderFormProps = {
   quoteRequests: QuoteRequestOption[];
   initialValues: QuoteBuilderInitialValues;
   quoteId?: string;
-  quoteVersionId?: string;
+  selectedQuoteVersionId?: string;
   quoteNumber?: number;
   quoteStatus?: string;
   versionStatus?: string;
@@ -74,6 +74,28 @@ type QuoteBuilderFormProps = {
   currentVersionNumber?: number;
   canEdit?: boolean;
 };
+
+function formatSupabaseError(error: unknown) {
+  if (!error || typeof error !== "object") {
+    return "Unable to save quote.";
+  }
+
+  const parts = [
+    "message" in error && typeof error.message === "string"
+      ? error.message
+      : null,
+    "details" in error && typeof error.details === "string"
+      ? error.details
+      : null,
+    "hint" in error && typeof error.hint === "string" ? error.hint : null,
+  ].filter(Boolean);
+
+  if (parts.length > 0) {
+    return parts.join(" — ");
+  }
+
+  return "Unable to save quote.";
+}
 
 function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
@@ -96,8 +118,7 @@ function createEmptyLineItem(): LineItemFormState {
 
 function toLineItemFormState(item: QuoteBuilderLineItem): LineItemFormState {
   return {
-    clientKey: item.id ?? crypto.randomUUID(),
-    id: item.id,
+    clientKey: crypto.randomUUID(),
     title: item.title,
     description: item.description,
     quantity: String(item.quantity),
@@ -142,7 +163,7 @@ export function QuoteBuilderForm({
   quoteRequests,
   initialValues,
   quoteId,
-  quoteVersionId,
+  selectedQuoteVersionId,
   quoteNumber,
   quoteStatus,
   versionStatus,
@@ -385,9 +406,19 @@ export function QuoteBuilderForm({
         return;
       }
 
-      if (!quoteId || !quoteVersionId) {
+      if (!quoteId || !selectedQuoteVersionId) {
         throw new Error("Quote details are missing.");
       }
+
+      if (
+        selectedVersionNumber !== currentVersionNumber ||
+        versionStatus !== "draft"
+      ) {
+        throw new Error("Only the current draft version can be saved.");
+      }
+
+      console.log("[quote-save] selectedQuoteVersionId", selectedQuoteVersionId);
+      console.log("[quote-save] selectedVersionNumber", selectedVersionNumber);
 
       if (targetStatus === "sent") {
         const { error: supersedeError } = await supabase
@@ -395,12 +426,26 @@ export function QuoteBuilderForm({
           .update({ version_status: "superseded" })
           .eq("quote_id", quoteId)
           .eq("version_status", "sent")
-          .neq("id", quoteVersionId);
+          .neq("id", selectedQuoteVersionId);
 
         if (supersedeError) {
-          throw new Error(supersedeError.message);
+          throw supersedeError;
         }
       }
+
+      const { data: existingItems, error: existingItemsError } = await supabase
+        .from("quote_items")
+        .select("id")
+        .eq("quote_version_id", selectedQuoteVersionId);
+
+      if (existingItemsError) {
+        throw existingItemsError;
+      }
+
+      console.log(
+        "[quote-save] quote item IDs being deleted",
+        (existingItems ?? []).map((item) => item.id)
+      );
 
       const { error: quoteUpdateError } = await supabase
         .from("quotes")
@@ -414,37 +459,37 @@ export function QuoteBuilderForm({
         .eq("id", quoteId);
 
       if (quoteUpdateError) {
-        throw new Error(quoteUpdateError.message);
+        throw quoteUpdateError;
       }
 
       const { error: versionUpdateError } = await supabase
         .from("quote_versions")
         .update(versionFields)
-        .eq("id", quoteVersionId);
+        .eq("id", selectedQuoteVersionId);
 
       if (versionUpdateError) {
-        throw new Error(versionUpdateError.message);
+        throw versionUpdateError;
       }
 
       const { error: deleteItemsError } = await supabase
         .from("quote_items")
         .delete()
-        .eq("quote_version_id", quoteVersionId);
+        .eq("quote_version_id", selectedQuoteVersionId);
 
       if (deleteItemsError) {
-        throw new Error(deleteItemsError.message);
+        throw deleteItemsError;
       }
 
       if (itemsPayload.length > 0) {
         const { error: itemsError } = await supabase.from("quote_items").insert(
           itemsPayload.map((item) => ({
             ...item,
-            quote_version_id: quoteVersionId,
+            quote_version_id: selectedQuoteVersionId,
           }))
         );
 
         if (itemsError) {
-          throw new Error(itemsError.message);
+          throw itemsError;
         }
       }
 
@@ -456,9 +501,7 @@ export function QuoteBuilderForm({
 
       router.refresh();
     } catch (saveError) {
-      setError(
-        saveError instanceof Error ? saveError.message : "Unable to save quote."
-      );
+      setError(formatSupabaseError(saveError));
     } finally {
       setIsSaving(false);
       setIsSending(false);
