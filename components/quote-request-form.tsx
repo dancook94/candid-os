@@ -27,9 +27,9 @@ type QuoteRequestInsert = {
   required_date: string;
   required_time: string | null;
   delivery_address: string | null;
-  contact_name: string | null;
-  contact_phone: string | null;
-  purchase_order: string | null;
+  delivery_contact_name: string | null;
+  delivery_contact_phone: string | null;
+  purchase_order_number: string | null;
   notes: string | null;
   status: "draft";
 };
@@ -174,11 +174,11 @@ export function QuoteRequestForm({
       required_time: requiredTime.trim() || null,
       delivery_address:
         fulfillmentType === "delivery" ? deliveryAddress.trim() : null,
-      contact_name:
+      delivery_contact_name:
         fulfillmentType === "delivery" ? deliveryContactName.trim() : null,
-      contact_phone:
+      delivery_contact_phone:
         fulfillmentType === "delivery" ? deliveryContactPhone.trim() : null,
-      purchase_order: purchaseOrderNumber.trim() || null,
+      purchase_order_number: purchaseOrderNumber.trim() || null,
       notes: additionalNotes.trim() || null,
       status: "draft",
     };
