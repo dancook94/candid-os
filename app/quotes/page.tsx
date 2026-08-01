@@ -87,7 +87,7 @@ function formatStatusLabel(value: string) {
     .join(" ");
 }
 
-function mapToBadgeStatus(value: string): BadgeStatus {
+function mapRequestStatusToBadge(value: string): BadgeStatus {
   const mapped = statusVariantMap[value.toLowerCase()];
 
   if (mapped) {
@@ -99,6 +99,42 @@ function mapToBadgeStatus(value: string): BadgeStatus {
   }
 
   return "draft";
+}
+
+const customerQuoteStatusLabels: Record<string, string> = {
+  draft: "In progress",
+  sent: "Received",
+  accepted: "Accepted",
+  declined: "Declined",
+  expired: "Expired",
+  superseded: "Revised",
+};
+
+const customerQuoteStatusBadgeMap: Record<string, BadgeStatus> = {
+  draft: "pending",
+  sent: "sent",
+  accepted: "accepted",
+  declined: "declined",
+  expired: "disabled",
+  superseded: "pending",
+};
+
+function getCustomerQuoteStatusLabel(status: string | undefined) {
+  if (!status) {
+    return "No quote yet";
+  }
+
+  return customerQuoteStatusLabels[status.toLowerCase()] ?? "In progress";
+}
+
+function mapCustomerQuoteStatusToBadge(status: string): BadgeStatus {
+  return customerQuoteStatusBadgeMap[status.toLowerCase()] ?? "pending";
+}
+
+function isCustomerQuoteStatusClickable(status: string) {
+  return ["sent", "accepted", "declined", "expired", "superseded"].includes(
+    status.toLowerCase()
+  );
 }
 
 export default async function QuotesPage() {
@@ -137,6 +173,28 @@ export default async function QuotesPage() {
   const quoteRequests: QuoteRequest[] = data ?? [];
   const queryError = error?.message ?? null;
   const isDevelopment = process.env.NODE_ENV === "development";
+
+  const requestIds = quoteRequests.map((request) => request.id);
+
+  const { data: linkedQuotes } =
+    requestIds.length > 0
+      ? await supabase
+          .from("quotes")
+          .select("id, quote_request_id, status")
+          .in("quote_request_id", requestIds)
+          .order("updated_at", { ascending: false })
+      : { data: [] as { id: string; quote_request_id: string | null; status: string }[] };
+
+  const quoteByRequestId = new Map<string, { id: string; status: string }>();
+
+  for (const quote of linkedQuotes ?? []) {
+    if (quote.quote_request_id && !quoteByRequestId.has(quote.quote_request_id)) {
+      quoteByRequestId.set(quote.quote_request_id, {
+        id: quote.id,
+        status: quote.status,
+      });
+    }
+  }
 
   const requestQuoteButton = (
     <Link href="/quotes/request">
@@ -193,11 +251,23 @@ export default async function QuotesPage() {
                       <th className="p-4 text-left font-medium text-neutral-500">
                         Request status
                       </th>
+                      <th className="p-4 text-left font-medium text-neutral-500">
+                        Quote status
+                      </th>
                     </tr>
                   </thead>
 
                   <tbody>
-                    {quoteRequests.map((request) => (
+                    {quoteRequests.map((request) => {
+                      const linkedQuote = quoteByRequestId.get(request.id);
+                      const quoteStatusLabel = getCustomerQuoteStatusLabel(
+                        linkedQuote?.status
+                      );
+                      const quoteStatusIsClickable = linkedQuote
+                        ? isCustomerQuoteStatusClickable(linkedQuote.status)
+                        : false;
+
+                      return (
                       <tr
                         key={request.id}
                         className="border-b border-neutral-200 last:border-0 hover:bg-neutral-50 cursor-pointer"
@@ -247,7 +317,7 @@ export default async function QuotesPage() {
                             className="block p-4"
                           >
                             <StatusBadge
-                              status={mapToBadgeStatus(request.deadline_status)}
+                              status={mapRequestStatusToBadge(request.deadline_status)}
                               label={formatStatusLabel(request.deadline_status)}
                             />
                           </Link>
@@ -259,13 +329,34 @@ export default async function QuotesPage() {
                             className="block p-4"
                           >
                             <StatusBadge
-                              status={mapToBadgeStatus(request.request_status)}
+                              status={mapRequestStatusToBadge(request.request_status)}
                               label={formatStatusLabel(request.request_status)}
                             />
                           </Link>
                         </td>
+
+                        <td className="p-4">
+                          {quoteStatusIsClickable && linkedQuote ? (
+                            <Link
+                              href={`/quotes/${linkedQuote.id}`}
+                              className="inline-flex"
+                            >
+                              <StatusBadge
+                                status={mapCustomerQuoteStatusToBadge(
+                                  linkedQuote.status
+                                )}
+                                label={quoteStatusLabel}
+                              />
+                            </Link>
+                          ) : (
+                            <span className="text-neutral-600">
+                              {quoteStatusLabel}
+                            </span>
+                          )}
+                        </td>
                       </tr>
-                    ))}
+                    );
+                    })}
                   </tbody>
                 </table>
               </div>

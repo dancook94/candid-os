@@ -95,7 +95,7 @@ function formatStatusLabel(value: string) {
     .join(" ");
 }
 
-function mapToBadgeStatus(value: string): BadgeStatus {
+function mapRequestStatusToBadge(value: string): BadgeStatus {
   const mapped = statusVariantMap[value.toLowerCase()];
 
   if (mapped) {
@@ -107,6 +107,42 @@ function mapToBadgeStatus(value: string): BadgeStatus {
   }
 
   return "draft";
+}
+
+const customerQuoteStatusLabels: Record<string, string> = {
+  draft: "In progress",
+  sent: "Received",
+  accepted: "Accepted",
+  declined: "Declined",
+  expired: "Expired",
+  superseded: "Revised",
+};
+
+const customerQuoteStatusBadgeMap: Record<string, BadgeStatus> = {
+  draft: "pending",
+  sent: "sent",
+  accepted: "accepted",
+  declined: "declined",
+  expired: "disabled",
+  superseded: "pending",
+};
+
+function getCustomerQuoteStatusLabel(status: string | undefined) {
+  if (!status) {
+    return "No quote yet";
+  }
+
+  return customerQuoteStatusLabels[status.toLowerCase()] ?? "In progress";
+}
+
+function mapCustomerQuoteStatusToBadge(status: string): BadgeStatus {
+  return customerQuoteStatusBadgeMap[status.toLowerCase()] ?? "pending";
+}
+
+function isCustomerQuoteStatusClickable(status: string) {
+  return ["sent", "accepted", "declined", "expired", "superseded"].includes(
+    status.toLowerCase()
+  );
 }
 
 function formatDeliveryAddress(quoteRequest: QuoteRequestDetail) {
@@ -207,7 +243,19 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
     .eq("quote_request_id", id)
     .order("created_at", { ascending: false });
 
+  const { data: linkedQuote } = await supabase
+    .from("quotes")
+    .select("id, status")
+    .eq("quote_request_id", id)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
   const quoteAttachments: QuoteRequestAttachmentRecord[] = attachments ?? [];
+  const quoteStatusLabel = getCustomerQuoteStatusLabel(linkedQuote?.status);
+  const quoteStatusIsClickable = linkedQuote
+    ? isCustomerQuoteStatusClickable(linkedQuote.status)
+    : false;
 
   const canEdit =
     quoteRequest.request_status === "submitted" ||
@@ -235,15 +283,42 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
         >
           <Card className="rounded-2xl border-neutral-200 shadow-sm ring-0">
             <CardHeader className="border-b border-neutral-200">
-              <div className="flex flex-wrap items-center gap-2">
-                <StatusBadge
-                  status={mapToBadgeStatus(quoteRequest.deadline_status)}
-                  label={formatStatusLabel(quoteRequest.deadline_status)}
-                />
-                <StatusBadge
-                  status={mapToBadgeStatus(quoteRequest.request_status)}
-                  label={formatStatusLabel(quoteRequest.request_status)}
-                />
+              <div className="flex flex-wrap gap-6 text-sm">
+                <div>
+                  <p className="text-neutral-500">Deadline status</p>
+                  <div className="mt-2">
+                    <StatusBadge
+                      status={mapRequestStatusToBadge(quoteRequest.deadline_status)}
+                      label={formatStatusLabel(quoteRequest.deadline_status)}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-neutral-500">Request status</p>
+                  <div className="mt-2">
+                    <StatusBadge
+                      status={mapRequestStatusToBadge(quoteRequest.request_status)}
+                      label={formatStatusLabel(quoteRequest.request_status)}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-neutral-500">Quote status</p>
+                  <div className="mt-2">
+                    {quoteStatusIsClickable && linkedQuote ? (
+                      <Link href={`/quotes/${linkedQuote.id}`} className="inline-flex">
+                        <StatusBadge
+                          status={mapCustomerQuoteStatusToBadge(linkedQuote.status)}
+                          label={quoteStatusLabel}
+                        />
+                      </Link>
+                    ) : (
+                      <span className="text-neutral-950">{quoteStatusLabel}</span>
+                    )}
+                  </div>
+                </div>
               </div>
             </CardHeader>
 
@@ -320,6 +395,32 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
                   <dt className="text-neutral-500">Submitted date</dt>
                   <dd className="mt-1 text-neutral-950">
                     {formatDate(quoteRequest.created_at)}
+                  </dd>
+                </div>
+
+                <div>
+                  <dt className="text-neutral-500">Request status</dt>
+                  <dd className="mt-1">
+                    <StatusBadge
+                      status={mapRequestStatusToBadge(quoteRequest.request_status)}
+                      label={formatStatusLabel(quoteRequest.request_status)}
+                    />
+                  </dd>
+                </div>
+
+                <div>
+                  <dt className="text-neutral-500">Quote status</dt>
+                  <dd className="mt-1">
+                    {quoteStatusIsClickable && linkedQuote ? (
+                      <Link href={`/quotes/${linkedQuote.id}`} className="inline-flex">
+                        <StatusBadge
+                          status={mapCustomerQuoteStatusToBadge(linkedQuote.status)}
+                          label={quoteStatusLabel}
+                        />
+                      </Link>
+                    ) : (
+                      <span className="text-neutral-950">{quoteStatusLabel}</span>
+                    )}
                   </dd>
                 </div>
               </dl>
