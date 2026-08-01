@@ -42,6 +42,7 @@ export type CustomerFormalQuoteViewProps = {
   dateSent: string | null;
   expiryDate: string | null;
   paymentTermsDays: number | null;
+  approvedDeadline: string | null;
   introduction: string | null;
   customerNotes: string | null;
   subtotal: number;
@@ -118,6 +119,7 @@ export function CustomerFormalQuoteView({
   dateSent,
   expiryDate,
   paymentTermsDays,
+  approvedDeadline,
   introduction,
   customerNotes,
   subtotal,
@@ -284,6 +286,15 @@ export function CustomerFormalQuoteView({
                   <span className="font-medium text-neutral-950">
                     {formatDate(expiryDate)}
                   </span>
+                </span>
+              </p>
+            ) : null}
+            {approvedDeadline ? (
+              <p>
+                <span className="text-neutral-500">Approved deadline</span>
+                <br />
+                <span className="font-medium text-neutral-950">
+                  {approvedDeadline}
                 </span>
               </p>
             ) : null}

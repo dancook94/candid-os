@@ -231,6 +231,7 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
           dateSent={formalQuote.dateSent}
           expiryDate={formalQuote.expiryDate}
           paymentTermsDays={formalQuote.paymentTermsDays}
+          approvedDeadline={formalQuote.approvedDeadline}
           introduction={formalQuote.introduction}
           customerNotes={formalQuote.customerNotes}
           subtotal={formalQuote.subtotal}

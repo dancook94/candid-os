@@ -15,6 +15,13 @@ export type CustomerFormalQuoteLineItemData = {
   imageFileName: string | null;
 };
 
+type LinkedQuoteRequestDeadline = {
+  requested_date: string;
+  requested_time: string | null;
+  fulfilment_method: string;
+  deadline_status: string;
+};
+
 export type CustomerFormalQuoteData = {
   quoteId: string;
   quoteNumber: number;
@@ -25,6 +32,7 @@ export type CustomerFormalQuoteData = {
   dateSent: string | null;
   expiryDate: string | null;
   paymentTermsDays: number | null;
+  approvedDeadline: string | null;
   introduction: string | null;
   customerNotes: string | null;
   subtotal: number;
@@ -36,6 +44,58 @@ export type CustomerFormalQuoteData = {
   customerContactName: string | null;
   customerEmail: string | null;
 };
+
+function formatFulfilmentMethod(fulfilmentMethod: string) {
+  return fulfilmentMethod === "collection" ? "Collection" : "Delivery";
+}
+
+function formatApprovedDeadlineDate(dateString: string) {
+  return new Date(dateString).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+export function formatApprovedQuoteDeadline(
+  quoteRequest: LinkedQuoteRequestDeadline
+) {
+  if (quoteRequest.deadline_status !== "approved") {
+    return null;
+  }
+
+  const formattedDate = formatApprovedDeadlineDate(quoteRequest.requested_date);
+  const fulfilment = formatFulfilmentMethod(quoteRequest.fulfilment_method);
+
+  if (quoteRequest.requested_time) {
+    return `${formattedDate} at ${quoteRequest.requested_time} — ${fulfilment}`;
+  }
+
+  return `${formattedDate} — ${fulfilment}`;
+}
+
+async function fetchLinkedQuoteRequestDeadline(
+  supabase: SupabaseClient,
+  quoteRequestId: string | null
+) {
+  if (!quoteRequestId) {
+    return null;
+  }
+
+  const { data: quoteRequest } = await supabase
+    .from("quote_requests")
+    .select(
+      "requested_date, requested_time, fulfilment_method, deadline_status"
+    )
+    .eq("id", quoteRequestId)
+    .maybeSingle();
+
+  if (!quoteRequest) {
+    return null;
+  }
+
+  return formatApprovedQuoteDeadline(quoteRequest);
+}
 
 export async function fetchCustomerFormalQuote(
   supabase: SupabaseClient,
@@ -62,7 +122,8 @@ export async function fetchCustomerFormalQuote(
     return null;
   }
 
-  const [{ data: quoteVersions }, { data: customerCompany }] = await Promise.all([
+  const [{ data: quoteVersions }, { data: customerCompany }, approvedDeadline] =
+    await Promise.all([
     supabase
       .from("quote_versions")
       .select(
@@ -77,6 +138,7 @@ export async function fetchCustomerFormalQuote(
           .eq("id", formalQuote.company_id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
+    fetchLinkedQuoteRequestDeadline(supabase, formalQuote.quote_request_id),
   ]);
 
   const displayVersion =
@@ -129,6 +191,7 @@ export async function fetchCustomerFormalQuote(
     dateSent: displayVersion.created_at,
     expiryDate: displayVersion.expiry_date,
     paymentTermsDays: displayVersion.payment_terms_days,
+    approvedDeadline,
     introduction: displayVersion.introduction,
     customerNotes: displayVersion.customer_notes,
     subtotal: Number(displayVersion.subtotal ?? 0),

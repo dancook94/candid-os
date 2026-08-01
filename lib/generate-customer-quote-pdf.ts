@@ -534,6 +534,10 @@ export async function generateCustomerQuotePdf(quote: CustomerFormalQuoteData) {
     quoteDetailLines.push("", "Valid until", formatDate(quote.expiryDate));
   }
 
+  if (quote.approvedDeadline) {
+    quoteDetailLines.push("", "Approved deadline", quote.approvedDeadline);
+  }
+
   const cardHeight = Math.max(
     measureSummaryCard(doc, fromLines, cardWidth),
     measureSummaryCard(
