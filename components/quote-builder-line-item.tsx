@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef } from "react";
 
+import { QuoteLineItemImageField } from "@/components/quote-line-item-image-field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -20,6 +21,8 @@ export type QuoteBuilderLineItemState = {
   unitPrice: string;
   isOptional: boolean;
   isSelected: boolean;
+  imageFileName: string | null;
+  previewUrl: string | null;
 };
 
 type QuoteBuilderLineItemCardProps = {
@@ -40,6 +43,8 @@ type QuoteBuilderLineItemCardProps = {
   onMoveUp: (clientKey: string) => void;
   onMoveDown: (clientKey: string) => void;
   onDelete: (clientKey: string) => void;
+  onSelectImage: (clientKey: string, file: File) => void;
+  onRemoveImage: (clientKey: string) => void;
   canDelete: boolean;
 };
 
@@ -87,6 +92,8 @@ export function QuoteBuilderLineItemCard({
   onMoveUp,
   onMoveDown,
   onDelete,
+  onSelectImage,
+  onRemoveImage,
   canDelete,
 }: QuoteBuilderLineItemCardProps) {
   const titleRef = useRef<HTMLInputElement>(null);
@@ -166,8 +173,19 @@ export function QuoteBuilderLineItemCard({
         )}
       </header>
 
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px] lg:gap-4">
-        <div className="space-y-2">
+      <div className="grid gap-3 lg:grid-cols-[180px_minmax(0,1fr)_320px] lg:gap-4">
+        <div className="min-w-0 w-full overflow-hidden lg:w-[180px] lg:max-w-[180px]">
+          <QuoteLineItemImageField
+            clientKey={item.clientKey}
+            fileName={item.imageFileName}
+            previewUrl={item.previewUrl}
+            disabled={fieldDisabled}
+            onSelectFile={onSelectImage}
+            onRemoveImage={onRemoveImage}
+          />
+        </div>
+
+        <div className="min-w-0 space-y-2">
           <div className="space-y-1.5">
             <Label htmlFor={`title-${item.clientKey}`} className="text-xs">
               Title
@@ -205,7 +223,7 @@ export function QuoteBuilderLineItemCard({
           </div>
         </div>
 
-        <div className="space-y-2">
+        <div className="min-w-0 space-y-2">
           <div className="space-y-1.5">
             <Label htmlFor={`quantity-${item.clientKey}`} className="text-xs">
               Quantity

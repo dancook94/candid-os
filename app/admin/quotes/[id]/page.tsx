@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
 
 type QuoteDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -98,10 +99,28 @@ export default async function QuoteDetailPage({
   const { data: quoteItems } = await supabase
     .from("quote_items")
     .select(
-      "id, title, description, quantity, unit_price, is_optional, line_total, sort_order"
+      "id, title, description, quantity, unit_price, is_optional, line_total, sort_order, image_storage_path, image_file_name, image_file_type, image_file_size"
     )
     .eq("quote_version_id", quoteVersion.id)
     .order("sort_order", { ascending: true });
+
+  const lineItemsWithImages = await Promise.all(
+    (quoteItems ?? []).map(async (item) => ({
+      id: item.id,
+      title: item.title,
+      description: item.description ?? "",
+      quantity: Number(item.quantity),
+      unitPrice: Number(item.unit_price),
+      isOptional: Boolean(item.is_optional),
+      imageStoragePath: item.image_storage_path,
+      imageFileName: item.image_file_name,
+      imageFileType: item.image_file_type,
+      imageFileSize: item.image_file_size,
+      imagePreviewUrl: item.image_storage_path
+        ? await createQuoteItemImageSignedUrl(supabase, item.image_storage_path)
+        : null,
+    }))
+  );
 
   const [{ data: companies }, { data: quoteRequests }] = await Promise.all([
     supabase
@@ -124,14 +143,23 @@ export default async function QuoteDetailPage({
     introduction: quoteVersion.introduction ?? "",
     customerNotes: quoteVersion.customer_notes ?? "",
     internalNotes: quoteVersion.internal_notes ?? "",
-    lineItems: (quoteItems ?? []).map((item) => ({
-      id: item.id,
-      title: item.title,
-      description: item.description ?? "",
-      quantity: Number(item.quantity),
-      unitPrice: Number(item.unit_price),
-      isOptional: Boolean(item.is_optional),
-    })),
+    lineItems: lineItemsWithImages.map(
+      ({
+        imageStoragePath,
+        imageFileName,
+        imageFileType,
+        imageFileSize,
+        imagePreviewUrl,
+        ...item
+      }) => ({
+        ...item,
+        imageStoragePath,
+        imageFileName,
+        imageFileType,
+        imageFileSize,
+        imagePreviewUrl,
+      })
+    ),
   };
 
   const canEdit = quoteVersion.version_status === "draft";
@@ -192,6 +220,10 @@ export default async function QuoteDetailPage({
                 is_optional: Boolean(item.is_optional),
                 line_total: Number(item.line_total),
                 sort_order: Number(item.sort_order),
+                image_storage_path: item.image_storage_path,
+                image_file_name: item.image_file_name,
+                image_file_type: item.image_file_type,
+                image_file_size: item.image_file_size,
               }))}
             />
           </CardContent>

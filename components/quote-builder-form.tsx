@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { QuoteBuilderLineItemCard } from "@/components/quote-builder-line-item";
@@ -15,6 +15,13 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
+import {
+  deleteOrphanedQuoteItemImages,
+  formatSupabaseStorageError,
+  syncQuoteVersionItemImages,
+  toQuoteItemImageInsertFields,
+  type QuoteItemImageMetadata,
+} from "@/lib/quote-item-images";
 
 const VAT_RATE = 0.2;
 
@@ -27,6 +34,14 @@ type LineItemFormState = {
   unitPrice: string;
   isOptional: boolean;
   isSelected: boolean;
+  imageStoragePath: string | null;
+  imageFileName: string | null;
+  imageFileType: string | null;
+  imageFileSize: number | null;
+  pendingFile: File | null;
+  previewUrl: string | null;
+  imageRemoved: boolean;
+  previousStoragePath: string | null;
 };
 
 export type QuoteBuilderLineItem = {
@@ -37,6 +52,11 @@ export type QuoteBuilderLineItem = {
   unitPrice: number;
   isOptional: boolean;
   isSelected?: boolean;
+  imageStoragePath?: string | null;
+  imageFileName?: string | null;
+  imageFileType?: string | null;
+  imageFileSize?: number | null;
+  imagePreviewUrl?: string | null;
 };
 
 export type QuoteBuilderInitialValues = {
@@ -111,6 +131,12 @@ function formatGbp(value: number) {
   }).format(roundMoney(value));
 }
 
+function revokeIfBlob(url: string | null) {
+  if (url?.startsWith("blob:")) {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function createEmptyLineItem(clientKey: string): LineItemFormState {
   return {
     clientKey,
@@ -120,6 +146,14 @@ function createEmptyLineItem(clientKey: string): LineItemFormState {
     unitPrice: "0.00",
     isOptional: false,
     isSelected: true,
+    imageStoragePath: null,
+    imageFileName: null,
+    imageFileType: null,
+    imageFileSize: null,
+    pendingFile: null,
+    previewUrl: null,
+    imageRemoved: false,
+    previousStoragePath: null,
   };
 }
 
@@ -136,7 +170,115 @@ function toLineItemFormState(
     unitPrice: item.unitPrice.toFixed(2),
     isOptional: item.isOptional,
     isSelected: item.isSelected ?? true,
+    imageStoragePath: item.imageStoragePath ?? null,
+    imageFileName: item.imageFileName ?? null,
+    imageFileType: item.imageFileType ?? null,
+    imageFileSize: item.imageFileSize ?? null,
+    pendingFile: null,
+    previewUrl: item.imagePreviewUrl ?? null,
+    imageRemoved: false,
+    previousStoragePath: item.imageStoragePath ?? null,
   };
+}
+
+function getPreservedImageMetadata(
+  item: Pick<
+    LineItemFormState,
+    | "pendingFile"
+    | "imageRemoved"
+    | "imageStoragePath"
+    | "imageFileName"
+    | "imageFileType"
+    | "imageFileSize"
+  >
+): QuoteItemImageMetadata | null {
+  if (item.pendingFile || item.imageRemoved || !item.imageStoragePath) {
+    return null;
+  }
+
+  return {
+    image_storage_path: item.imageStoragePath,
+    image_file_name: item.imageFileName,
+    image_file_type: item.imageFileType,
+    image_file_size: item.imageFileSize,
+  };
+}
+
+function getImageInsertFields(
+  item: Pick<
+    LineItemFormState,
+    | "pendingFile"
+    | "imageRemoved"
+    | "imageStoragePath"
+    | "imageFileName"
+    | "imageFileType"
+    | "imageFileSize"
+  >
+) {
+  return toQuoteItemImageInsertFields(getPreservedImageMetadata(item));
+}
+
+function buildItemsPayload(
+  activeItems: ReturnType<typeof calculateTotals>["parsedItems"]
+) {
+  return activeItems.map((item, index) => ({
+    title: item.title.trim(),
+    description: item.description.trim() || null,
+    quantity: item.quantity,
+    unit_price: item.unitPrice,
+    is_optional: item.isOptional,
+    line_total: item.lineTotal,
+    sort_order: index + 1,
+    ...getImageInsertFields(item),
+  }));
+}
+
+function formatSaveError(error: unknown) {
+  const storageMessage = formatSupabaseStorageError(error);
+
+  if (
+    storageMessage &&
+    storageMessage !== "Unable to process quote item image."
+  ) {
+    return storageMessage;
+  }
+
+  return formatSupabaseError(error);
+}
+
+async function syncSavedLineItemImages(
+  supabase: ReturnType<typeof createClient>,
+  quoteId: string,
+  quoteVersionId: string,
+  activeItems: ReturnType<typeof calculateTotals>["parsedItems"],
+  insertedItems: { id: string; sort_order: number }[]
+) {
+  const syncInputs = activeItems.map((item, index) => {
+    const savedItem = insertedItems.find(
+      (inserted) => inserted.sort_order === index + 1
+    );
+
+    if (!savedItem) {
+      throw new Error(
+        `Unable to match saved line item for sort order ${index + 1}.`
+      );
+    }
+
+    return {
+      quoteItemId: savedItem.id,
+      pendingFile: item.pendingFile,
+      imageRemoved: item.imageRemoved,
+      preservedMetadata: getPreservedImageMetadata(item),
+      previousStoragePath: item.previousStoragePath,
+    };
+  });
+
+  return syncQuoteVersionItemImages(
+    supabase,
+    quoteId,
+    quoteVersionId,
+    syncInputs
+  );
 }
 
 function calculateLineTotal(quantity: number, unitPrice: number) {
@@ -227,6 +369,17 @@ export function QuoteBuilderForm({
 
   const isReadOnly = !canEdit;
 
+  const lineItemsRef = useRef(lineItems);
+  lineItemsRef.current = lineItems;
+
+  useEffect(() => {
+    return () => {
+      for (const item of lineItemsRef.current) {
+        revokeIfBlob(item.previewUrl);
+      }
+    };
+  }, []);
+
   function handleAddLineItem() {
     const clientKey = crypto.randomUUID();
     setLineItems((current) => [...current, createEmptyLineItem(clientKey)]);
@@ -238,6 +391,9 @@ export function QuoteBuilderForm({
       if (current.length <= 1) {
         return current;
       }
+
+      const removedItem = current.find((item) => item.clientKey === clientKey);
+      revokeIfBlob(removedItem?.previewUrl ?? null);
 
       return current.filter((item) => item.clientKey !== clientKey);
     });
@@ -260,6 +416,16 @@ export function QuoteBuilderForm({
         unitPrice: source.unitPrice,
         isOptional: source.isOptional,
         isSelected: source.isSelected,
+        imageStoragePath: source.imageStoragePath,
+        imageFileName: source.imageFileName,
+        imageFileType: source.imageFileType,
+        imageFileSize: source.imageFileSize,
+        pendingFile: source.pendingFile,
+        previewUrl: source.pendingFile
+          ? URL.createObjectURL(source.pendingFile)
+          : source.previewUrl,
+        imageRemoved: false,
+        previousStoragePath: source.imageStoragePath,
       };
 
       const next = [...current];
@@ -292,6 +458,49 @@ export function QuoteBuilderForm({
   const clearFocusTitle = useCallback(() => {
     setFocusTitleClientKey(null);
   }, []);
+
+  function handleSelectLineItemImage(clientKey: string, file: File) {
+    setLineItems((current) =>
+      current.map((item) => {
+        if (item.clientKey !== clientKey) {
+          return item;
+        }
+
+        revokeIfBlob(item.previewUrl);
+
+        return {
+          ...item,
+          pendingFile: file,
+          imageRemoved: false,
+          imageFileName: file.name,
+          previewUrl: URL.createObjectURL(file),
+        };
+      })
+    );
+  }
+
+  function handleRemoveLineItemImage(clientKey: string) {
+    setLineItems((current) =>
+      current.map((item) => {
+        if (item.clientKey !== clientKey) {
+          return item;
+        }
+
+        revokeIfBlob(item.previewUrl);
+
+        return {
+          ...item,
+          pendingFile: null,
+          previewUrl: null,
+          imageFileName: null,
+          imageStoragePath: null,
+          imageFileType: null,
+          imageFileSize: null,
+          imageRemoved: true,
+        };
+      })
+    );
+  }
 
   function updateLineItem(
     clientKey: string,
@@ -394,15 +603,7 @@ export function QuoteBuilderForm({
         total: totals.total,
       };
 
-      const itemsPayload = activeItems.map((item, index) => ({
-        title: item.title.trim(),
-        description: item.description.trim() || null,
-        quantity: item.quantity,
-        unit_price: item.unitPrice,
-        is_optional: item.isOptional,
-        line_total: item.lineTotal,
-        sort_order: index + 1,
-      }));
+      const itemsPayload = buildItemsPayload(activeItems);
 
       if (mode === "create") {
         if (targetStatus !== "draft") {
@@ -447,17 +648,38 @@ export function QuoteBuilderForm({
         }
 
         if (itemsPayload.length > 0) {
-          const { error: itemsError } = await supabase.from("quote_items").insert(
-            itemsPayload.map((item) => ({
-              ...item,
-              quote_version_id: createdVersion.id,
-            }))
-          );
+          const { data: insertedItems, error: itemsError } = await supabase
+            .from("quote_items")
+            .insert(
+              itemsPayload.map((item) => ({
+                ...item,
+                quote_version_id: createdVersion.id,
+              }))
+            )
+            .select("id, sort_order");
 
           if (itemsError) {
             await rollbackCreatedQuote(createdQuote.id, createdVersion.id);
-            throw new Error(itemsError.message);
+            throw itemsError;
           }
+
+          const retainedPaths = await syncSavedLineItemImages(
+            supabase,
+            createdQuote.id,
+            createdVersion.id,
+            activeItems,
+            insertedItems ?? []
+          );
+
+          const previousPaths = activeItems
+            .map((item) => item.previousStoragePath)
+            .filter((path): path is string => Boolean(path));
+
+          await deleteOrphanedQuoteItemImages(
+            supabase,
+            previousPaths,
+            retainedPaths
+          );
         }
 
         if (quoteRequestId) {
@@ -485,9 +707,6 @@ export function QuoteBuilderForm({
         throw new Error("Only draft versions can be saved.");
       }
 
-      console.log("[quote-save] selectedQuoteVersionId", selectedQuoteVersionId);
-      console.log("[quote-save] selectedVersionNumber", selectedVersionNumber);
-
       if (targetStatus === "sent") {
         const { error: supersedeError } = await supabase
           .from("quote_versions")
@@ -503,17 +722,16 @@ export function QuoteBuilderForm({
 
       const { data: existingItems, error: existingItemsError } = await supabase
         .from("quote_items")
-        .select("id")
+        .select("id, image_storage_path")
         .eq("quote_version_id", selectedQuoteVersionId);
 
       if (existingItemsError) {
         throw existingItemsError;
       }
 
-      console.log(
-        "[quote-save] quote item IDs being deleted",
-        (existingItems ?? []).map((item) => item.id)
-      );
+      const previousStoragePaths = (existingItems ?? [])
+        .map((item) => item.image_storage_path)
+        .filter((path): path is string => Boolean(path));
 
       const { error: quoteUpdateError } = await supabase
         .from("quotes")
@@ -552,16 +770,39 @@ export function QuoteBuilderForm({
       }
 
       if (itemsPayload.length > 0) {
-        const { error: itemsError } = await supabase.from("quote_items").insert(
-          itemsPayload.map((item) => ({
-            ...item,
-            quote_version_id: selectedQuoteVersionId,
-          }))
-        );
+        const { data: insertedItems, error: itemsError } = await supabase
+          .from("quote_items")
+          .insert(
+            itemsPayload.map((item) => ({
+              ...item,
+              quote_version_id: selectedQuoteVersionId,
+            }))
+          )
+          .select("id, sort_order");
 
         if (itemsError) {
           throw itemsError;
         }
+
+        const retainedPaths = await syncSavedLineItemImages(
+          supabase,
+          quoteId,
+          selectedQuoteVersionId,
+          activeItems,
+          insertedItems ?? []
+        );
+
+        await deleteOrphanedQuoteItemImages(
+          supabase,
+          previousStoragePaths,
+          retainedPaths
+        );
+      } else if (previousStoragePaths.length > 0) {
+        await deleteOrphanedQuoteItemImages(
+          supabase,
+          previousStoragePaths,
+          new Set()
+        );
       }
 
       if (targetStatus === "sent") {
@@ -572,7 +813,7 @@ export function QuoteBuilderForm({
 
       router.refresh();
     } catch (saveError) {
-      setError(formatSupabaseError(saveError));
+      setError(formatSaveError(saveError));
     } finally {
       setIsSaving(false);
       setIsSending(false);
@@ -777,6 +1018,8 @@ export function QuoteBuilderForm({
                 onMoveUp={(clientKey) => handleMoveLineItem(clientKey, -1)}
                 onMoveDown={(clientKey) => handleMoveLineItem(clientKey, 1)}
                 onDelete={handleRemoveLineItem}
+                onSelectImage={handleSelectLineItemImage}
+                onRemoveImage={handleRemoveLineItemImage}
                 canDelete={lineItems.length > 1}
               />
             );

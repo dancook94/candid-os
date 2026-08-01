@@ -28,6 +28,10 @@ type SourceItem = {
   is_optional: boolean;
   line_total: number;
   sort_order: number;
+  image_storage_path: string | null;
+  image_file_name: string | null;
+  image_file_type: string | null;
+  image_file_size: number | null;
 };
 
 type CreateQuoteVersionButtonProps = {
@@ -138,6 +142,10 @@ export function CreateQuoteVersionButton({
             is_optional: item.is_optional,
             line_total: item.line_total,
             sort_order: item.sort_order,
+            image_storage_path: item.image_storage_path,
+            image_file_name: item.image_file_name,
+            image_file_type: item.image_file_type,
+            image_file_size: item.image_file_size,
           }))
         );
 

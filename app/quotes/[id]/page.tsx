@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
+import { CustomerFormalQuoteView } from "@/components/customer-formal-quote-view";
 import { QuoteRequestAttachmentUpload } from "@/components/quote-request-attachment-upload";
 import { QuoteRequestAttachmentsList } from "@/components/quote-request-attachments-list";
 import {
@@ -19,6 +20,7 @@ import {
 } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 import { resolveCustomerQuoteStatus } from "@/lib/quote-customer-status";
+import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
 import type { QuoteRequestAttachmentRecord } from "@/lib/quote-request-attachments";
 
 type QuoteRequestDetail = {
@@ -225,6 +227,88 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
 
   const companyName =
     user.user_metadata?.company_name || "Company awaiting approval";
+
+  const { data: formalQuote } = await supabase
+    .from("quotes")
+    .select(
+      "id, quote_number, project_name, status, current_version, quote_request_id"
+    )
+    .eq("id", id)
+    .maybeSingle();
+
+  if (formalQuote) {
+    const { data: quoteVersions } = await supabase
+      .from("quote_versions")
+      .select(
+        "id, version_number, version_status, expiry_date, payment_terms_days, introduction, customer_notes, subtotal, vat_amount, total"
+      )
+      .eq("quote_id", formalQuote.id)
+      .order("version_number", { ascending: false });
+
+    const displayVersion =
+      quoteVersions?.find(
+        (version) =>
+          version.version_number === formalQuote.current_version &&
+          version.version_status !== "draft"
+      ) ??
+      quoteVersions?.find((version) => version.version_status !== "draft");
+
+    if (!displayVersion) {
+      notFound();
+    }
+
+    const { data: formalQuoteItems } = await supabase
+      .from("quote_items")
+      .select(
+        "id, title, description, quantity, unit_price, is_optional, line_total, sort_order, image_storage_path, image_file_name"
+      )
+      .eq("quote_version_id", displayVersion.id)
+      .order("sort_order", { ascending: true });
+
+    const lineItems = await Promise.all(
+      (formalQuoteItems ?? []).map(async (item) => ({
+        id: item.id,
+        title: item.title,
+        description: item.description,
+        quantity: Number(item.quantity),
+        unitPrice: Number(item.unit_price),
+        lineTotal: Number(item.line_total),
+        isOptional: Boolean(item.is_optional),
+        imageUrl: item.image_storage_path
+          ? await createQuoteItemImageSignedUrl(
+              supabase,
+              item.image_storage_path
+            )
+          : null,
+        imageFileName: item.image_file_name,
+      }))
+    );
+
+    const customerQuoteStatus = await resolveCustomerQuoteStatus(
+      supabase,
+      formalQuote
+    );
+
+    return (
+      <AppShell userRole="customer" userName={fullName} companyName={companyName}>
+        <CustomerFormalQuoteView
+          quoteNumber={formalQuote.quote_number}
+          projectName={formalQuote.project_name}
+          quoteStatus={customerQuoteStatus}
+          versionNumber={displayVersion.version_number}
+          expiryDate={displayVersion.expiry_date}
+          paymentTermsDays={displayVersion.payment_terms_days}
+          introduction={displayVersion.introduction}
+          customerNotes={displayVersion.customer_notes}
+          subtotal={Number(displayVersion.subtotal ?? 0)}
+          vatAmount={Number(displayVersion.vat_amount ?? 0)}
+          total={Number(displayVersion.total ?? 0)}
+          lineItems={lineItems}
+          linkedRequestId={formalQuote.quote_request_id}
+        />
+      </AppShell>
+    );
+  }
 
   const { data: quoteRequest, error } = await supabase
     .from("quote_requests")
