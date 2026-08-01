@@ -110,12 +110,12 @@ function mapRequestStatusToBadge(value: string): BadgeStatus {
 }
 
 const customerQuoteStatusLabels: Record<string, string> = {
-  draft: "In progress",
-  sent: "Received",
+  draft: "Preparing quote",
+  sent: "Quote sent",
   accepted: "Accepted",
   declined: "Declined",
   expired: "Expired",
-  superseded: "Revised",
+  superseded: "Updated quote available",
 };
 
 const customerQuoteStatusBadgeMap: Record<string, BadgeStatus> = {
@@ -132,7 +132,7 @@ function getCustomerQuoteStatusLabel(status: string | undefined) {
     return "No quote yet";
   }
 
-  return customerQuoteStatusLabels[status.toLowerCase()] ?? "In progress";
+  return customerQuoteStatusLabels[status.toLowerCase()] ?? "Preparing quote";
 }
 
 function mapCustomerQuoteStatusToBadge(status: string): BadgeStatus {
