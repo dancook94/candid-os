@@ -169,8 +169,11 @@ export function QuoteBuilderForm({
       : [createEmptyLineItem()]
   );
   const [isSaving, setIsSaving] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+
+  const isBusy = isSaving || isSending;
 
   const totals = useMemo(() => calculateTotals(lineItems), [lineItems]);
 
@@ -218,9 +221,19 @@ export function QuoteBuilderForm({
     return (data?.quote_number ?? 0) + 1;
   }
 
-  async function handleSaveDraft(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function rollbackCreatedQuote(
+    quoteIdToRemove: string,
+    versionIdToRemove: string
+  ) {
+    await supabase
+      .from("quote_items")
+      .delete()
+      .eq("quote_version_id", versionIdToRemove);
+    await supabase.from("quote_versions").delete().eq("id", versionIdToRemove);
+    await supabase.from("quotes").delete().eq("id", quoteIdToRemove);
+  }
 
+  async function persistQuote(targetStatus: "draft" | "sent") {
     if (isReadOnly) {
       return;
     }
@@ -263,12 +276,15 @@ export function QuoteBuilderForm({
 
     const activeItems = totals.parsedItems.filter((item) => item.title.trim());
 
-    setIsSaving(true);
+    if (targetStatus === "sent") {
+      setIsSending(true);
+    } else {
+      setIsSaving(true);
+    }
 
     try {
-      const versionPayload = {
-        version_number: 1,
-        version_status: "draft",
+      const versionFields = {
+        version_status: targetStatus,
         expiry_date: expiryDate || null,
         payment_terms_days: parsedPaymentTerms,
         introduction: introduction.trim() || null,
@@ -290,6 +306,10 @@ export function QuoteBuilderForm({
       }));
 
       if (mode === "create") {
+        if (targetStatus !== "draft") {
+          throw new Error("Save the quote as a draft before sending.");
+        }
+
         const nextQuoteNumber = await getNextQuoteNumber();
 
         const { data: createdQuote, error: quoteError } = await supabase
@@ -314,7 +334,8 @@ export function QuoteBuilderForm({
           .from("quote_versions")
           .insert({
             quote_id: createdQuote.id,
-            ...versionPayload,
+            version_number: 1,
+            ...versionFields,
           })
           .select("id")
           .single();
@@ -335,16 +356,20 @@ export function QuoteBuilderForm({
           );
 
           if (itemsError) {
-            await supabase
-              .from("quote_items")
-              .delete()
-              .eq("quote_version_id", createdVersion.id);
-            await supabase
-              .from("quote_versions")
-              .delete()
-              .eq("id", createdVersion.id);
-            await supabase.from("quotes").delete().eq("id", createdQuote.id);
+            await rollbackCreatedQuote(createdQuote.id, createdVersion.id);
             throw new Error(itemsError.message);
+          }
+        }
+
+        if (quoteRequestId) {
+          const { error: requestUpdateError } = await supabase
+            .from("quote_requests")
+            .update({ request_status: "quoted" })
+            .eq("id", quoteRequestId);
+
+          if (requestUpdateError) {
+            await rollbackCreatedQuote(createdQuote.id, createdVersion.id);
+            throw new Error(requestUpdateError.message);
           }
         }
 
@@ -363,6 +388,7 @@ export function QuoteBuilderForm({
           company_id: companyId,
           quote_request_id: quoteRequestId || null,
           project_name: trimmedProjectName,
+          status: targetStatus,
         })
         .eq("id", quoteId);
 
@@ -372,16 +398,7 @@ export function QuoteBuilderForm({
 
       const { error: versionUpdateError } = await supabase
         .from("quote_versions")
-        .update({
-          expiry_date: expiryDate || null,
-          payment_terms_days: parsedPaymentTerms,
-          introduction: introduction.trim() || null,
-          customer_notes: customerNotes.trim() || null,
-          internal_notes: internalNotes.trim() || null,
-          subtotal: totals.subtotal,
-          vat_amount: totals.vatAmount,
-          total: totals.total,
-        })
+        .update(versionFields)
         .eq("id", quoteVersionId);
 
       if (versionUpdateError) {
@@ -410,7 +427,12 @@ export function QuoteBuilderForm({
         }
       }
 
-      setSuccess("Draft saved successfully.");
+      if (targetStatus === "sent") {
+        setSuccess("Quote sent successfully.");
+      } else {
+        setSuccess("Draft saved successfully.");
+      }
+
       router.refresh();
     } catch (saveError) {
       setError(
@@ -418,7 +440,17 @@ export function QuoteBuilderForm({
       );
     } finally {
       setIsSaving(false);
+      setIsSending(false);
     }
+  }
+
+  async function handleSaveDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await persistQuote("draft");
+  }
+
+  async function handleSendQuote() {
+    await persistQuote("sent");
   }
 
   return (
@@ -459,7 +491,7 @@ export function QuoteBuilderForm({
                   setCompanyId(event.target.value);
                   setQuoteRequestId("");
                 }}
-                disabled={isSaving || isReadOnly}
+                disabled={isBusy || isReadOnly}
                 className="h-8 w-full rounded-lg border border-neutral-300 bg-white px-2.5 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
                 required
               >
@@ -478,7 +510,7 @@ export function QuoteBuilderForm({
                 id="quote-request-id"
                 value={quoteRequestId}
                 onChange={(event) => setQuoteRequestId(event.target.value)}
-                disabled={isSaving || isReadOnly || !companyId}
+                disabled={isBusy || isReadOnly || !companyId}
                 className="h-8 w-full rounded-lg border border-neutral-300 bg-white px-2.5 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
               >
                 <option value="">No linked request</option>
@@ -496,7 +528,7 @@ export function QuoteBuilderForm({
                 id="project-name"
                 value={projectName}
                 onChange={(event) => setProjectName(event.target.value)}
-                disabled={isSaving || isReadOnly}
+                disabled={isBusy || isReadOnly}
                 required
               />
             </div>
@@ -508,7 +540,7 @@ export function QuoteBuilderForm({
                 type="date"
                 value={expiryDate}
                 onChange={(event) => setExpiryDate(event.target.value)}
-                disabled={isSaving || isReadOnly}
+                disabled={isBusy || isReadOnly}
               />
             </div>
 
@@ -520,7 +552,7 @@ export function QuoteBuilderForm({
                 min={0}
                 value={paymentTermsDays}
                 onChange={(event) => setPaymentTermsDays(event.target.value)}
-                disabled={isSaving || isReadOnly}
+                disabled={isBusy || isReadOnly}
               />
             </div>
 
@@ -530,7 +562,7 @@ export function QuoteBuilderForm({
                 id="introduction"
                 value={introduction}
                 onChange={(event) => setIntroduction(event.target.value)}
-                disabled={isSaving || isReadOnly}
+                disabled={isBusy || isReadOnly}
                 rows={4}
                 className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
               />
@@ -542,7 +574,7 @@ export function QuoteBuilderForm({
                 id="customer-notes"
                 value={customerNotes}
                 onChange={(event) => setCustomerNotes(event.target.value)}
-                disabled={isSaving || isReadOnly}
+                disabled={isBusy || isReadOnly}
                 rows={4}
                 className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
               />
@@ -554,7 +586,7 @@ export function QuoteBuilderForm({
                 id="internal-notes"
                 value={internalNotes}
                 onChange={(event) => setInternalNotes(event.target.value)}
-                disabled={isSaving || isReadOnly}
+                disabled={isBusy || isReadOnly}
                 rows={4}
                 className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
               />
@@ -579,7 +611,7 @@ export function QuoteBuilderForm({
               <Button
                 type="button"
                 variant="outline"
-                disabled={isSaving}
+                disabled={isBusy}
                 onClick={handleAddLineItem}
               >
                 Add line item
@@ -609,7 +641,7 @@ export function QuoteBuilderForm({
                       type="button"
                       variant="outline"
                       size="sm"
-                      disabled={isSaving}
+                      disabled={isBusy}
                       onClick={() => handleRemoveLineItem(item.clientKey)}
                     >
                       Remove
@@ -628,7 +660,7 @@ export function QuoteBuilderForm({
                           title: event.target.value,
                         })
                       }
-                      disabled={isSaving || isReadOnly}
+                      disabled={isBusy || isReadOnly}
                     />
                   </div>
 
@@ -644,7 +676,7 @@ export function QuoteBuilderForm({
                           description: event.target.value,
                         })
                       }
-                      disabled={isSaving || isReadOnly}
+                      disabled={isBusy || isReadOnly}
                       rows={3}
                       className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
                     />
@@ -665,7 +697,7 @@ export function QuoteBuilderForm({
                           quantity: event.target.value,
                         })
                       }
-                      disabled={isSaving || isReadOnly}
+                      disabled={isBusy || isReadOnly}
                     />
                   </div>
 
@@ -684,7 +716,7 @@ export function QuoteBuilderForm({
                           unitPrice: event.target.value,
                         })
                       }
-                      disabled={isSaving || isReadOnly}
+                      disabled={isBusy || isReadOnly}
                     />
                   </div>
 
@@ -698,7 +730,7 @@ export function QuoteBuilderForm({
                           isOptional: event.target.checked,
                         })
                       }
-                      disabled={isSaving || isReadOnly}
+                      disabled={isBusy || isReadOnly}
                       className="h-4 w-4 rounded border-neutral-300"
                     />
                     <Label htmlFor={`optional-${item.clientKey}`}>
@@ -771,10 +803,15 @@ export function QuoteBuilderForm({
       )}
 
       {!isReadOnly && (
-        <div className="flex justify-end">
-          <Button type="submit" disabled={isSaving}>
+        <div className="flex flex-col-reverse justify-end gap-2 sm:flex-row">
+          <Button type="submit" variant="outline" disabled={isBusy}>
             {isSaving ? "Saving..." : "Save draft"}
           </Button>
+          {mode === "edit" && (
+            <Button type="button" disabled={isBusy} onClick={handleSendQuote}>
+              {isSending ? "Sending..." : "Send quote"}
+            </Button>
+          )}
         </div>
       )}
     </form>
