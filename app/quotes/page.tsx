@@ -11,12 +11,16 @@ import { createClient } from "@/lib/supabase/server";
 
 type QuoteRequest = {
   id: string;
+  company_id: string;
+  requested_by: string;
   project_name: string;
+  description: string;
+  fulfilment_method: string;
+  requested_date: string;
+  requested_time: string | null;
+  deadline_status: string;
+  request_status: string;
   created_at: string;
-  required_date: string;
-  required_time: string | null;
-  fulfillment_type: string;
-  status: string;
 };
 
 type BadgeStatus =
@@ -28,7 +32,7 @@ type BadgeStatus =
   | "accepted"
   | "declined";
 
-const requestStatuses: BadgeStatus[] = [
+const badgeStatuses: BadgeStatus[] = [
   "pending",
   "approved",
   "disabled",
@@ -38,6 +42,19 @@ const requestStatuses: BadgeStatus[] = [
   "declined",
 ];
 
+const statusVariantMap: Record<string, BadgeStatus> = {
+  pending: "pending",
+  approved: "approved",
+  disabled: "disabled",
+  draft: "draft",
+  sent: "sent",
+  accepted: "accepted",
+  declined: "declined",
+  submitted: "sent",
+  overdue: "declined",
+  upcoming: "approved",
+};
+
 function formatDate(dateString: string) {
   return new Date(dateString).toLocaleDateString("en-GB", {
     day: "numeric",
@@ -46,47 +63,42 @@ function formatDate(dateString: string) {
   });
 }
 
-function formatDeadline(requiredDate: string, requiredTime: string | null) {
-  const formattedDate = formatDate(requiredDate);
+function formatRequestedDeadline(
+  requestedDate: string,
+  requestedTime: string | null
+) {
+  const formattedDate = formatDate(requestedDate);
 
-  if (!requiredTime) {
+  if (!requestedTime) {
     return formattedDate;
   }
 
-  return `${formattedDate}, ${requiredTime}`;
+  return `${formattedDate}, ${requestedTime}`;
 }
 
-function getDeadlineStatus(requiredDate: string): {
-  status: BadgeStatus;
-  label: string;
-} {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const deadline = new Date(requiredDate);
-  deadline.setHours(0, 0, 0, 0);
-
-  if (deadline < today) {
-    return { status: "declined", label: "Overdue" };
-  }
-
-  if (deadline.getTime() === today.getTime()) {
-    return { status: "pending", label: "Due today" };
-  }
-
-  return { status: "approved", label: "Upcoming" };
+function formatFulfilmentMethod(fulfilmentMethod: string) {
+  return fulfilmentMethod === "collection" ? "Collection" : "Delivery";
 }
 
-function mapRequestStatus(status: string): BadgeStatus {
-  if (requestStatuses.includes(status as BadgeStatus)) {
-    return status as BadgeStatus;
+function formatStatusLabel(value: string) {
+  return value
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function mapToBadgeStatus(value: string): BadgeStatus {
+  const mapped = statusVariantMap[value.toLowerCase()];
+
+  if (mapped) {
+    return mapped;
+  }
+
+  if (badgeStatuses.includes(value as BadgeStatus)) {
+    return value as BadgeStatus;
   }
 
   return "draft";
-}
-
-function formatFulfillmentType(fulfillmentType: string) {
-  return fulfillmentType === "collection" ? "Collection" : "Delivery";
 }
 
 export default async function QuotesPage() {
@@ -102,7 +114,7 @@ export default async function QuotesPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, company_id")
+    .select("full_name")
     .eq("id", user.id)
     .single();
 
@@ -115,19 +127,16 @@ export default async function QuotesPage() {
   const companyName =
     user.user_metadata?.company_name || "Company awaiting approval";
 
-  let quoteRequests: QuoteRequest[] = [];
+  const { data, error } = await supabase
+    .from("quote_requests")
+    .select(
+      "id, company_id, requested_by, project_name, description, fulfilment_method, requested_date, requested_time, deadline_status, request_status, created_at"
+    )
+    .order("created_at", { ascending: false });
 
-  if (profile?.company_id) {
-    const { data } = await supabase
-      .from("quote_requests")
-      .select(
-        "id, project_name, created_at, required_date, required_time, fulfillment_type, status"
-      )
-      .eq("company_id", profile.company_id)
-      .order("created_at", { ascending: false });
-
-    quoteRequests = data ?? [];
-  }
+  const quoteRequests: QuoteRequest[] = data ?? [];
+  const queryError = error?.message ?? null;
+  const isDevelopment = process.env.NODE_ENV === "development";
 
   const requestQuoteButton = (
     <Link href="/quotes/request">
@@ -144,7 +153,16 @@ export default async function QuotesPage() {
           actions={requestQuoteButton}
         />
 
-        {quoteRequests.length === 0 ? (
+        {isDevelopment && queryError ? (
+          <Card className="rounded-2xl border-red-200 bg-red-50 shadow-sm ring-0">
+            <CardContent className="p-6">
+              <p className="text-sm font-medium text-red-800">
+                Supabase query error
+              </p>
+              <p className="mt-2 text-sm text-red-700">{queryError}</p>
+            </CardContent>
+          </Card>
+        ) : quoteRequests.length === 0 ? (
           <EmptyState
             title="No quote requests yet"
             description="Submit your first quote request to get started."
@@ -167,7 +185,7 @@ export default async function QuotesPage() {
                         Requested deadline
                       </th>
                       <th className="p-4 text-left font-medium text-neutral-500">
-                        Fulfillment
+                        Fulfilment
                       </th>
                       <th className="p-4 text-left font-medium text-neutral-500">
                         Deadline status
@@ -179,50 +197,45 @@ export default async function QuotesPage() {
                   </thead>
 
                   <tbody>
-                    {quoteRequests.map((request) => {
-                      const deadlineStatus = getDeadlineStatus(
-                        request.required_date
-                      );
+                    {quoteRequests.map((request) => (
+                      <tr
+                        key={request.id}
+                        className="border-b border-neutral-200 last:border-0 hover:bg-neutral-50"
+                      >
+                        <td className="p-4 font-medium text-neutral-950">
+                          {request.project_name}
+                        </td>
 
-                      return (
-                        <tr
-                          key={request.id}
-                          className="border-b border-neutral-200 last:border-0 hover:bg-neutral-50"
-                        >
-                          <td className="p-4 font-medium text-neutral-950">
-                            {request.project_name}
-                          </td>
+                        <td className="p-4 text-neutral-600">
+                          {formatDate(request.created_at)}
+                        </td>
 
-                          <td className="p-4 text-neutral-600">
-                            {formatDate(request.created_at)}
-                          </td>
+                        <td className="p-4 text-neutral-600">
+                          {formatRequestedDeadline(
+                            request.requested_date,
+                            request.requested_time
+                          )}
+                        </td>
 
-                          <td className="p-4 text-neutral-600">
-                            {formatDeadline(
-                              request.required_date,
-                              request.required_time
-                            )}
-                          </td>
+                        <td className="p-4 text-neutral-600">
+                          {formatFulfilmentMethod(request.fulfilment_method)}
+                        </td>
 
-                          <td className="p-4 text-neutral-600">
-                            {formatFulfillmentType(request.fulfillment_type)}
-                          </td>
+                        <td className="p-4">
+                          <StatusBadge
+                            status={mapToBadgeStatus(request.deadline_status)}
+                            label={formatStatusLabel(request.deadline_status)}
+                          />
+                        </td>
 
-                          <td className="p-4">
-                            <StatusBadge
-                              status={deadlineStatus.status}
-                              label={deadlineStatus.label}
-                            />
-                          </td>
-
-                          <td className="p-4">
-                            <StatusBadge
-                              status={mapRequestStatus(request.status)}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })}
+                        <td className="p-4">
+                          <StatusBadge
+                            status={mapToBadgeStatus(request.request_status)}
+                            label={formatStatusLabel(request.request_status)}
+                          />
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
