@@ -4,7 +4,10 @@ import path from "node:path";
 import PDFDocument from "pdfkit";
 import sharp from "sharp";
 
-import type { CustomerFormalQuoteData } from "@/lib/customer-formal-quote-data";
+import type {
+  CustomerFormalQuoteData,
+  CustomerFormalQuotePdfInput,
+} from "@/lib/customer-formal-quote-data";
 import { CUSTOMER_QUOTE_TERMS_SECTIONS } from "@/lib/customer-quote-terms-content";
 import {
   formatQuoteProjectName,
@@ -394,7 +397,7 @@ function drawTotalsBlock(
   cursor.y = totalsTop + blockHeight + 10;
 }
 
-export async function generateCustomerQuotePdf(quote: CustomerFormalQuoteData) {
+export async function generateCustomerQuotePdf(quote: CustomerFormalQuotePdfInput) {
   const logoBuffer = await loadLogoBuffer();
   const imageBuffers = await Promise.all(
     quote.lineItems.map((item) =>

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { fetchCustomerFormalQuote } from "@/lib/customer-formal-quote-data";
+import {
+  fetchCustomerFormalQuote,
+  loadLinkedQuoteRequestDeadline,
+} from "@/lib/customer-formal-quote-data";
 import {
   buildCustomerQuotePdfFilename,
   isCustomerQuotePdfDownloadable,
@@ -49,6 +52,31 @@ export async function GET(_request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Quote not found." }, { status: 404 });
   }
 
+  const { data: quoteLinkRow } = await supabase
+    .from("quotes")
+    .select("id, quote_request_id")
+    .eq("id", id)
+    .maybeSingle();
+
+  if (process.env.NODE_ENV === "development") {
+    console.log("[approved-deadline] pdf quote link", {
+      quoteId: quoteLinkRow?.id ?? id,
+      quoteRequestId: quoteLinkRow?.quote_request_id ?? null,
+    });
+  }
+
+  const deadlineLoad = await loadLinkedQuoteRequestDeadline(supabase, {
+    quoteId: id,
+    quoteRequestId: quoteLinkRow?.quote_request_id ?? null,
+  });
+
+  if (deadlineLoad.loadError) {
+    console.error(
+      "[approved-deadline] pdf quote request query error:",
+      deadlineLoad.loadError
+    );
+  }
+
   if (!isCustomerQuotePdfDownloadable(quote.versionStatus)) {
     return NextResponse.json(
       { error: "This quote version is not available for download." },
@@ -57,7 +85,10 @@ export async function GET(_request: Request, context: RouteContext) {
   }
 
   try {
-    const pdfBuffer = await generateCustomerQuotePdf(quote);
+    const pdfBuffer = await generateCustomerQuotePdf({
+      ...quote,
+      approvedDeadline: deadlineLoad.approvedDeadline,
+    });
     const filename = buildCustomerQuotePdfFilename(
       quote.quoteNumber,
       quote.versionNumber,

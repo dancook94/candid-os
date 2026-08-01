@@ -18,7 +18,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { fetchCustomerFormalQuote } from "@/lib/customer-formal-quote-data";
+import {
+  fetchCustomerFormalQuote,
+  loadLinkedQuoteRequestDeadline,
+} from "@/lib/customer-formal-quote-data";
 import { createClient } from "@/lib/supabase/server";
 import {
   getCustomerQuoteActionLabel,
@@ -207,6 +210,19 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
     .maybeSingle();
 
   if (formalQuoteExists) {
+    const { data: quoteLinkRow } = await supabase
+      .from("quotes")
+      .select("id, quote_request_id")
+      .eq("id", id)
+      .maybeSingle();
+
+    if (process.env.NODE_ENV === "development") {
+      console.log("[approved-deadline] quote link", {
+        quoteId: quoteLinkRow?.id ?? id,
+        quoteRequestId: quoteLinkRow?.quote_request_id ?? null,
+      });
+    }
+
     const formalQuote = await fetchCustomerFormalQuote(supabase, id, {
       customerContactName: fullName,
       customerEmail: user.email ?? null,
@@ -215,6 +231,18 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
 
     if (!formalQuote) {
       notFound();
+    }
+
+    const deadlineLoad = await loadLinkedQuoteRequestDeadline(supabase, {
+      quoteId: id,
+      quoteRequestId: quoteLinkRow?.quote_request_id ?? null,
+    });
+
+    if (deadlineLoad.loadError && process.env.NODE_ENV === "development") {
+      console.error(
+        "[approved-deadline] quote request query error:",
+        deadlineLoad.loadError
+      );
     }
 
     return (
@@ -231,7 +259,12 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
           dateSent={formalQuote.dateSent}
           expiryDate={formalQuote.expiryDate}
           paymentTermsDays={formalQuote.paymentTermsDays}
-          approvedDeadline={formalQuote.approvedDeadline}
+          approvedDeadline={deadlineLoad.approvedDeadline}
+          deadlineDiagnostic={
+            process.env.NODE_ENV === "development"
+              ? deadlineLoad.diagnostic ?? deadlineLoad.loadError
+              : null
+          }
           introduction={formalQuote.introduction}
           customerNotes={formalQuote.customerNotes}
           subtotal={formalQuote.subtotal}
