@@ -1,34 +1,81 @@
+import Image from "next/image";
+import Link from "next/link";
+
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
 export default function Home() {
   return (
-    <main className="min-h-screen bg-slate-100 flex items-center justify-center">
-      <div className="w-[500px] rounded-2xl bg-white p-10 shadow-xl">
+    <main className="public-auth-page">
+      <div
+        className="public-auth-glow pointer-events-none absolute inset-0"
+        aria-hidden
+      />
 
-        <h1 className="text-4xl font-bold">
-          Candid OS
-        </h1>
+      <div className="relative mx-auto flex w-full max-w-6xl flex-col gap-10 lg:min-h-[calc(100vh-8rem)] lg:flex-row lg:items-center lg:gap-16">
+        <section className="flex flex-1 flex-col justify-center text-center lg:text-left">
+          <Image
+            src="/LOGO_YELLOW.svg"
+            alt="Candid Creative"
+            width={240}
+            height={117}
+            priority
+            className="mx-auto h-auto w-[min(240px,75vw)] lg:mx-0"
+          />
 
-        <p className="mt-2 text-gray-500">
-          Customer Portal
-        </p>
+          <p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+            Candid OS
+          </p>
 
-        <div className="mt-10 space-y-4">
+          <h1 className="mt-3 text-4xl font-semibold tracking-tight text-foreground sm:text-5xl lg:text-[3.25rem] lg:leading-[1.05]">
+            Your Candid customer portal
+          </h1>
 
-          <a
-            href="/login"
-            className="block w-full rounded-lg bg-blue-600 py-3 text-center text-white"
-          >
-            Login
-          </a>
+          <p className="mx-auto mt-4 max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg lg:mx-0">
+            View quotations, submit new requests and track your projects with
+            Candid Creative.
+          </p>
+        </section>
 
-          <a
-            href="/register"
-            className="block w-full rounded-lg border py-3 text-center"
-          >
-            Register
-          </a>
+        <section className="flex w-full flex-col justify-center lg:max-w-md lg:flex-none xl:max-w-lg">
+          <div className="public-auth-panel">
+            <div className="space-y-2">
+              <h2 className="text-2xl font-semibold tracking-tight text-foreground">
+                Get started
+              </h2>
+              <p className="text-sm leading-relaxed text-muted-foreground">
+                Sign in to an existing account or register for access to quote
+                requests and project updates.
+              </p>
+            </div>
 
-        </div>
+            <div className="mt-8 space-y-3">
+              <Link
+                href="/login"
+                className={cn(
+                  buttonVariants({ variant: "default" }),
+                  "h-11 w-full text-base"
+                )}
+              >
+                Login
+              </Link>
 
+              <Link
+                href="/register"
+                className={cn(
+                  buttonVariants({ variant: "outline" }),
+                  "h-11 w-full text-base"
+                )}
+              >
+                Register
+              </Link>
+            </div>
+          </div>
+
+          <p className="mt-6 text-center text-sm text-muted-foreground">
+            Secure access for Candid Creative customers.
+          </p>
+        </section>
       </div>
     </main>
   );

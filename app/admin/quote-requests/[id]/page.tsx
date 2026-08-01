@@ -14,6 +14,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { QuoteRequestAttachmentRecord } from "@/lib/quote-request-attachments";
+import { formatAdminQuoteStatusLabel } from "@/lib/admin-quote-status";
+import { buildLoginUrl } from "@/lib/auth-redirect";
 import { createClient } from "@/lib/supabase/server";
 
 type QuoteRequestDetail = {
@@ -171,7 +173,7 @@ export default async function AdminQuoteRequestDetailPage({
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/login");
+    redirect(buildLoginUrl(`/admin/quote-requests/${id}`));
   }
 
   const { data: profile } = await supabase
@@ -257,11 +259,11 @@ export default async function AdminQuoteRequestDetailPage({
           }
         />
 
-        <Card className="rounded-2xl border-neutral-200 shadow-sm ring-0">
-          <CardHeader className="border-b border-neutral-200">
+        <Card className="portal-surface overflow-hidden">
+          <CardHeader className="border-b border-border">
             <div className="flex flex-wrap gap-6 text-sm">
               <div>
-                <p className="text-neutral-500">Deadline status</p>
+                <p className="portal-field-label">Deadline status</p>
                 <div className="mt-2">
                   <StatusBadge
                     status={mapRequestStatusToBadge(quoteRequest.deadline_status)}
@@ -271,7 +273,7 @@ export default async function AdminQuoteRequestDetailPage({
               </div>
 
               <div>
-                <p className="text-neutral-500">Request status</p>
+                <p className="portal-field-label">Request status</p>
                 <div className="mt-2">
                   <StatusBadge
                     status={mapRequestStatusToBadge(quoteRequest.request_status)}
@@ -281,17 +283,17 @@ export default async function AdminQuoteRequestDetailPage({
               </div>
 
               <div>
-                <p className="text-neutral-500">Quote status</p>
+                <p className="portal-field-label">Quote status</p>
                 <div className="mt-2">
                   {linkedQuote ? (
                     <Link href={`/admin/quotes/${linkedQuote.id}`}>
                       <StatusBadge
                         status={mapQuoteStatusToBadge(linkedQuote.status)}
-                        label={formatStatusLabel(linkedQuote.status)}
+                        label={formatAdminQuoteStatusLabel(linkedQuote.status)}
                       />
                     </Link>
                   ) : (
-                    <span className="text-neutral-600">No quote yet</span>
+                    <span className="text-muted-foreground">No quote yet</span>
                   )}
                 </div>
               </div>
@@ -418,7 +420,7 @@ export default async function AdminQuoteRequestDetailPage({
                     >
                       <StatusBadge
                         status={mapQuoteStatusToBadge(linkedQuote.status)}
-                        label={formatStatusLabel(linkedQuote.status)}
+                        label={formatAdminQuoteStatusLabel(linkedQuote.status)}
                       />
                     </Link>
                   ) : (

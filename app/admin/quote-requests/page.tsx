@@ -9,6 +9,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
+import { formatAdminQuoteStatusLabel } from "@/lib/admin-quote-status";
+import { buildLoginUrl } from "@/lib/auth-redirect";
 import { createClient } from "@/lib/supabase/server";
 
 type QuoteRequestRow = {
@@ -162,7 +165,7 @@ export default async function AdminQuoteRequestsPage({
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/login");
+    redirect(buildLoginUrl("/admin/quote-requests"));
   }
 
   const { data: profile } = await supabase
@@ -281,7 +284,7 @@ export default async function AdminQuoteRequestsPage({
           description="Review incoming customer quote requests."
         />
 
-        <Card className="mb-6 rounded-2xl border-neutral-200 shadow-sm ring-0">
+        <Card className="portal-surface mb-6">
           <CardContent className="pt-6">
             <form method="get" className="grid gap-4 lg:grid-cols-4">
               <div className="space-y-2 lg:col-span-2">
@@ -297,11 +300,10 @@ export default async function AdminQuoteRequestsPage({
 
               <div className="space-y-2">
                 <Label htmlFor="request_status">Request status</Label>
-                <select
+                <Select
                   id="request_status"
                   name="request_status"
                   defaultValue={requestStatusFilter ?? ""}
-                  className="h-8 w-full rounded-lg border border-neutral-300 bg-white px-2.5 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10"
                 >
                   <option value="">All request statuses</option>
                   {REQUEST_STATUS_OPTIONS.map((status) => (
@@ -309,16 +311,15 @@ export default async function AdminQuoteRequestsPage({
                       {formatStatusLabel(status)}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
 
               <div className="space-y-2">
                 <Label htmlFor="deadline_status">Deadline status</Label>
-                <select
+                <Select
                   id="deadline_status"
                   name="deadline_status"
                   defaultValue={deadlineStatusFilter ?? ""}
-                  className="h-8 w-full rounded-lg border border-neutral-300 bg-white px-2.5 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10"
                 >
                   <option value="">All deadline statuses</option>
                   {DEADLINE_STATUS_OPTIONS.map((status) => (
@@ -326,7 +327,7 @@ export default async function AdminQuoteRequestsPage({
                       {formatStatusLabel(status)}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
 
               <div className="flex items-end gap-2 lg:col-span-4">
@@ -362,39 +363,21 @@ export default async function AdminQuoteRequestsPage({
             }
           />
         ) : (
-          <Card className="overflow-hidden rounded-xl border-neutral-200 shadow-sm ring-0">
+          <Card className="portal-surface overflow-hidden">
             <CardContent className="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="portal-table">
                   <thead>
-                    <tr className="border-b border-neutral-200 bg-neutral-50/50">
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Project
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Company
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Requested by
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Submitted
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Requested deadline
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Fulfilment
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Deadline status
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Request status
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Quote status
-                      </th>
+                    <tr>
+                      <th>Project</th>
+                      <th>Company</th>
+                      <th>Requested by</th>
+                      <th>Submitted</th>
+                      <th>Requested deadline</th>
+                      <th>Fulfilment</th>
+                      <th>Deadline status</th>
+                      <th>Request status</th>
+                      <th>Quote status</th>
                     </tr>
                   </thead>
 
@@ -405,12 +388,12 @@ export default async function AdminQuoteRequestsPage({
                       return (
                       <tr
                         key={request.id}
-                        className="cursor-pointer border-b border-neutral-200 last:border-0 hover:bg-neutral-50"
+                        className="cursor-pointer hover:bg-muted/35"
                       >
                         <td className="p-0">
                           <Link
                             href={`/admin/quote-requests/${request.id}`}
-                            className="block p-4 font-medium text-neutral-950"
+                            className="block p-4 font-medium text-foreground"
                           >
                             {request.project_name}
                           </Link>
@@ -419,7 +402,7 @@ export default async function AdminQuoteRequestsPage({
                         <td className="p-0">
                           <Link
                             href={`/admin/quote-requests/${request.id}`}
-                            className="block p-4 text-neutral-600"
+                            className="block p-4 text-muted-foreground"
                           >
                             {companyNameById.get(request.company_id) ||
                               "Unknown company"}
@@ -429,7 +412,7 @@ export default async function AdminQuoteRequestsPage({
                         <td className="p-0">
                           <Link
                             href={`/admin/quote-requests/${request.id}`}
-                            className="block p-4 text-neutral-600"
+                            className="block p-4 text-muted-foreground"
                           >
                             {requesterNameById.get(request.requested_by) ||
                               "Unknown requester"}
@@ -439,7 +422,7 @@ export default async function AdminQuoteRequestsPage({
                         <td className="p-0">
                           <Link
                             href={`/admin/quote-requests/${request.id}`}
-                            className="block p-4 text-neutral-600"
+                            className="block p-4 text-muted-foreground"
                           >
                             {formatDate(request.created_at)}
                           </Link>
@@ -448,7 +431,7 @@ export default async function AdminQuoteRequestsPage({
                         <td className="p-0">
                           <Link
                             href={`/admin/quote-requests/${request.id}`}
-                            className="block p-4 text-neutral-600"
+                            className="block p-4 text-muted-foreground"
                           >
                             {formatRequestedDeadline(
                               request.requested_date,
@@ -460,7 +443,7 @@ export default async function AdminQuoteRequestsPage({
                         <td className="p-0">
                           <Link
                             href={`/admin/quote-requests/${request.id}`}
-                            className="block p-4 text-neutral-600"
+                            className="block p-4 text-muted-foreground"
                           >
                             {formatFulfilmentMethod(request.fulfilment_method)}
                           </Link>
@@ -498,7 +481,7 @@ export default async function AdminQuoteRequestsPage({
                             >
                               <StatusBadge
                                 status={mapQuoteStatusToBadge(linkedQuote.status)}
-                                label={formatStatusLabel(linkedQuote.status)}
+                                label={formatAdminQuoteStatusLabel(linkedQuote.status)}
                               />
                             </Link>
                           ) : (

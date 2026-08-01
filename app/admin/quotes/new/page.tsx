@@ -8,7 +8,9 @@ import {
   type QuoteBuilderInitialValues,
 } from "@/components/quote-builder-form";
 import { Button } from "@/components/ui/button";
+import { resolvePaymentTermsDays } from "@/lib/payment-terms";
 import { createClient } from "@/lib/supabase/server";
+import { buildLoginUrl } from "@/lib/auth-redirect";
 
 type NewQuotePageProps = {
   searchParams: Promise<{ quoteRequestId?: string }>;
@@ -27,7 +29,10 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/login");
+    const nextPath = quoteRequestId
+      ? `/admin/quotes/new?quoteRequestId=${encodeURIComponent(quoteRequestId)}`
+      : "/admin/quotes/new";
+    redirect(buildLoginUrl(nextPath));
   }
 
   const { data: profile } = await supabase
@@ -47,7 +52,7 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
   const [{ data: companies }, { data: quoteRequests }] = await Promise.all([
     supabase
       .from("companies")
-      .select("id, company_name")
+      .select("id, company_name, payment_terms_days")
       .eq("is_active", true)
       .order("company_name"),
     supabase
@@ -76,12 +81,18 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
       .maybeSingle();
 
     if (quoteRequest) {
+      const linkedCompany = (companies ?? []).find(
+        (company) => company.id === quoteRequest.company_id
+      );
+
       initialValues = {
         companyId: quoteRequest.company_id,
         quoteRequestId: quoteRequest.id,
         projectName: quoteRequest.project_name,
         expiryDate: "",
-        paymentTermsDays: 14,
+        paymentTermsDays: resolvePaymentTermsDays(
+          linkedCompany?.payment_terms_days
+        ),
         introduction: "",
         customerNotes: buildCustomerNotes(
           quoteRequest.description,

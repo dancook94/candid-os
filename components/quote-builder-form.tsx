@@ -15,6 +15,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
+import { resolvePaymentTermsDays } from "@/lib/payment-terms";
 import {
   deleteOrphanedQuoteItemImages,
   formatSupabaseStorageError,
@@ -74,6 +75,7 @@ export type QuoteBuilderInitialValues = {
 type CompanyOption = {
   id: string;
   company_name: string;
+  payment_terms_days: number | null;
 };
 
 type QuoteRequestOption = {
@@ -366,6 +368,17 @@ export function QuoteBuilderForm({
   const filteredQuoteRequests = quoteRequests.filter(
     (request) => !companyId || request.company_id === companyId
   );
+
+  function applyCompanyPaymentTerms(nextCompanyId: string) {
+    if (mode !== "create") {
+      return;
+    }
+
+    const company = companies.find((entry) => entry.id === nextCompanyId);
+    setPaymentTermsDays(
+      String(resolvePaymentTermsDays(company?.payment_terms_days))
+    );
+  }
 
   const isReadOnly = !canEdit;
 
@@ -842,8 +855,8 @@ export function QuoteBuilderForm({
 
   return (
     <form className="space-y-6" onSubmit={handleSaveDraft}>
-      <Card className="rounded-2xl border-neutral-200 shadow-sm ring-0">
-        <CardHeader className="border-b border-neutral-200">
+      <Card className="portal-surface overflow-hidden">
+        <CardHeader className="border-b border-border">
           <CardTitle className="text-lg font-semibold text-neutral-950">
             {mode === "create" ? "New quote" : "Quote details"}
           </CardTitle>
@@ -889,8 +902,10 @@ export function QuoteBuilderForm({
                 id="company-id"
                 value={companyId}
                 onChange={(event) => {
-                  setCompanyId(event.target.value);
+                  const nextCompanyId = event.target.value;
+                  setCompanyId(nextCompanyId);
                   setQuoteRequestId("");
+                  applyCompanyPaymentTerms(nextCompanyId);
                 }}
                 disabled={isBusy || isReadOnly}
                 className="h-8 w-full rounded-lg border border-neutral-300 bg-white px-2.5 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
@@ -910,7 +925,25 @@ export function QuoteBuilderForm({
               <select
                 id="quote-request-id"
                 value={quoteRequestId}
-                onChange={(event) => setQuoteRequestId(event.target.value)}
+                onChange={(event) => {
+                  const nextQuoteRequestId = event.target.value;
+                  setQuoteRequestId(nextQuoteRequestId);
+
+                  if (mode !== "create" || !nextQuoteRequestId) {
+                    return;
+                  }
+
+                  const request = quoteRequests.find(
+                    (entry) => entry.id === nextQuoteRequestId
+                  );
+
+                  if (!request) {
+                    return;
+                  }
+
+                  setCompanyId(request.company_id);
+                  applyCompanyPaymentTerms(request.company_id);
+                }}
                 disabled={isBusy || isReadOnly || !companyId}
                 className="h-8 w-full rounded-lg border border-neutral-300 bg-white px-2.5 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
               >
@@ -996,8 +1029,8 @@ export function QuoteBuilderForm({
         </CardContent>
       </Card>
 
-      <Card className="rounded-2xl border-neutral-200 shadow-sm ring-0">
-        <CardHeader className="border-b border-neutral-200 pb-4">
+      <Card className="portal-surface overflow-hidden">
+        <CardHeader className="border-b border-border pb-4">
           <CardTitle className="text-lg font-semibold text-neutral-950">
             Line items
           </CardTitle>
@@ -1049,7 +1082,7 @@ export function QuoteBuilderForm({
           )}
 
           <div className="flex justify-end pt-2">
-            <div className="w-full max-w-sm rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+            <div className="w-full max-w-sm rounded-xl border border-border bg-card p-4 shadow-sm">
               <dl className="space-y-2 text-sm">
                 <div className="flex items-center justify-between gap-4">
                   <dt className="text-neutral-500">Subtotal</dt>
@@ -1063,7 +1096,7 @@ export function QuoteBuilderForm({
                     {formatGbp(totals.vatAmount)}
                   </dd>
                 </div>
-                <div className="flex items-center justify-between gap-4 border-t border-neutral-200 pt-3">
+                <div className="flex items-center justify-between gap-4 border-t border-border pt-3">
                   <dt className="font-medium text-neutral-950">
                     Total including VAT
                   </dt>

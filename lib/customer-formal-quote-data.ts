@@ -25,6 +25,8 @@ export type CustomerFormalQuoteData = {
   quoteStatus: string;
   versionStatus: string;
   versionNumber: number;
+  currentVersion: number;
+  canRespondToQuote: boolean;
   dateSent: string | null;
   expiryDate: string | null;
   paymentTermsDays: number | null;
@@ -133,6 +135,11 @@ export async function fetchCustomerFormalQuote(
     quoteStatus: customerQuoteStatus,
     versionStatus: displayVersion.version_status,
     versionNumber: displayVersion.version_number,
+    currentVersion: formalQuote.current_version,
+    canRespondToQuote:
+      formalQuote.status === "sent" &&
+      displayVersion.version_status === "sent" &&
+      displayVersion.version_number === formalQuote.current_version,
     dateSent: displayVersion.created_at,
     expiryDate: displayVersion.expiry_date,
     paymentTermsDays: displayVersion.payment_terms_days,

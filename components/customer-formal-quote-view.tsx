@@ -8,6 +8,7 @@ import {
   Users,
 } from "lucide-react";
 
+import { CustomerQuoteActions } from "@/components/customer-quote-actions";
 import { CustomerQuoteDownloadPdfButton } from "@/components/customer-quote-download-pdf-button";
 import { CustomerQuoteTermsSection } from "@/components/customer-quote-terms-section";
 import { StatusBadge } from "@/components/status-badge";
@@ -39,6 +40,7 @@ export type CustomerFormalQuoteViewProps = {
   projectName: string;
   quoteStatus: string;
   versionNumber: number;
+  canRespondToQuote: boolean;
   dateSent: string | null;
   expiryDate: string | null;
   paymentTermsDays: number | null;
@@ -117,6 +119,7 @@ export function CustomerFormalQuoteView({
   projectName,
   quoteStatus,
   versionNumber,
+  canRespondToQuote,
   dateSent,
   expiryDate,
   paymentTermsDays,
@@ -136,6 +139,8 @@ export function CustomerFormalQuoteView({
   const backHref = linkedRequestId ? `/quotes/${linkedRequestId}` : "/quotes";
   const displayProjectName = formatQuoteProjectName(projectName);
   const statusLabel = getFormalQuoteStatusLabel(quoteStatus);
+  const showAcceptedConfirmation = quoteStatus === "accepted";
+  const showDeclinedConfirmation = quoteStatus === "declined";
 
   return (
     <div className="min-h-screen bg-[#fafafa] pb-16 pt-6 sm:pb-20 sm:pt-8">
@@ -209,6 +214,34 @@ export function CustomerFormalQuoteView({
             </p>
           ) : null}
         </header>
+
+        {showAcceptedConfirmation ? (
+          <div className="mb-8 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
+            <p className="font-semibold">Quotation accepted</p>
+            <p className="mt-1">
+              You accepted Q-{quoteNumber}, Version {versionNumber}. Candid Creative
+              has been notified.
+            </p>
+          </div>
+        ) : null}
+
+        {showDeclinedConfirmation ? (
+          <div className="mb-8 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-900">
+            <p className="font-semibold">Quotation declined</p>
+            <p className="mt-1">
+              You declined Q-{quoteNumber}, Version {versionNumber}. Candid Creative
+              has been notified.
+            </p>
+          </div>
+        ) : null}
+
+        <CustomerQuoteActions
+          quoteId={quoteId}
+          quoteNumber={quoteNumber}
+          versionNumber={versionNumber}
+          total={total}
+          canRespond={canRespondToQuote}
+        />
 
         <section
           aria-label="Quote summary"

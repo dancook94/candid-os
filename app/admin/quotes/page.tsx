@@ -7,6 +7,8 @@ import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatAdminQuoteStatusLabel } from "@/lib/admin-quote-status";
+import { buildLoginUrl } from "@/lib/auth-redirect";
 import { createClient } from "@/lib/supabase/server";
 
 type QuoteRow = {
@@ -85,7 +87,7 @@ export default async function AdminQuotesPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/login");
+    redirect(buildLoginUrl("/admin/quotes"));
   }
 
   const { data: profile } = await supabase
@@ -163,30 +165,18 @@ export default async function AdminQuotesPage() {
             action={newQuoteButton}
           />
         ) : (
-          <Card className="overflow-hidden rounded-xl border-neutral-200 shadow-sm ring-0">
+          <Card className="portal-surface overflow-hidden">
             <CardContent className="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="portal-table">
                   <thead>
-                    <tr className="border-b border-neutral-200 bg-neutral-50/50">
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Quote
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Company
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Project
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Version
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Status
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Updated
-                      </th>
+                    <tr>
+                      <th>Quote</th>
+                      <th>Company</th>
+                      <th>Project</th>
+                      <th>Version</th>
+                      <th>Status</th>
+                      <th>Updated</th>
                     </tr>
                   </thead>
 
@@ -194,12 +184,12 @@ export default async function AdminQuotesPage() {
                     {quotes.map((quote) => (
                       <tr
                         key={quote.id}
-                        className="cursor-pointer border-b border-neutral-200 last:border-0 hover:bg-neutral-50"
+                        className="cursor-pointer hover:bg-muted/35"
                       >
                         <td className="p-0">
                           <Link
                             href={`/admin/quotes/${quote.id}`}
-                            className="block p-4 font-medium text-neutral-950"
+                            className="block p-4 font-medium text-foreground"
                           >
                             Q-{quote.quote_number}
                           </Link>
@@ -208,7 +198,7 @@ export default async function AdminQuotesPage() {
                         <td className="p-0">
                           <Link
                             href={`/admin/quotes/${quote.id}`}
-                            className="block p-4 text-neutral-600"
+                            className="block p-4 text-muted-foreground"
                           >
                             {companyNameById.get(quote.company_id) ||
                               "Unknown company"}
@@ -218,7 +208,7 @@ export default async function AdminQuotesPage() {
                         <td className="p-0">
                           <Link
                             href={`/admin/quotes/${quote.id}`}
-                            className="block p-4 text-neutral-600"
+                            className="block p-4 text-muted-foreground"
                           >
                             {quote.project_name}
                           </Link>
@@ -227,7 +217,7 @@ export default async function AdminQuotesPage() {
                         <td className="p-0">
                           <Link
                             href={`/admin/quotes/${quote.id}`}
-                            className="block p-4 text-neutral-600"
+                            className="block p-4 text-muted-foreground"
                           >
                             v{quote.current_version}
                           </Link>
@@ -240,7 +230,7 @@ export default async function AdminQuotesPage() {
                           >
                             <StatusBadge
                               status={mapToBadgeStatus(quote.status)}
-                              label={formatStatusLabel(quote.status)}
+                              label={formatAdminQuoteStatusLabel(quote.status)}
                             />
                           </Link>
                         </td>
@@ -248,7 +238,7 @@ export default async function AdminQuotesPage() {
                         <td className="p-0">
                           <Link
                             href={`/admin/quotes/${quote.id}`}
-                            className="block p-4 text-neutral-600"
+                            className="block p-4 text-muted-foreground"
                           >
                             {formatDate(quote.updated_at)}
                           </Link>

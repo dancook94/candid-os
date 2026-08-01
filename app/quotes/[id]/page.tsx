@@ -25,6 +25,7 @@ import {
 import { createClient } from "@/lib/supabase/server";
 import {
   getCustomerQuoteActionLabel,
+  getFormalQuoteStatusLabel,
   isCustomerQuotePdfDownloadable,
   isCustomerQuoteViewable,
   isQuoteRequestLockedByFormalQuote,
@@ -256,6 +257,7 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
           projectName={formalQuote.projectName}
           quoteStatus={formalQuote.quoteStatus}
           versionNumber={formalQuote.versionNumber}
+          canRespondToQuote={formalQuote.canRespondToQuote}
           dateSent={formalQuote.dateSent}
           expiryDate={formalQuote.expiryDate}
           paymentTermsDays={formalQuote.paymentTermsDays}
@@ -311,6 +313,9 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
     ? await resolveCustomerQuoteStatus(supabase, linkedQuote)
     : undefined;
   const quoteActionLabel = getCustomerQuoteActionLabel(customerQuoteStatus);
+  const quoteStatusLabel = customerQuoteStatus
+    ? getFormalQuoteStatusLabel(customerQuoteStatus)
+    : quoteActionLabel;
   const quoteStatusIsClickable = isCustomerQuoteViewable(customerQuoteStatus);
   const isLockedByFormalQuote = isQuoteRequestLockedByFormalQuote(
     customerQuoteStatus
@@ -337,8 +342,8 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
         />
 
         {isLockedByFormalQuote && (
-          <div className="mb-4 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
-            <p className="text-sm text-neutral-700">{QUOTE_REQUEST_LOCKED_NOTICE}</p>
+          <div className="mb-4 rounded-xl border border-border bg-muted/40 p-4">
+            <p className="text-sm text-muted-foreground">{QUOTE_REQUEST_LOCKED_NOTICE}</p>
           </div>
         )}
 
@@ -347,11 +352,11 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
           canEdit={canEdit}
           initialValues={toEditableValues(quoteRequest)}
         >
-          <Card className="rounded-2xl border-neutral-200 shadow-sm ring-0">
-            <CardHeader className="border-b border-neutral-200">
+          <Card className="portal-surface overflow-hidden">
+            <CardHeader className="border-b border-border">
               <div className="flex flex-wrap gap-6 text-sm">
                 <div>
-                  <p className="text-neutral-500">Deadline status</p>
+                  <p className="portal-field-label">Deadline status</p>
                   <div className="mt-2">
                     <StatusBadge
                       status={mapRequestStatusToBadge(quoteRequest.deadline_status)}
@@ -361,7 +366,7 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
                 </div>
 
                 <div>
-                  <p className="text-neutral-500">Request status</p>
+                  <p className="portal-field-label">Request status</p>
                   <div className="mt-2">
                     <StatusBadge
                       status={mapRequestStatusToBadge(quoteRequest.request_status)}
@@ -371,17 +376,17 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
                 </div>
 
                 <div>
-                  <p className="text-neutral-500">Quote status</p>
+                  <p className="portal-field-label">Quote status</p>
                   <div className="mt-2">
                     {quoteStatusIsClickable && linkedQuote ? (
                       <Link href={`/quotes/${linkedQuote.id}`} className="inline-flex">
                         <StatusBadge
                           status={mapCustomerQuoteStatusToBadge(customerQuoteStatus!)}
-                          label={quoteActionLabel}
+                          label={quoteStatusLabel}
                         />
                       </Link>
                     ) : (
-                      <span className="text-neutral-950">{quoteActionLabel}</span>
+                      <span className="text-foreground">{quoteActionLabel}</span>
                     )}
                   </div>
                 </div>
@@ -391,36 +396,36 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
             <CardContent className="pt-6">
               <dl className="space-y-5 text-sm">
                 <div>
-                  <dt className="text-neutral-500">Project name</dt>
-                  <dd className="mt-1 font-medium text-neutral-950">
+                  <dt className="portal-field-label">Project name</dt>
+                  <dd className="portal-detail-value">
                     {quoteRequest.project_name}
                   </dd>
                 </div>
 
                 <div>
-                  <dt className="text-neutral-500">Description</dt>
-                  <dd className="mt-1 text-neutral-950">
+                  <dt className="portal-field-label">Description</dt>
+                  <dd className="portal-detail-value">
                     {quoteRequest.description}
                   </dd>
                 </div>
 
                 <div>
-                  <dt className="text-neutral-500">Fulfilment</dt>
-                  <dd className="mt-1 font-medium text-neutral-950">
+                  <dt className="portal-field-label">Fulfilment</dt>
+                  <dd className="portal-detail-value">
                     {formatFulfilmentMethod(quoteRequest.fulfilment_method)}
                   </dd>
                 </div>
 
                 <div>
-                  <dt className="text-neutral-500">Requested date</dt>
-                  <dd className="mt-1 text-neutral-950">
+                  <dt className="portal-field-label">Requested date</dt>
+                  <dd className="portal-detail-value">
                     {formatDate(quoteRequest.requested_date)}
                   </dd>
                 </div>
 
                 <div>
-                  <dt className="text-neutral-500">Requested time</dt>
-                  <dd className="mt-1 text-neutral-950">
+                  <dt className="portal-field-label">Requested time</dt>
+                  <dd className="portal-detail-value">
                     {quoteRequest.requested_time || "—"}
                   </dd>
                 </div>
@@ -428,15 +433,15 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
                 {isDelivery && (
                   <>
                     <div>
-                      <dt className="text-neutral-500">Delivery address</dt>
-                      <dd className="mt-1 text-neutral-950">
+                      <dt className="portal-field-label">Delivery address</dt>
+                      <dd className="portal-detail-value">
                         {formatDeliveryAddress(quoteRequest)}
                       </dd>
                     </div>
 
                     <div>
-                      <dt className="text-neutral-500">Delivery contact</dt>
-                      <dd className="mt-1 text-neutral-950">
+                      <dt className="portal-field-label">Delivery contact</dt>
+                      <dd className="portal-detail-value">
                         {formatDeliveryContact(quoteRequest)}
                       </dd>
                     </div>
@@ -444,28 +449,28 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
                 )}
 
                 <div>
-                  <dt className="text-neutral-500">Purchase order number</dt>
-                  <dd className="mt-1 text-neutral-950">
+                  <dt className="portal-field-label">Purchase order number</dt>
+                  <dd className="portal-detail-value">
                     {quoteRequest.purchase_order_number || "—"}
                   </dd>
                 </div>
 
                 <div>
-                  <dt className="text-neutral-500">Notes</dt>
-                  <dd className="mt-1 text-neutral-950">
+                  <dt className="portal-field-label">Notes</dt>
+                  <dd className="portal-detail-value">
                     {quoteRequest.notes || "—"}
                   </dd>
                 </div>
 
                 <div>
-                  <dt className="text-neutral-500">Submitted date</dt>
-                  <dd className="mt-1 text-neutral-950">
+                  <dt className="portal-field-label">Submitted date</dt>
+                  <dd className="portal-detail-value">
                     {formatDate(quoteRequest.created_at)}
                   </dd>
                 </div>
 
                 <div>
-                  <dt className="text-neutral-500">Request status</dt>
+                  <dt className="portal-field-label">Request status</dt>
                   <dd className="mt-1">
                     <StatusBadge
                       status={mapRequestStatusToBadge(quoteRequest.request_status)}
@@ -475,17 +480,17 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
                 </div>
 
                 <div>
-                  <dt className="text-neutral-500">Quote status</dt>
+                  <dt className="portal-field-label">Quote status</dt>
                   <dd className="mt-1">
                     {quoteStatusIsClickable && linkedQuote ? (
                       <Link href={`/quotes/${linkedQuote.id}`} className="inline-flex">
                         <StatusBadge
                           status={mapCustomerQuoteStatusToBadge(customerQuoteStatus!)}
-                          label={quoteActionLabel}
+                          label={quoteStatusLabel}
                         />
                       </Link>
                     ) : (
-                      <span className="text-neutral-950">{quoteActionLabel}</span>
+                      <span className="text-foreground">{quoteActionLabel}</span>
                     )}
                   </dd>
                 </div>

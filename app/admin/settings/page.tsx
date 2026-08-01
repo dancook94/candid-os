@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import { buildLoginUrl } from "@/lib/auth-redirect";
 
 const plannedSections = [
   {
@@ -38,7 +39,7 @@ export default async function AdminSettingsPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/login");
+    redirect(buildLoginUrl("/admin/settings"));
   }
 
   const { data: profile } = await supabase
@@ -72,17 +73,17 @@ export default async function AdminSettingsPage() {
           {plannedSections.map((section) => (
             <Card
               key={section.title}
-              className="rounded-2xl border-neutral-200 shadow-sm ring-0"
+              className="portal-surface overflow-hidden"
             >
-              <CardHeader className="border-b border-neutral-200">
-                <CardTitle className="text-lg font-semibold text-neutral-950">
+              <CardHeader className="border-b border-border">
+                <CardTitle className="text-lg font-semibold">
                   {section.title}
                 </CardTitle>
                 <CardDescription>{section.description}</CardDescription>
               </CardHeader>
 
               <CardContent className="pt-6">
-                <p className="text-sm text-neutral-500">Coming soon.</p>
+                <p className="text-sm text-muted-foreground">Coming soon.</p>
               </CardContent>
             </Card>
           ))}

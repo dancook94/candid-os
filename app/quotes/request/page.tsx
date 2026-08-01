@@ -57,9 +57,9 @@ export default async function QuoteRequestPage() {
             requestedBy={user.id}
           />
         ) : (
-          <Card className="rounded-2xl border-neutral-200 shadow-sm ring-0">
+          <Card className="portal-surface">
             <CardHeader>
-              <CardTitle className="text-lg font-semibold text-neutral-950">
+              <CardTitle className="text-lg font-semibold">
                 Quote requests unavailable
               </CardTitle>
               <CardDescription>

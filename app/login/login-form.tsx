@@ -2,24 +2,24 @@
 
 import { FormEvent, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 import { AuthPageLayout } from "@/components/auth-page-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { resolvePostLoginPath } from "@/lib/auth-redirect";
 import { createClient } from "@/lib/supabase/client";
 
-export default function RegisterPage() {
+export default function LoginForm() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = createClient();
 
-  const [fullName, setFullName] = useState("");
-  const [companyName, setCompanyName] = useState("");
+  const next = searchParams.get("next");
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -27,56 +27,51 @@ export default function RegisterPage() {
     event.preventDefault();
 
     setError("");
-    setMessage("");
     setIsSubmitting(true);
 
-    const { data, error: signUpError } = await supabase.auth.signUp({
+    const {
+      data: { user },
+      error: signInError,
+    } = await supabase.auth.signInWithPassword({
       email,
       password,
-      options: {
-        data: {
-          full_name: fullName,
-          company_name: companyName,
-        },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
     });
+
+    if (signInError || !user) {
+      setIsSubmitting(false);
+      setError("Incorrect email address or password.");
+      return;
+    }
+
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("account_status, user_role")
+      .eq("id", user.id)
+      .single();
 
     setIsSubmitting(false);
 
-    if (signUpError) {
-      setError(signUpError.message);
+    if (profileError) {
+      setError(profileError.message);
       return;
     }
 
-    if (data.session) {
-      router.push("/dashboard");
-      router.refresh();
-      return;
-    }
-
-    setMessage(
-      "Account created. Please check your email and click the verification link."
-    );
-
-    setFullName("");
-    setCompanyName("");
-    setEmail("");
-    setPassword("");
+    router.push(resolvePostLoginPath(profile, next));
+    router.refresh();
   }
 
   return (
     <AuthPageLayout
-      title="Create your account"
-      description="Register for access to quote requests and your Candid projects."
+      title="Welcome to Candid OS"
+      description="Sign in to access your Candid portal."
       footer={
         <>
-          Already registered?{" "}
+          Need an account?{" "}
           <Link
-            href="/login"
+            href="/register"
             className="font-medium text-foreground underline decoration-border underline-offset-4 transition hover:decoration-foreground"
           >
-            Sign in
+            Register
           </Link>
         </>
       }
@@ -84,35 +79,11 @@ export default function RegisterPage() {
       <form className="space-y-5" onSubmit={handleSubmit}>
         <div className="space-y-1">
           <h2 className="text-2xl font-semibold tracking-tight text-foreground">
-            Register
+            Sign in
           </h2>
           <p className="text-sm text-muted-foreground">
-            Tell us who you are and we&apos;ll set up your portal access.
+            Enter your account details to continue.
           </p>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="fullName">Full name</Label>
-          <Input
-            id="fullName"
-            type="text"
-            required
-            value={fullName}
-            onChange={(event) => setFullName(event.target.value)}
-            placeholder="Daniel Cook"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="companyName">Company name</Label>
-          <Input
-            id="companyName"
-            type="text"
-            required
-            value={companyName}
-            onChange={(event) => setCompanyName(event.target.value)}
-            placeholder="Your company"
-          />
         </div>
 
         <div className="space-y-2">
@@ -129,16 +100,23 @@ export default function RegisterPage() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="password">Password</Label>
+          <div className="flex items-center justify-between gap-3">
+            <Label htmlFor="password">Password</Label>
+            <Link
+              href="/forgot-password"
+              className="text-sm font-medium text-muted-foreground underline decoration-border underline-offset-4 transition hover:text-foreground hover:decoration-foreground"
+            >
+              Forgot password?
+            </Link>
+          </div>
           <Input
             id="password"
             type="password"
             required
-            minLength={8}
-            autoComplete="new-password"
+            autoComplete="current-password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            placeholder="At least 8 characters"
+            placeholder="Enter your password"
           />
         </div>
 
@@ -148,14 +126,8 @@ export default function RegisterPage() {
           </div>
         ) : null}
 
-        {message ? (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-            {message}
-          </div>
-        ) : null}
-
         <Button type="submit" disabled={isSubmitting} className="h-10 w-full">
-          {isSubmitting ? "Creating account..." : "Create account"}
+          {isSubmitting ? "Signing in..." : "Sign in"}
         </Button>
       </form>
     </AuthPageLayout>

@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 import {
   getCustomerQuoteActionLabel,
+  getFormalQuoteStatusLabel,
   isCustomerQuoteViewable,
   mapCustomerQuoteStatusToBadge,
 } from "@/lib/customer-quote-request";
@@ -202,33 +203,19 @@ export default async function QuotesPage() {
             action={requestQuoteButton}
           />
         ) : (
-          <Card className="overflow-hidden rounded-xl border-neutral-200 shadow-sm ring-0">
+          <Card className="portal-surface overflow-hidden">
             <CardContent className="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="portal-table">
                   <thead>
-                    <tr className="border-b border-neutral-200 bg-neutral-50/50">
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Project
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Submitted
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Requested deadline
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Fulfilment
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Deadline status
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Request status
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Quote status
-                      </th>
+                    <tr>
+                      <th>Project</th>
+                      <th>Submitted</th>
+                      <th>Requested deadline</th>
+                      <th>Fulfilment</th>
+                      <th>Deadline status</th>
+                      <th>Request status</th>
+                      <th>Quote status</th>
                     </tr>
                   </thead>
 
@@ -241,18 +228,21 @@ export default async function QuotesPage() {
                         : undefined;
                       const quoteActionLabel =
                         getCustomerQuoteActionLabel(customerQuoteStatus);
+                      const quoteStatusLabel = customerQuoteStatus
+                        ? getFormalQuoteStatusLabel(customerQuoteStatus)
+                        : quoteActionLabel;
                       const quoteStatusIsClickable =
                         isCustomerQuoteViewable(customerQuoteStatus);
 
                       return (
                       <tr
                         key={request.id}
-                        className="border-b border-neutral-200 last:border-0 hover:bg-neutral-50 cursor-pointer"
+                        className="cursor-pointer hover:bg-muted/35"
                       >
                         <td className="p-0">
                           <Link
                             href={`/quotes/${request.id}`}
-                            className="block p-4 font-medium text-neutral-950"
+                            className="block p-4 font-medium text-foreground"
                           >
                             {request.project_name}
                           </Link>
@@ -261,7 +251,7 @@ export default async function QuotesPage() {
                         <td className="p-0">
                           <Link
                             href={`/quotes/${request.id}`}
-                            className="block p-4 text-neutral-600"
+                            className="block p-4 text-muted-foreground"
                           >
                             {formatDate(request.created_at)}
                           </Link>
@@ -270,7 +260,7 @@ export default async function QuotesPage() {
                         <td className="p-0">
                           <Link
                             href={`/quotes/${request.id}`}
-                            className="block p-4 text-neutral-600"
+                            className="block p-4 text-muted-foreground"
                           >
                             {formatRequestedDeadline(
                               request.requested_date,
@@ -282,7 +272,7 @@ export default async function QuotesPage() {
                         <td className="p-0">
                           <Link
                             href={`/quotes/${request.id}`}
-                            className="block p-4 text-neutral-600"
+                            className="block p-4 text-muted-foreground"
                           >
                             {formatFulfilmentMethod(request.fulfilment_method)}
                           </Link>
@@ -322,7 +312,7 @@ export default async function QuotesPage() {
                                 status={mapCustomerQuoteStatusToBadge(
                                   customerQuoteStatus!
                                 )}
-                                label={quoteActionLabel}
+                                label={quoteStatusLabel}
                               />
                             </Link>
                           ) : (

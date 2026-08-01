@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
@@ -6,7 +7,9 @@ import { InviteCustomerDialog } from "@/components/invite-customer-dialog";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatPaymentTermsLabel } from "@/lib/payment-terms";
 import { createClient } from "@/lib/supabase/server";
+import { buildLoginUrl } from "@/lib/auth-redirect";
 
 type CustomerProfile = {
   id: string;
@@ -86,7 +89,7 @@ export default async function AdminCustomersPage() {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/login");
+    redirect(buildLoginUrl("/admin/customers"));
   }
 
   const { data: profile } = await supabase
@@ -126,12 +129,16 @@ export default async function AdminCustomersPage() {
     companyIds.length > 0
       ? await supabase
           .from("companies")
-          .select("id, company_name")
+          .select("id, company_name, payment_terms_days")
           .in("id", companyIds)
-      : { data: [] as { id: string; company_name: string }[] };
+      : { data: [] as { id: string; company_name: string; payment_terms_days: number | null }[] };
 
   const companyNameById = new Map(
     (companies ?? []).map((company) => [company.id, company.company_name])
+  );
+
+  const companyPaymentTermsById = new Map(
+    (companies ?? []).map((company) => [company.id, company.payment_terms_days])
   );
 
   const { data: inviteCompanies } = await supabase
@@ -171,69 +178,70 @@ export default async function AdminCustomersPage() {
             description="Registered portal users will appear here."
           />
         ) : (
-          <Card className="overflow-hidden rounded-xl border-neutral-200 shadow-sm ring-0">
+          <Card className="portal-surface overflow-hidden">
             <CardContent className="p-0">
               <div className="overflow-x-auto">
-                <table className="w-full text-sm">
+                <table className="portal-table">
                   <thead>
-                    <tr className="border-b border-neutral-200 bg-neutral-50/50">
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Name
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Requested company
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Linked company
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Account status
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Role
-                      </th>
-                      <th className="p-4 text-left font-medium text-neutral-500">
-                        Registered
-                      </th>
+                    <tr>
+                      <th>Name</th>
+                      <th>Requested company</th>
+                      <th>Linked company</th>
+                      <th>Payment terms</th>
+                      <th>Account status</th>
+                      <th>Role</th>
+                      <th>Registered</th>
                     </tr>
                   </thead>
 
                   <tbody>
                     {customers.map((customer) => (
-                      <tr
-                        key={customer.id}
-                        className="border-b border-neutral-200 last:border-0 hover:bg-neutral-50"
-                      >
-                        <td className="p-4 font-medium text-neutral-950">
+                      <tr key={customer.id}>
+                        <td className="px-4 py-3.5 font-medium text-foreground">
                           {customer.full_name || "Unnamed user"}
                         </td>
 
-                        <td className="p-4 text-neutral-600">
+                        <td className="px-4 py-3.5 text-muted-foreground">
                           {customer.requested_company_name || "—"}
                         </td>
 
-                        <td className="p-4 text-neutral-600">
+                        <td className="px-4 py-3.5">
+                          {customer.company_id ? (
+                            <Link
+                              href={`/admin/companies/${customer.company_id}`}
+                              className="font-medium text-foreground underline decoration-border underline-offset-4 transition hover:decoration-foreground"
+                            >
+                              {companyNameById.get(customer.company_id) ||
+                                "Unknown company"}
+                            </Link>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+
+                        <td className="px-4 py-3.5 text-muted-foreground">
                           {customer.company_id
-                            ? companyNameById.get(customer.company_id) ||
-                              "Unknown company"
+                            ? formatPaymentTermsLabel(
+                                companyPaymentTermsById.get(customer.company_id)
+                              )
                             : "—"}
                         </td>
 
-                        <td className="p-4">
+                        <td className="px-4 py-3.5">
                           <StatusBadge
                             status={mapToBadgeStatus(customer.account_status)}
                             label={formatStatusLabel(customer.account_status)}
                           />
                         </td>
 
-                        <td className="p-4">
+                        <td className="px-4 py-3.5">
                           <StatusBadge
                             status={mapToBadgeStatus(customer.user_role)}
                             label={formatStatusLabel(customer.user_role)}
                           />
                         </td>
 
-                        <td className="p-4 text-neutral-600">
+                        <td className="px-4 py-3.5 text-muted-foreground">
                           {formatDate(customer.created_at)}
                         </td>
                       </tr>

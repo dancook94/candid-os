@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import { buildLoginUrl } from "@/lib/auth-redirect";
 import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
 
 type QuoteDetailPageProps = {
@@ -39,7 +40,7 @@ export default async function QuoteDetailPage({
   } = await supabase.auth.getUser();
 
   if (!user) {
-    redirect("/login");
+    redirect(buildLoginUrl(`/admin/quotes/${id}`));
   }
 
   const { data: profile } = await supabase
@@ -125,7 +126,7 @@ export default async function QuoteDetailPage({
   const [{ data: companies }, { data: quoteRequests }] = await Promise.all([
     supabase
       .from("companies")
-      .select("id, company_name")
+      .select("id, company_name, payment_terms_days")
       .eq("is_active", true)
       .order("company_name"),
     supabase
@@ -187,7 +188,7 @@ export default async function QuoteDetailPage({
           }
         />
 
-        <Card className="mb-6 rounded-2xl border-neutral-200 shadow-sm ring-0">
+        <Card className="portal-surface mb-6">
           <CardContent className="space-y-4 pt-6">
             <QuoteVersionSelector
               quoteId={quote.id}

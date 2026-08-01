@@ -265,8 +265,8 @@ export function QuoteRequestForm({
   }
 
   return (
-    <Card className="rounded-2xl border-neutral-200 shadow-sm ring-0">
-      <CardHeader className="border-b border-neutral-200">
+    <Card className="portal-surface overflow-hidden">
+      <CardHeader className="border-b border-border">
         <CardTitle className="text-lg font-semibold text-neutral-950">
           Quote request
         </CardTitle>
@@ -394,7 +394,7 @@ export function QuoteRequestForm({
               </div>
 
               {fulfilmentMethod === "delivery" && (
-                <div className="space-y-5 rounded-xl border border-neutral-200 bg-neutral-50/50 p-4">
+                <div className="space-y-5 rounded-xl border border-border bg-muted/35 p-4">
                   <div className="space-y-2">
                     <Label htmlFor="deliveryAddressLine1">Address line 1</Label>
                     <Input
@@ -547,7 +547,7 @@ export function QuoteRequestForm({
                 <p className="text-sm text-red-600">{attachmentValidationError}</p>
               )}
 
-              <div className="rounded-xl border border-neutral-200 bg-neutral-50/50 p-4">
+              <div className="rounded-xl border border-border bg-muted/35 p-4">
                 <h3 className="text-sm font-medium text-neutral-950">
                   Review summary
                 </h3>
