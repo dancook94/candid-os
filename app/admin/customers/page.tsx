@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { EmptyState } from "@/components/empty-state";
+import { InviteCustomerDialog } from "@/components/invite-customer-dialog";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -133,6 +134,12 @@ export default async function AdminCustomersPage() {
     (companies ?? []).map((company) => [company.id, company.company_name])
   );
 
+  const { data: inviteCompanies } = await supabase
+    .from("companies")
+    .select("id, company_name")
+    .eq("is_active", true)
+    .order("company_name");
+
   return (
     <AppShell
       userRole="admin"
@@ -144,6 +151,9 @@ export default async function AdminCustomersPage() {
           eyebrow="Administration"
           title="Customers"
           description="View registered portal users and their account status."
+          actions={
+            <InviteCustomerDialog companies={inviteCompanies ?? []} />
+          }
         />
 
         {isDevelopment && queryError ? (
