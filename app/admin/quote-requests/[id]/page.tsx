@@ -92,8 +92,31 @@ function formatStatusLabel(value: string) {
     .join(" ");
 }
 
-function mapToBadgeStatus(value: string): BadgeStatus {
+function mapRequestStatusToBadge(value: string): BadgeStatus {
   const mapped = statusVariantMap[value.toLowerCase()];
+
+  if (mapped) {
+    return mapped;
+  }
+
+  if (badgeStatuses.includes(value as BadgeStatus)) {
+    return value as BadgeStatus;
+  }
+
+  return "draft";
+}
+
+const quoteStatusVariantMap: Record<string, BadgeStatus> = {
+  draft: "draft",
+  sent: "sent",
+  accepted: "accepted",
+  declined: "declined",
+  expired: "disabled",
+  superseded: "disabled",
+};
+
+function mapQuoteStatusToBadge(value: string): BadgeStatus {
+  const mapped = quoteStatusVariantMap[value.toLowerCase()];
 
   if (mapped) {
     return mapped;
@@ -177,7 +200,7 @@ export default async function AdminQuoteRequestDetailPage({
     notFound();
   }
 
-  const [{ data: company }, { data: requester }, { data: attachments }] =
+  const [{ data: company }, { data: requester }, { data: attachments }, { data: linkedQuote }] =
     await Promise.all([
       supabase
         .from("companies")
@@ -194,6 +217,13 @@ export default async function AdminQuoteRequestDetailPage({
         .select("id, file_name, file_size, file_type, storage_path, created_at")
         .eq("quote_request_id", id)
         .order("created_at", { ascending: false }),
+      supabase
+        .from("quotes")
+        .select("id, status, quote_number")
+        .eq("quote_request_id", id)
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
   const quoteAttachments: QuoteRequestAttachmentRecord[] = attachments ?? [];
@@ -211,9 +241,15 @@ export default async function AdminQuoteRequestDetailPage({
           description="Admin quote request review"
           actions={
             <div className="flex flex-wrap gap-2">
-              <Link href={`/admin/quotes/new?quoteRequestId=${quoteRequest.id}`}>
-                <Button>Create quote</Button>
-              </Link>
+              {linkedQuote ? (
+                <Link href={`/admin/quotes/${linkedQuote.id}`}>
+                  <Button>View quote Q-{linkedQuote.quote_number}</Button>
+                </Link>
+              ) : (
+                <Link href={`/admin/quotes/new?quoteRequestId=${quoteRequest.id}`}>
+                  <Button>Create quote</Button>
+                </Link>
+              )}
               <Link href="/admin/quote-requests">
                 <Button variant="outline">Back to inbox</Button>
               </Link>
@@ -223,15 +259,42 @@ export default async function AdminQuoteRequestDetailPage({
 
         <Card className="rounded-2xl border-neutral-200 shadow-sm ring-0">
           <CardHeader className="border-b border-neutral-200">
-            <div className="flex flex-wrap items-center gap-2">
-              <StatusBadge
-                status={mapToBadgeStatus(quoteRequest.deadline_status)}
-                label={formatStatusLabel(quoteRequest.deadline_status)}
-              />
-              <StatusBadge
-                status={mapToBadgeStatus(quoteRequest.request_status)}
-                label={formatStatusLabel(quoteRequest.request_status)}
-              />
+            <div className="flex flex-wrap gap-6 text-sm">
+              <div>
+                <p className="text-neutral-500">Deadline status</p>
+                <div className="mt-2">
+                  <StatusBadge
+                    status={mapRequestStatusToBadge(quoteRequest.deadline_status)}
+                    label={formatStatusLabel(quoteRequest.deadline_status)}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <p className="text-neutral-500">Request status</p>
+                <div className="mt-2">
+                  <StatusBadge
+                    status={mapRequestStatusToBadge(quoteRequest.request_status)}
+                    label={formatStatusLabel(quoteRequest.request_status)}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <p className="text-neutral-500">Quote status</p>
+                <div className="mt-2">
+                  {linkedQuote ? (
+                    <Link href={`/admin/quotes/${linkedQuote.id}`}>
+                      <StatusBadge
+                        status={mapQuoteStatusToBadge(linkedQuote.status)}
+                        label={formatStatusLabel(linkedQuote.status)}
+                      />
+                    </Link>
+                  ) : (
+                    <span className="text-neutral-600">No quote yet</span>
+                  )}
+                </div>
+              </div>
             </div>
           </CardHeader>
 
@@ -329,7 +392,7 @@ export default async function AdminQuoteRequestDetailPage({
                 <dt className="text-neutral-500">Deadline status</dt>
                 <dd className="mt-1">
                   <StatusBadge
-                    status={mapToBadgeStatus(quoteRequest.deadline_status)}
+                    status={mapRequestStatusToBadge(quoteRequest.deadline_status)}
                     label={formatStatusLabel(quoteRequest.deadline_status)}
                   />
                 </dd>
@@ -339,9 +402,28 @@ export default async function AdminQuoteRequestDetailPage({
                 <dt className="text-neutral-500">Request status</dt>
                 <dd className="mt-1">
                   <StatusBadge
-                    status={mapToBadgeStatus(quoteRequest.request_status)}
+                    status={mapRequestStatusToBadge(quoteRequest.request_status)}
                     label={formatStatusLabel(quoteRequest.request_status)}
                   />
+                </dd>
+              </div>
+
+              <div>
+                <dt className="text-neutral-500">Quote status</dt>
+                <dd className="mt-1">
+                  {linkedQuote ? (
+                    <Link
+                      href={`/admin/quotes/${linkedQuote.id}`}
+                      className="inline-flex"
+                    >
+                      <StatusBadge
+                        status={mapQuoteStatusToBadge(linkedQuote.status)}
+                        label={formatStatusLabel(linkedQuote.status)}
+                      />
+                    </Link>
+                  ) : (
+                    <span className="text-neutral-950">No quote yet</span>
+                  )}
                 </dd>
               </div>
             </dl>
