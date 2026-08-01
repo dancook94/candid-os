@@ -18,6 +18,22 @@ import { createClient } from "@/lib/supabase/client";
 
 type FulfillmentType = "delivery" | "collection";
 
+type QuoteRequestInsert = {
+  company_id: string;
+  requested_by: string;
+  project_name: string;
+  project_description: string;
+  fulfillment_type: FulfillmentType;
+  required_date: string;
+  required_time: string | null;
+  delivery_address: string | null;
+  contact_name: string | null;
+  contact_phone: string | null;
+  purchase_order: string | null;
+  notes: string | null;
+  status: "draft";
+};
+
 type QuoteRequestFormProps = {
   companyId: string;
   requestedBy: string;
@@ -148,7 +164,7 @@ export function QuoteRequestForm({
 
     setIsSubmitting(true);
 
-    const { error: insertError } = await supabase.from("quote_requests").insert({
+    const insertPayload: QuoteRequestInsert = {
       company_id: companyId,
       requested_by: requestedBy,
       project_name: projectName.trim(),
@@ -158,14 +174,18 @@ export function QuoteRequestForm({
       required_time: requiredTime.trim() || null,
       delivery_address:
         fulfillmentType === "delivery" ? deliveryAddress.trim() : null,
-      delivery_contact_name:
+      contact_name:
         fulfillmentType === "delivery" ? deliveryContactName.trim() : null,
-      delivery_contact_phone:
+      contact_phone:
         fulfillmentType === "delivery" ? deliveryContactPhone.trim() : null,
-      purchase_order_number: purchaseOrderNumber.trim() || null,
-      additional_notes: additionalNotes.trim() || null,
+      purchase_order: purchaseOrderNumber.trim() || null,
+      notes: additionalNotes.trim() || null,
       status: "draft",
-    });
+    };
+
+    const { error: insertError } = await supabase
+      .from("quote_requests")
+      .insert(insertPayload);
 
     setIsSubmitting(false);
 
