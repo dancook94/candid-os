@@ -1,6 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-type QuoteResponseAction = "accept" | "decline";
+import {
+  applyQuoteStatusResponse,
+  isQuoteAwaitingDecision,
+  quoteResponseConflictMessage,
+  type QuoteResponseAction,
+  type QuoteStatusResponseResult,
+} from "@/lib/quote-status-response";
 
 type LoadedQuoteContext = {
   quote: {
@@ -16,9 +22,7 @@ type LoadedQuoteContext = {
   };
 };
 
-export type CustomerQuoteResponseResult =
-  | { ok: true }
-  | { ok: false; status: number; message: string };
+export type CustomerQuoteResponseResult = QuoteStatusResponseResult;
 
 function responseError(status: number, message: string): CustomerQuoteResponseResult {
   return { ok: false, status, message };
@@ -83,95 +87,21 @@ async function loadQuoteContext(
     return responseError(409, "This quote version is no longer available.");
   }
 
-  if (quote.status !== "sent" || version.version_status !== "sent") {
-    if (quote.status === "accepted" || version.version_status === "accepted") {
-      return responseError(409, "This quote has already been accepted.");
-    }
-
-    if (quote.status === "declined" || version.version_status === "declined") {
-      return responseError(409, "This quote has already been declined.");
-    }
-
+  if (
+    !isQuoteAwaitingDecision({
+      quoteStatus: quote.status,
+      versionStatus: version.version_status,
+      versionNumber: version.version_number,
+      currentVersion: quote.current_version,
+    })
+  ) {
     return responseError(
       409,
-      "This quote is no longer awaiting a decision."
+      quoteResponseConflictMessage(quote.status, version.version_status)
     );
-  }
-
-  if (version.version_number !== quote.current_version) {
-    return responseError(409, "This quote version is no longer current.");
   }
 
   return { quote, version };
-}
-
-async function applyQuoteResponse(
-  supabase: SupabaseClient,
-  context: LoadedQuoteContext,
-  action: QuoteResponseAction
-): Promise<CustomerQuoteResponseResult> {
-  const now = new Date().toISOString();
-  const nextQuoteStatus = action === "accept" ? "accepted" : "declined";
-  const nextVersionStatus = action === "accept" ? "accepted" : "declined";
-
-  const { data: updatedQuote, error: quoteUpdateError } = await supabase
-    .from("quotes")
-    .update({
-      status: nextQuoteStatus,
-      updated_at: now,
-    })
-    .eq("id", context.quote.id)
-    .eq("status", "sent")
-    .select("id")
-    .maybeSingle();
-
-  if (quoteUpdateError) {
-    return responseError(500, quoteUpdateError.message);
-  }
-
-  if (!updatedQuote) {
-    return responseError(409, "This quote has already been actioned.");
-  }
-
-  const versionUpdate =
-    action === "accept"
-      ? {
-          version_status: "accepted" as const,
-          accepted_at: now,
-          declined_at: null,
-        }
-      : {
-          version_status: "declined" as const,
-          declined_at: now,
-          accepted_at: null,
-        };
-
-  const { data: updatedVersion, error: versionUpdateError } = await supabase
-    .from("quote_versions")
-    .update(versionUpdate)
-    .eq("id", context.version.id)
-    .eq("version_status", "sent")
-    .select("id")
-    .maybeSingle();
-
-  if (versionUpdateError || !updatedVersion) {
-    await supabase
-      .from("quotes")
-      .update({
-        status: "sent",
-        updated_at: now,
-      })
-      .eq("id", context.quote.id)
-      .eq("status", nextQuoteStatus);
-
-    return responseError(
-      500,
-      versionUpdateError?.message ??
-        "Unable to update the quote version. No changes were saved."
-    );
-  }
-
-  return { ok: true };
 }
 
 export async function respondToCustomerQuote(
@@ -192,7 +122,7 @@ export async function respondToCustomerQuote(
     return loaded;
   }
 
-  return applyQuoteResponse(supabase, loaded, action);
+  return applyQuoteStatusResponse(supabase, loaded, action);
 }
 
 export function canCustomerRespondToQuote({
@@ -206,9 +136,10 @@ export function canCustomerRespondToQuote({
   versionNumber: number;
   currentVersion: number;
 }) {
-  return (
-    quoteStatus === "sent" &&
-    versionStatus === "sent" &&
-    versionNumber === currentVersion
-  );
+  return isQuoteAwaitingDecision({
+    quoteStatus,
+    versionStatus,
+    versionNumber,
+    currentVersion,
+  });
 }

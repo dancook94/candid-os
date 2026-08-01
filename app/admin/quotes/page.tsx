@@ -11,6 +11,8 @@ import { formatAdminQuoteStatusLabel } from "@/lib/admin-quote-status";
 import { buildLoginUrl } from "@/lib/auth-redirect";
 import { createClient } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+
 type QuoteRow = {
   id: string;
   quote_number: number;

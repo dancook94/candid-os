@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { AdminQuoteManagementActions } from "@/components/admin-quote-management-actions";
 import { CreateQuoteVersionButton } from "@/components/create-quote-version-button";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
@@ -17,6 +18,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 import { buildLoginUrl } from "@/lib/auth-redirect";
 import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
+import { isQuoteAwaitingDecision } from "@/lib/quote-status-response";
+
+export const dynamic = "force-dynamic";
 
 type QuoteDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -164,6 +168,17 @@ export default async function QuoteDetailPage({
   };
 
   const canEdit = quoteVersion.version_status === "draft";
+  const companyName =
+    (companies ?? []).find((company) => company.id === quote.company_id)
+      ?.company_name ?? "Unknown company";
+  const canRespondOnBehalf =
+    selectedVersionNumber === quote.current_version &&
+    isQuoteAwaitingDecision({
+      quoteStatus: quote.status,
+      versionStatus: quoteVersion.version_status,
+      versionNumber: selectedVersionNumber,
+      currentVersion: quote.current_version,
+    });
   const versionOptions: QuoteVersionOption[] = allVersions.map((version) => ({
     version_number: version.version_number,
     version_status: version.version_status,
@@ -229,6 +244,16 @@ export default async function QuoteDetailPage({
             />
           </CardContent>
         </Card>
+
+        <AdminQuoteManagementActions
+          quoteId={quote.id}
+          quoteNumber={quote.quote_number}
+          quoteStatus={quote.status}
+          versionNumber={selectedVersionNumber}
+          companyName={companyName}
+          total={Number(quoteVersion.total ?? 0)}
+          canRespondOnBehalf={canRespondOnBehalf}
+        />
 
         <QuoteBuilderForm
           key={quoteVersion.id}
