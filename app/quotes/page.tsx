@@ -200,39 +200,69 @@ export default async function QuotesPage() {
                     {quoteRequests.map((request) => (
                       <tr
                         key={request.id}
-                        className="border-b border-neutral-200 last:border-0 hover:bg-neutral-50"
+                        className="border-b border-neutral-200 last:border-0 hover:bg-neutral-50 cursor-pointer"
                       >
-                        <td className="p-4 font-medium text-neutral-950">
-                          {request.project_name}
+                        <td className="p-0">
+                          <Link
+                            href={`/quotes/${request.id}`}
+                            className="block p-4 font-medium text-neutral-950"
+                          >
+                            {request.project_name}
+                          </Link>
                         </td>
 
-                        <td className="p-4 text-neutral-600">
-                          {formatDate(request.created_at)}
+                        <td className="p-0">
+                          <Link
+                            href={`/quotes/${request.id}`}
+                            className="block p-4 text-neutral-600"
+                          >
+                            {formatDate(request.created_at)}
+                          </Link>
                         </td>
 
-                        <td className="p-4 text-neutral-600">
-                          {formatRequestedDeadline(
-                            request.requested_date,
-                            request.requested_time
-                          )}
+                        <td className="p-0">
+                          <Link
+                            href={`/quotes/${request.id}`}
+                            className="block p-4 text-neutral-600"
+                          >
+                            {formatRequestedDeadline(
+                              request.requested_date,
+                              request.requested_time
+                            )}
+                          </Link>
                         </td>
 
-                        <td className="p-4 text-neutral-600">
-                          {formatFulfilmentMethod(request.fulfilment_method)}
+                        <td className="p-0">
+                          <Link
+                            href={`/quotes/${request.id}`}
+                            className="block p-4 text-neutral-600"
+                          >
+                            {formatFulfilmentMethod(request.fulfilment_method)}
+                          </Link>
                         </td>
 
-                        <td className="p-4">
-                          <StatusBadge
-                            status={mapToBadgeStatus(request.deadline_status)}
-                            label={formatStatusLabel(request.deadline_status)}
-                          />
+                        <td className="p-0">
+                          <Link
+                            href={`/quotes/${request.id}`}
+                            className="block p-4"
+                          >
+                            <StatusBadge
+                              status={mapToBadgeStatus(request.deadline_status)}
+                              label={formatStatusLabel(request.deadline_status)}
+                            />
+                          </Link>
                         </td>
 
-                        <td className="p-4">
-                          <StatusBadge
-                            status={mapToBadgeStatus(request.request_status)}
-                            label={formatStatusLabel(request.request_status)}
-                          />
+                        <td className="p-0">
+                          <Link
+                            href={`/quotes/${request.id}`}
+                            className="block p-4"
+                          >
+                            <StatusBadge
+                              status={mapToBadgeStatus(request.request_status)}
+                              label={formatStatusLabel(request.request_status)}
+                            />
+                          </Link>
                         </td>
                       </tr>
                     ))}
