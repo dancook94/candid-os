@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Building2,
+  ClipboardList,
   FileText,
   Gauge,
   LogOut,
@@ -54,6 +55,11 @@ const adminLinks = [
     href: "/admin/companies",
     label: "Companies",
     icon: Building2,
+  },
+  {
+    href: "/admin/quote-requests",
+    label: "Quote requests",
+    icon: ClipboardList,
   },
   {
     href: "/admin/quotes",

@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
+import { CreateCompanyDialog } from "@/components/create-company-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 
@@ -47,7 +47,7 @@ export default async function CompaniesPage() {
         <PageHeader
           title="Companies"
           description="Manage customer companies."
-          actions={<Button>+ New Company</Button>}
+          actions={<CreateCompanyDialog />}
         />
 
         {!companies || companies.length === 0 ? (

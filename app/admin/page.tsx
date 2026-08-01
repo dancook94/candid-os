@@ -74,7 +74,6 @@ export default async function AdminPage() {
           <CardContent className="p-0">
             {!pendingUsers || pendingUsers.length === 0 ? (
               <EmptyState
-                className="border-0 shadow-none"
                 title="No pending approvals"
                 description="There are no customers awaiting approval."
               />
