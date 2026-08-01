@@ -8,6 +8,11 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import {
+  getCustomerQuoteActionLabel,
+  isCustomerQuoteViewable,
+  mapCustomerQuoteStatusToBadge,
+} from "@/lib/customer-quote-request";
 import { resolveCustomerQuoteStatuses } from "@/lib/quote-customer-status";
 
 type QuoteRequest = {
@@ -100,42 +105,6 @@ function mapRequestStatusToBadge(value: string): BadgeStatus {
   }
 
   return "draft";
-}
-
-const customerQuoteStatusLabels: Record<string, string> = {
-  draft: "Preparing quote",
-  sent: "Quote sent",
-  accepted: "Accepted",
-  declined: "Declined",
-  expired: "Expired",
-  superseded: "Updated quote available",
-};
-
-const customerQuoteStatusBadgeMap: Record<string, BadgeStatus> = {
-  draft: "pending",
-  sent: "sent",
-  accepted: "accepted",
-  declined: "declined",
-  expired: "disabled",
-  superseded: "pending",
-};
-
-function getCustomerQuoteStatusLabel(status: string | undefined) {
-  if (!status) {
-    return "No quote yet";
-  }
-
-  return customerQuoteStatusLabels[status.toLowerCase()] ?? "Preparing quote";
-}
-
-function mapCustomerQuoteStatusToBadge(status: string): BadgeStatus {
-  return customerQuoteStatusBadgeMap[status.toLowerCase()] ?? "pending";
-}
-
-function isCustomerQuoteStatusClickable(status: string) {
-  return ["sent", "accepted", "declined", "expired", "superseded"].includes(
-    status.toLowerCase()
-  );
 }
 
 export default async function QuotesPage() {
@@ -270,12 +239,10 @@ export default async function QuotesPage() {
                         ? (customerQuoteStatuses.get(linkedQuote.id) ??
                           linkedQuote.status)
                         : undefined;
-                      const quoteStatusLabel = getCustomerQuoteStatusLabel(
-                        customerQuoteStatus
-                      );
-                      const quoteStatusIsClickable = customerQuoteStatus
-                        ? isCustomerQuoteStatusClickable(customerQuoteStatus)
-                        : false;
+                      const quoteActionLabel =
+                        getCustomerQuoteActionLabel(customerQuoteStatus);
+                      const quoteStatusIsClickable =
+                        isCustomerQuoteViewable(customerQuoteStatus);
 
                       return (
                       <tr
@@ -355,12 +322,12 @@ export default async function QuotesPage() {
                                 status={mapCustomerQuoteStatusToBadge(
                                   customerQuoteStatus!
                                 )}
-                                label={quoteStatusLabel}
+                                label={quoteActionLabel}
                               />
                             </Link>
                           ) : (
                             <span className="text-neutral-600">
-                              {quoteStatusLabel}
+                              {quoteActionLabel}
                             </span>
                           )}
                         </td>

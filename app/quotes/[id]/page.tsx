@@ -19,6 +19,13 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import {
+  getCustomerQuoteActionLabel,
+  isCustomerQuoteViewable,
+  isQuoteRequestLockedByFormalQuote,
+  mapCustomerQuoteStatusToBadge,
+  QUOTE_REQUEST_LOCKED_NOTICE,
+} from "@/lib/customer-quote-request";
 import { resolveCustomerQuoteStatus } from "@/lib/quote-customer-status";
 import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
 import type { QuoteRequestAttachmentRecord } from "@/lib/quote-request-attachments";
@@ -110,42 +117,6 @@ function mapRequestStatusToBadge(value: string): BadgeStatus {
   }
 
   return "draft";
-}
-
-const customerQuoteStatusLabels: Record<string, string> = {
-  draft: "Preparing quote",
-  sent: "Quote sent",
-  accepted: "Accepted",
-  declined: "Declined",
-  expired: "Expired",
-  superseded: "Updated quote available",
-};
-
-const customerQuoteStatusBadgeMap: Record<string, BadgeStatus> = {
-  draft: "pending",
-  sent: "sent",
-  accepted: "accepted",
-  declined: "declined",
-  expired: "disabled",
-  superseded: "pending",
-};
-
-function getCustomerQuoteStatusLabel(status: string | undefined) {
-  if (!status) {
-    return "No quote yet";
-  }
-
-  return customerQuoteStatusLabels[status.toLowerCase()] ?? "Preparing quote";
-}
-
-function mapCustomerQuoteStatusToBadge(status: string): BadgeStatus {
-  return customerQuoteStatusBadgeMap[status.toLowerCase()] ?? "pending";
-}
-
-function isCustomerQuoteStatusClickable(status: string) {
-  return ["sent", "accepted", "declined", "expired", "superseded"].includes(
-    status.toLowerCase()
-  );
 }
 
 function formatDeliveryAddress(quoteRequest: QuoteRequestDetail) {
@@ -340,14 +311,16 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
   const customerQuoteStatus = linkedQuote
     ? await resolveCustomerQuoteStatus(supabase, linkedQuote)
     : undefined;
-  const quoteStatusLabel = getCustomerQuoteStatusLabel(customerQuoteStatus);
-  const quoteStatusIsClickable = customerQuoteStatus
-    ? isCustomerQuoteStatusClickable(customerQuoteStatus)
-    : false;
+  const quoteActionLabel = getCustomerQuoteActionLabel(customerQuoteStatus);
+  const quoteStatusIsClickable = isCustomerQuoteViewable(customerQuoteStatus);
+  const isLockedByFormalQuote = isQuoteRequestLockedByFormalQuote(
+    customerQuoteStatus
+  );
 
   const canEdit =
-    quoteRequest.request_status === "submitted" ||
-    quoteRequest.request_status === "reviewing";
+    !isLockedByFormalQuote &&
+    (quoteRequest.request_status === "submitted" ||
+      quoteRequest.request_status === "reviewing");
 
   const isDelivery = quoteRequest.fulfilment_method === "delivery";
 
@@ -363,6 +336,12 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
             </Link>
           }
         />
+
+        {isLockedByFormalQuote && (
+          <div className="mb-4 rounded-lg border border-neutral-200 bg-neutral-50 p-4">
+            <p className="text-sm text-neutral-700">{QUOTE_REQUEST_LOCKED_NOTICE}</p>
+          </div>
+        )}
 
         <EditQuoteRequestForm
           quoteRequestId={quoteRequest.id}
@@ -399,11 +378,11 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
                       <Link href={`/quotes/${linkedQuote.id}`} className="inline-flex">
                         <StatusBadge
                           status={mapCustomerQuoteStatusToBadge(customerQuoteStatus!)}
-                          label={quoteStatusLabel}
+                          label={quoteActionLabel}
                         />
                       </Link>
                     ) : (
-                      <span className="text-neutral-950">{quoteStatusLabel}</span>
+                      <span className="text-neutral-950">{quoteActionLabel}</span>
                     )}
                   </div>
                 </div>
@@ -503,11 +482,11 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
                       <Link href={`/quotes/${linkedQuote.id}`} className="inline-flex">
                         <StatusBadge
                           status={mapCustomerQuoteStatusToBadge(customerQuoteStatus!)}
-                          label={quoteStatusLabel}
+                          label={quoteActionLabel}
                         />
                       </Link>
                     ) : (
-                      <span className="text-neutral-950">{quoteStatusLabel}</span>
+                      <span className="text-neutral-950">{quoteActionLabel}</span>
                     )}
                   </dd>
                 </div>

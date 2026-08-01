@@ -811,6 +811,17 @@ export function QuoteBuilderForm({
         setSuccess("Draft saved successfully.");
       }
 
+      if (targetStatus === "sent" && quoteRequestId) {
+        const { error: requestUpdateError } = await supabase
+          .from("quote_requests")
+          .update({ request_status: "quoted" })
+          .eq("id", quoteRequestId);
+
+        if (requestUpdateError) {
+          throw requestUpdateError;
+        }
+      }
+
       router.refresh();
     } catch (saveError) {
       setError(formatSaveError(saveError));
