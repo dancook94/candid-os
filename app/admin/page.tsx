@@ -2,6 +2,14 @@ import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { ApproveCustomer } from "@/components/approve-customer";
+import { EmptyState } from "@/components/empty-state";
+import { PageHeader } from "@/components/page-header";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function AdminPage() {
@@ -50,58 +58,54 @@ export default async function AdminPage() {
       companyName="Candid Creative"
     >
       <div className="mx-auto max-w-6xl">
-        <header className="mb-8">
-          <p className="text-sm font-medium text-neutral-500">
-            Administration
-          </p>
+        <PageHeader
+          eyebrow="Administration"
+          title="Admin dashboard"
+          description="Manage customer registrations and portal access."
+        />
 
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-neutral-950">
-            Admin dashboard
-          </h1>
-
-          <p className="mt-2 text-neutral-600">
-            Manage customer registrations and portal access.
-          </p>
-        </header>
-
-        <section className="rounded-2xl border border-neutral-200 bg-white shadow-sm">
-          <div className="border-b border-neutral-200 px-6 py-5">
-            <h2 className="text-lg font-semibold text-neutral-950">
+        <Card className="rounded-2xl border-neutral-200 shadow-sm ring-0">
+          <CardHeader className="border-b border-neutral-200">
+            <CardTitle className="text-lg font-semibold text-neutral-950">
               Pending customer approvals
-            </h2>
-          </div>
+            </CardTitle>
+          </CardHeader>
 
-          {!pendingUsers || pendingUsers.length === 0 ? (
-            <div className="px-6 py-10 text-sm text-neutral-500">
-              There are no customers awaiting approval.
-            </div>
-          ) : (
-            <div className="divide-y divide-neutral-200">
-              {pendingUsers.map((pendingUser) => (
-                <div
-                  key={pendingUser.id}
-                  className="flex flex-col gap-4 px-6 py-5 lg:flex-row lg:items-center lg:justify-between"
-                >
-                  <div>
-                    <p className="font-medium text-neutral-950">
-                      {pendingUser.full_name || "Unnamed customer"}
-                    </p>
+          <CardContent className="p-0">
+            {!pendingUsers || pendingUsers.length === 0 ? (
+              <EmptyState
+                className="border-0 shadow-none"
+                title="No pending approvals"
+                description="There are no customers awaiting approval."
+              />
+            ) : (
+              <div className="divide-y divide-neutral-200">
+                {pendingUsers.map((pendingUser) => (
+                  <div
+                    key={pendingUser.id}
+                    className="flex flex-col gap-4 px-6 py-5 lg:flex-row lg:items-center lg:justify-between"
+                  >
+                    <div>
+                      <p className="font-medium text-neutral-950">
+                        {pendingUser.full_name || "Unnamed customer"}
+                      </p>
 
-                    <p className="mt-1 text-sm text-neutral-500">
-                      {pendingUser.requested_company_name ||
-                        "No company supplied"}
-                    </p>
+                      <p className="mt-1 text-sm text-neutral-500">
+                        {pendingUser.requested_company_name ||
+                          "No company supplied"}
+                      </p>
+                    </div>
+
+                    <ApproveCustomer
+                      profileId={pendingUser.id}
+                      companies={companies ?? []}
+                    />
                   </div>
-
-                  <ApproveCustomer
-                    profileId={pendingUser.id}
-                    companies={companies ?? []}
-                  />
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </AppShell>
   );

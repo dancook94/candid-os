@@ -1,5 +1,16 @@
 import { redirect } from "next/navigation";
 
+import { AppShell } from "@/components/app-shell";
+import { PageHeader } from "@/components/page-header";
+import { StatCard } from "@/components/stat-card";
+import { StatusBadge } from "@/components/status-badge";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 
 export default async function DashboardPage() {
@@ -20,66 +31,48 @@ export default async function DashboardPage() {
     user.user_metadata?.company_name || "Company awaiting approval";
 
   return (
-    <main className="min-h-screen bg-neutral-50 px-6 py-12">
+    <AppShell userRole="customer" userName={fullName} companyName={companyName}>
       <div className="mx-auto max-w-5xl">
-        <header className="mb-10 flex items-center justify-between">
-          <div>
-            <p className="text-sm font-medium text-neutral-500">
-              Candid OS
-            </p>
-
-            <h1 className="mt-1 text-3xl font-semibold tracking-tight text-neutral-950">
-              Welcome, {fullName}
-            </h1>
-
-            <p className="mt-2 text-neutral-600">
-              {companyName}
-            </p>
-          </div>
-        </header>
+        <PageHeader
+          eyebrow="Candid OS"
+          title={`Welcome, ${fullName}`}
+          description={companyName}
+        />
 
         <div className="grid gap-5 md:grid-cols-3">
-          <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-            <p className="text-sm text-neutral-500">Quotes</p>
-            <p className="mt-3 text-3xl font-semibold">0</p>
-            <p className="mt-2 text-sm text-neutral-500">
-              Current and historic quotes
-            </p>
-          </div>
+          <StatCard
+            label="Quotes"
+            value="0"
+            description="Current and historic quotes"
+          />
 
-          <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-            <p className="text-sm text-neutral-500">
-              Quote requests
-            </p>
-            <p className="mt-3 text-3xl font-semibold">0</p>
-            <p className="mt-2 text-sm text-neutral-500">
-              Requests awaiting review
-            </p>
-          </div>
+          <StatCard
+            label="Quote requests"
+            value="0"
+            description="Requests awaiting review"
+          />
 
-          <div className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm">
-            <p className="text-sm text-neutral-500">
-              Account status
-            </p>
-            <p className="mt-3 text-lg font-semibold text-amber-700">
-              Pending approval
-            </p>
-            <p className="mt-2 text-sm text-neutral-500">
-              Candid will confirm your company access.
-            </p>
-          </div>
+          <StatCard
+            label="Account status"
+            value={<StatusBadge status="pending" />}
+            description="Candid will confirm your company access."
+          />
         </div>
 
-        <div className="mt-8 rounded-2xl border border-neutral-200 bg-white p-8 shadow-sm">
-          <h2 className="text-xl font-semibold">
-            Request a quote
-          </h2>
+        <Card className="mt-8 rounded-2xl border-neutral-200 shadow-sm ring-0">
+          <CardHeader>
+            <CardTitle className="text-xl font-semibold">
+              Request a quote
+            </CardTitle>
 
-          <p className="mt-2 text-neutral-600">
-            Quote requests and mandatory delivery details will be added next.
-          </p>
-        </div>
+            <CardDescription>
+              Quote requests and mandatory delivery details will be added next.
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent />
+        </Card>
       </div>
-    </main>
+    </AppShell>
   );
 }

@@ -1,7 +1,11 @@
 import { redirect } from "next/navigation";
 
-import { createClient } from "@/lib/supabase/server";
 import { AppShell } from "@/components/app-shell";
+import { EmptyState } from "@/components/empty-state";
+import { PageHeader } from "@/components/page-header";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { createClient } from "@/lib/supabase/server";
 
 export default async function CompaniesPage() {
   const supabase = await createClient();
@@ -39,76 +43,63 @@ export default async function CompaniesPage() {
       userName={profile.full_name}
       companyName="Candid Creative"
     >
-      <div className="max-w-7xl">
+      <div className="mx-auto max-w-7xl">
+        <PageHeader
+          title="Companies"
+          description="Manage customer companies."
+          actions={<Button>+ New Company</Button>}
+        />
 
-        <div className="flex items-center justify-between mb-8">
+        {!companies || companies.length === 0 ? (
+          <EmptyState
+            title="No companies yet"
+            description="Create a company to assign customers during approval."
+          />
+        ) : (
+          <Card className="overflow-hidden rounded-xl border-neutral-200 shadow-sm ring-0">
+            <CardContent className="p-0">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-neutral-200 bg-neutral-50/50">
+                      <th className="p-4 text-left font-medium text-neutral-500">
+                        Company
+                      </th>
+                      <th className="p-4 text-left font-medium text-neutral-500">
+                        Trading Name
+                      </th>
+                      <th className="p-4 text-left font-medium text-neutral-500">
+                        Payment Terms
+                      </th>
+                    </tr>
+                  </thead>
 
-          <div>
-            <h1 className="text-3xl font-bold">
-              Companies
-            </h1>
+                  <tbody>
+                    {companies.map((company) => (
+                      <tr
+                        key={company.id}
+                        className="border-b border-neutral-200 last:border-0 hover:bg-neutral-50"
+                      >
+                        <td className="p-4 font-medium text-neutral-950">
+                          {company.company_name}
+                        </td>
 
-            <p className="text-neutral-500 mt-2">
-              Manage customer companies.
-            </p>
+                        <td className="p-4 text-neutral-600">
+                          {company.trading_name}
+                        </td>
 
-          </div>
-
-          <button className="rounded-lg bg-black px-5 py-3 text-white">
-            + New Company
-          </button>
-
-        </div>
-
-        <div className="rounded-xl border bg-white">
-
-          <table className="w-full">
-
-            <thead>
-
-              <tr className="border-b">
-
-                <th className="p-4 text-left">Company</th>
-                <th className="p-4 text-left">Trading Name</th>
-                <th className="p-4 text-left">Payment Terms</th>
-
-              </tr>
-
-            </thead>
-
-            <tbody>
-
-              {companies?.map((company) => (
-
-                <tr
-                  key={company.id}
-                  className="border-b hover:bg-neutral-50"
-                >
-
-                  <td className="p-4">
-                    {company.company_name}
-                  </td>
-
-                  <td className="p-4">
-                    {company.trading_name}
-                  </td>
-
-                  <td className="p-4">
-                    {company.payment_terms_days} days
-                  </td>
-
-                </tr>
-
-              ))}
-
-            </tbody>
-
-          </table>
-
-        </div>
-
+                        <td className="p-4 text-neutral-600">
+                          {company.payment_terms_days} days
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
-
     </AppShell>
   );
 }
