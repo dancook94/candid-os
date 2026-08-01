@@ -18,16 +18,17 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { fetchCustomerFormalQuote } from "@/lib/customer-formal-quote-data";
 import { createClient } from "@/lib/supabase/server";
 import {
   getCustomerQuoteActionLabel,
+  isCustomerQuotePdfDownloadable,
   isCustomerQuoteViewable,
   isQuoteRequestLockedByFormalQuote,
   mapCustomerQuoteStatusToBadge,
   QUOTE_REQUEST_LOCKED_NOTICE,
 } from "@/lib/customer-quote-request";
 import { resolveCustomerQuoteStatus } from "@/lib/quote-customer-status";
-import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
 import type { QuoteRequestAttachmentRecord } from "@/lib/quote-request-attachments";
 
 type QuoteRequestDetail = {
@@ -199,98 +200,47 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
   const companyName =
     user.user_metadata?.company_name || "Company awaiting approval";
 
-  const { data: formalQuote } = await supabase
+  const { data: formalQuoteExists } = await supabase
     .from("quotes")
-    .select(
-      "id, quote_number, project_name, status, current_version, quote_request_id, company_id"
-    )
+    .select("id")
     .eq("id", id)
     .maybeSingle();
 
-  if (formalQuote) {
-    const [{ data: quoteVersions }, { data: customerCompany }] = await Promise.all([
-      supabase
-        .from("quote_versions")
-        .select(
-          "id, version_number, version_status, created_at, expiry_date, payment_terms_days, introduction, customer_notes, subtotal, vat_amount, total"
-        )
-        .eq("quote_id", formalQuote.id)
-        .order("version_number", { ascending: false }),
-      formalQuote.company_id
-        ? supabase
-            .from("companies")
-            .select("company_name")
-            .eq("id", formalQuote.company_id)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
-    ]);
+  if (formalQuoteExists) {
+    const formalQuote = await fetchCustomerFormalQuote(supabase, id, {
+      customerContactName: fullName,
+      customerEmail: user.email ?? null,
+      fallbackCompanyName: companyName,
+    });
 
-    const displayVersion =
-      quoteVersions?.find(
-        (version) =>
-          version.version_number === formalQuote.current_version &&
-          version.version_status !== "draft"
-      ) ??
-      quoteVersions?.find((version) => version.version_status !== "draft");
-
-    if (!displayVersion) {
+    if (!formalQuote) {
       notFound();
     }
-
-    const { data: formalQuoteItems } = await supabase
-      .from("quote_items")
-      .select(
-        "id, title, description, quantity, unit_price, is_optional, line_total, sort_order, image_storage_path, image_file_name"
-      )
-      .eq("quote_version_id", displayVersion.id)
-      .order("sort_order", { ascending: true });
-
-    const lineItems = await Promise.all(
-      (formalQuoteItems ?? []).map(async (item) => ({
-        id: item.id,
-        title: item.title,
-        description: item.description,
-        quantity: Number(item.quantity),
-        unitPrice: Number(item.unit_price),
-        lineTotal: Number(item.line_total),
-        isOptional: Boolean(item.is_optional),
-        imageUrl: item.image_storage_path
-          ? await createQuoteItemImageSignedUrl(
-              supabase,
-              item.image_storage_path
-            )
-          : null,
-        imageFileName: item.image_file_name,
-      }))
-    );
-
-    const customerQuoteStatus = await resolveCustomerQuoteStatus(
-      supabase,
-      formalQuote
-    );
 
     return (
       <AppShell userRole="customer" userName={fullName} companyName={companyName}>
         <CustomerFormalQuoteView
-          quoteNumber={formalQuote.quote_number}
-          projectName={formalQuote.project_name}
-          quoteStatus={customerQuoteStatus}
-          versionNumber={displayVersion.version_number}
-          dateSent={displayVersion.created_at}
-          expiryDate={displayVersion.expiry_date}
-          paymentTermsDays={displayVersion.payment_terms_days}
-          introduction={displayVersion.introduction}
-          customerNotes={displayVersion.customer_notes}
-          subtotal={Number(displayVersion.subtotal ?? 0)}
-          vatAmount={Number(displayVersion.vat_amount ?? 0)}
-          total={Number(displayVersion.total ?? 0)}
-          lineItems={lineItems}
-          linkedRequestId={formalQuote.quote_request_id}
-          customerCompanyName={
-            customerCompany?.company_name ?? companyName ?? null
-          }
-          customerContactName={fullName}
-          customerEmail={user.email ?? null}
+          quoteId={formalQuote.quoteId}
+          showPdfDownload={isCustomerQuotePdfDownloadable(
+            formalQuote.versionStatus
+          )}
+          quoteNumber={formalQuote.quoteNumber}
+          projectName={formalQuote.projectName}
+          quoteStatus={formalQuote.quoteStatus}
+          versionNumber={formalQuote.versionNumber}
+          dateSent={formalQuote.dateSent}
+          expiryDate={formalQuote.expiryDate}
+          paymentTermsDays={formalQuote.paymentTermsDays}
+          introduction={formalQuote.introduction}
+          customerNotes={formalQuote.customerNotes}
+          subtotal={formalQuote.subtotal}
+          vatAmount={formalQuote.vatAmount}
+          total={formalQuote.total}
+          lineItems={formalQuote.lineItems}
+          linkedRequestId={formalQuote.linkedRequestId}
+          customerCompanyName={formalQuote.customerCompanyName}
+          customerContactName={formalQuote.customerContactName}
+          customerEmail={formalQuote.customerEmail}
         />
       </AppShell>
     );

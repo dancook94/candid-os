@@ -8,6 +8,7 @@ import {
   Users,
 } from "lucide-react";
 
+import { CustomerQuoteDownloadPdfButton } from "@/components/customer-quote-download-pdf-button";
 import { CustomerQuoteTermsSection } from "@/components/customer-quote-terms-section";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,8 @@ export type CustomerFormalQuoteLineItem = {
 };
 
 export type CustomerFormalQuoteViewProps = {
+  quoteId: string;
+  showPdfDownload: boolean;
   quoteNumber: number;
   projectName: string;
   quoteStatus: string;
@@ -106,6 +109,8 @@ function MetaBadge({ label, value }: { label: string; value: string }) {
 }
 
 export function CustomerFormalQuoteView({
+  quoteId,
+  showPdfDownload,
   quoteNumber,
   projectName,
   quoteStatus,
@@ -131,7 +136,7 @@ export function CustomerFormalQuoteView({
   return (
     <div className="min-h-screen bg-[#fafafa] pb-16 pt-6 sm:pb-20 sm:pt-8">
       <div className="mx-auto w-full max-w-5xl px-4 sm:px-6 lg:max-w-6xl lg:px-8">
-        <div className="mb-8">
+        <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
           <Link href={backHref}>
             <Button
               variant="ghost"
@@ -141,6 +146,10 @@ export function CustomerFormalQuoteView({
               Back to quotes
             </Button>
           </Link>
+
+          {showPdfDownload ? (
+            <CustomerQuoteDownloadPdfButton quoteId={quoteId} />
+          ) : null}
         </div>
 
         <header className="mb-12 space-y-8 sm:mb-16">

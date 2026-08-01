@@ -59,6 +59,26 @@ export function formatQuoteProjectName(projectName: string) {
   return projectName.replace(/^Hi\s+/i, "");
 }
 
+export function isCustomerQuotePdfDownloadable(versionStatus: string) {
+  return ["sent", "accepted", "declined", "expired"].includes(
+    versionStatus.toLowerCase()
+  );
+}
+
+export function buildCustomerQuotePdfFilename(
+  quoteNumber: number,
+  versionNumber: number,
+  projectName: string
+) {
+  const slug = projectName
+    .replace(/^Hi\s+/i, "")
+    .trim()
+    .replace(/[^a-zA-Z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return `Q-${quoteNumber}-V${versionNumber}-${slug || "quotation"}.pdf`;
+}
+
 export function mapCustomerQuoteStatusToBadge(status: string) {
   const badgeMap: Record<
     string,
