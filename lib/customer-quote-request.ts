@@ -43,6 +43,22 @@ export function getCustomerQuoteActionLabel(status: string | undefined) {
   return "Preparing quote";
 }
 
+export function getFormalQuoteStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    sent: "Quote received",
+    accepted: "Accepted",
+    declined: "Declined",
+    expired: "Expired",
+    superseded: "Updated version available",
+  };
+
+  return labels[status.toLowerCase()] ?? "Quote received";
+}
+
+export function formatQuoteProjectName(projectName: string) {
+  return projectName.replace(/^Hi\s+/i, "");
+}
+
 export function mapCustomerQuoteStatusToBadge(status: string) {
   const badgeMap: Record<
     string,

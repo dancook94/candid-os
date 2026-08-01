@@ -202,19 +202,28 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
   const { data: formalQuote } = await supabase
     .from("quotes")
     .select(
-      "id, quote_number, project_name, status, current_version, quote_request_id"
+      "id, quote_number, project_name, status, current_version, quote_request_id, company_id"
     )
     .eq("id", id)
     .maybeSingle();
 
   if (formalQuote) {
-    const { data: quoteVersions } = await supabase
-      .from("quote_versions")
-      .select(
-        "id, version_number, version_status, expiry_date, payment_terms_days, introduction, customer_notes, subtotal, vat_amount, total"
-      )
-      .eq("quote_id", formalQuote.id)
-      .order("version_number", { ascending: false });
+    const [{ data: quoteVersions }, { data: customerCompany }] = await Promise.all([
+      supabase
+        .from("quote_versions")
+        .select(
+          "id, version_number, version_status, created_at, expiry_date, payment_terms_days, introduction, customer_notes, subtotal, vat_amount, total"
+        )
+        .eq("quote_id", formalQuote.id)
+        .order("version_number", { ascending: false }),
+      formalQuote.company_id
+        ? supabase
+            .from("companies")
+            .select("company_name")
+            .eq("id", formalQuote.company_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
 
     const displayVersion =
       quoteVersions?.find(
@@ -267,6 +276,7 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
           projectName={formalQuote.project_name}
           quoteStatus={customerQuoteStatus}
           versionNumber={displayVersion.version_number}
+          dateSent={displayVersion.created_at}
           expiryDate={displayVersion.expiry_date}
           paymentTermsDays={displayVersion.payment_terms_days}
           introduction={displayVersion.introduction}
@@ -276,6 +286,11 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
           total={Number(displayVersion.total ?? 0)}
           lineItems={lineItems}
           linkedRequestId={formalQuote.quote_request_id}
+          customerCompanyName={
+            customerCompany?.company_name ?? companyName ?? null
+          }
+          customerContactName={fullName}
+          customerEmail={user.email ?? null}
         />
       </AppShell>
     );
