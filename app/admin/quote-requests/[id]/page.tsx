@@ -210,9 +210,14 @@ export default async function AdminQuoteRequestDetailPage({
           title={quoteRequest.project_name}
           description="Admin quote request review"
           actions={
-            <Link href="/admin/quote-requests">
-              <Button variant="outline">Back to inbox</Button>
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link href={`/admin/quotes/new?quoteRequestId=${quoteRequest.id}`}>
+                <Button>Create quote</Button>
+              </Link>
+              <Link href="/admin/quote-requests">
+                <Button variant="outline">Back to inbox</Button>
+              </Link>
+            </div>
           }
         />
 
