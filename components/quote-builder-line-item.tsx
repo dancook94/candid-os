@@ -40,6 +40,7 @@ type QuoteBuilderLineItemCardProps = {
   onMoveUp: (clientKey: string) => void;
   onMoveDown: (clientKey: string) => void;
   onDelete: (clientKey: string) => void;
+  canDelete: boolean;
 };
 
 function IconActionButton({
@@ -59,7 +60,11 @@ function IconActionButton({
       title={label}
       aria-label={label}
       disabled={disabled}
-      onClick={onClick}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClick();
+      }}
       className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-neutral-200 bg-white text-neutral-600 transition-colors hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40"
     >
       {children}
@@ -82,6 +87,7 @@ export function QuoteBuilderLineItemCard({
   onMoveUp,
   onMoveDown,
   onDelete,
+  canDelete,
 }: QuoteBuilderLineItemCardProps) {
   const titleRef = useRef<HTMLInputElement>(null);
   const isFirst = index === 0;
@@ -151,7 +157,7 @@ export function QuoteBuilderLineItemCard({
             </IconActionButton>
             <IconActionButton
               label="Delete item"
-              disabled={fieldDisabled}
+              disabled={fieldDisabled || !canDelete}
               onClick={() => onDelete(item.clientKey)}
             >
               <Trash2 className="h-4 w-4" />

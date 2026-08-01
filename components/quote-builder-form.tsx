@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useCallback, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { QuoteBuilderLineItemCard } from "@/components/quote-builder-line-item";
@@ -234,11 +234,13 @@ export function QuoteBuilderForm({
   }
 
   function handleRemoveLineItem(clientKey: string) {
-    setLineItems((current) =>
-      current.length === 1
-        ? [createEmptyLineItem("new-0")]
-        : current.filter((item) => item.clientKey !== clientKey)
-    );
+    setLineItems((current) => {
+      if (current.length <= 1) {
+        return current;
+      }
+
+      return current.filter((item) => item.clientKey !== clientKey);
+    });
   }
 
   function handleDuplicateLineItem(clientKey: string) {
@@ -280,11 +282,16 @@ export function QuoteBuilderForm({
         return current;
       }
 
-      const next = [...current];
-      [next[index], next[targetIndex]] = [next[targetIndex], next[index]];
+      const next = current.map((item) => ({ ...item }));
+      const [movedItem] = next.splice(index, 1);
+      next.splice(targetIndex, 0, movedItem);
       return next;
     });
   }
+
+  const clearFocusTitle = useCallback(() => {
+    setFocusTitleClientKey(null);
+  }, []);
 
   function updateLineItem(
     clientKey: string,
@@ -586,9 +593,7 @@ export function QuoteBuilderForm({
       <Card className="rounded-2xl border-neutral-200 shadow-sm ring-0">
         <CardHeader className="border-b border-neutral-200">
           <CardTitle className="text-lg font-semibold text-neutral-950">
-            {mode === "create"
-              ? "New quote"
-              : `Quote Q-${quoteNumber ?? "—"}`}
+            {mode === "create" ? "New quote" : "Quote details"}
           </CardTitle>
           <CardDescription>
             {mode === "create"
@@ -766,12 +771,13 @@ export function QuoteBuilderForm({
                 isBusy={isBusy}
                 isReadOnly={isReadOnly}
                 shouldFocusTitle={focusTitleClientKey === item.clientKey}
-                onFocusTitle={() => setFocusTitleClientKey(null)}
+                onFocusTitle={clearFocusTitle}
                 onUpdate={updateLineItem}
                 onDuplicate={handleDuplicateLineItem}
                 onMoveUp={(clientKey) => handleMoveLineItem(clientKey, -1)}
                 onMoveDown={(clientKey) => handleMoveLineItem(clientKey, 1)}
                 onDelete={handleRemoveLineItem}
+                canDelete={lineItems.length > 1}
               />
             );
           })}

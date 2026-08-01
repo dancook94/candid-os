@@ -146,8 +146,8 @@ export default async function QuoteDetailPage({
       <div className="mx-auto max-w-5xl">
         <PageHeader
           eyebrow="Administration"
-          title={`Quote Q-${quote.quote_number}`}
-          description={quote.project_name}
+          title={quote.project_name}
+          description={`Quote Q-${quote.quote_number}`}
           actions={
             <Link href="/admin/quotes">
               <Button variant="outline">Back to quotes</Button>
