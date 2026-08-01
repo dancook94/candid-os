@@ -1,5 +1,12 @@
 import Image from "next/image";
 import Link from "next/link";
+import {
+  ArrowLeft,
+  Building2,
+  CalendarDays,
+  FileText,
+  Users,
+} from "lucide-react";
 
 import { CustomerQuoteTermsSection } from "@/components/customer-quote-terms-section";
 import { StatusBadge } from "@/components/status-badge";
@@ -9,6 +16,8 @@ import {
   getFormalQuoteStatusLabel,
   mapCustomerQuoteStatusToBadge,
 } from "@/lib/customer-quote-request";
+
+const CANDID_YELLOW = "#fbd12c";
 
 export type CustomerFormalQuoteLineItem = {
   id: string;
@@ -57,24 +66,42 @@ function formatDate(dateString: string) {
   });
 }
 
-function InfoColumn({
+function SummaryCard({
+  icon: Icon,
   title,
   children,
-  className = "",
 }: {
+  icon: React.ComponentType<{ className?: string }>;
   title: string;
   children: React.ReactNode;
-  className?: string;
 }) {
   return (
-    <section className={`min-w-0 space-y-3 ${className}`}>
-      <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
-        {title}
-      </h2>
-      <div className="space-y-1 text-sm leading-relaxed text-neutral-700">
+    <article className="rounded-2xl border border-neutral-200/80 bg-white p-6 shadow-sm">
+      <div className="mb-4 flex items-center gap-3">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-neutral-50 ring-1 ring-neutral-200/80">
+          <Icon className="h-5 w-5 text-neutral-700" aria-hidden />
+        </div>
+        <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-neutral-500">
+          {title}
+        </h2>
+      </div>
+      <div className="space-y-1.5 text-sm leading-relaxed text-neutral-600">
         {children}
       </div>
-    </section>
+    </article>
+  );
+}
+
+function MetaBadge({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="inline-flex flex-col rounded-xl border border-neutral-200/80 bg-white px-4 py-2.5 shadow-sm">
+      <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-neutral-400">
+        {label}
+      </span>
+      <span className="mt-0.5 text-sm font-semibold text-neutral-950">
+        {value}
+      </span>
+    </div>
   );
 }
 
@@ -102,198 +129,227 @@ export function CustomerFormalQuoteView({
   const statusLabel = getFormalQuoteStatusLabel(quoteStatus);
 
   return (
-    <div className="mx-auto w-full max-w-[1150px] px-4 py-6 sm:px-6 lg:py-8">
-      <div className="mb-4 flex justify-end">
-        <Link href={backHref}>
-          <Button variant="outline">Back to quotes</Button>
-        </Link>
-      </div>
+    <div className="min-h-screen bg-[#fafafa] pb-16 pt-6 sm:pb-20 sm:pt-8">
+      <div className="mx-auto w-full max-w-5xl px-4 sm:px-6 lg:max-w-6xl lg:px-8">
+        <div className="mb-8">
+          <Link href={backHref}>
+            <Button
+              variant="ghost"
+              className="gap-2 px-0 text-neutral-600 hover:bg-transparent hover:text-neutral-950"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden />
+              Back to quotes
+            </Button>
+          </Link>
+        </div>
 
-      <article className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm">
-        <header className="border-b border-neutral-200 px-6 py-8 sm:px-8 sm:py-10">
-          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
-            <div className="space-y-4">
-              <div className="space-y-3">
-                <Image
-                  src="/LOGO_YELLOW.svg"
-                  alt="Candid Creative"
-                  width={180}
-                  height={88}
-                  priority
-                  className="h-auto w-[min(180px,70vw)]"
-                />
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-neutral-500">
-                  Quotation
-                </p>
+        <header className="mb-12 space-y-8 sm:mb-16">
+          <Image
+            src="/LOGO_YELLOW.svg"
+            alt="Candid Creative"
+            width={240}
+            height={117}
+            priority
+            className="h-auto w-[min(240px,75vw)]"
+          />
+
+          <div className="space-y-5">
+            <p className="text-4xl font-semibold tracking-tight text-neutral-950 sm:text-5xl">
+              Quotation
+            </p>
+
+            <h1 className="max-w-4xl text-4xl font-bold tracking-tight text-neutral-950 sm:text-5xl lg:text-6xl lg:leading-[1.05]">
+              {displayProjectName}
+            </h1>
+
+            {customerCompanyName ? (
+              <p className="text-lg text-neutral-500 sm:text-xl">
+                Prepared for{" "}
+                <span className="font-medium text-neutral-800">
+                  {customerCompanyName}
+                </span>
+              </p>
+            ) : null}
+
+            <div className="flex flex-wrap items-center gap-3 pt-1">
+              <MetaBadge label="Version" value={String(versionNumber)} />
+              <div className="inline-flex flex-col rounded-xl border border-neutral-200/80 bg-white px-4 py-2.5 shadow-sm">
+                <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-neutral-400">
+                  Status
+                </span>
+                <div className="mt-1">
+                  <StatusBadge
+                    status={mapCustomerQuoteStatusToBadge(quoteStatus)}
+                    label={statusLabel}
+                  />
+                </div>
               </div>
-            </div>
-
-            <div className="flex flex-col items-start gap-3 lg:items-end">
-              <StatusBadge
-                status={mapCustomerQuoteStatusToBadge(quoteStatus)}
-                label={statusLabel}
-              />
+              {expiryDate ? (
+                <MetaBadge label="Expiry" value={formatDate(expiryDate)} />
+              ) : null}
             </div>
           </div>
+
+          {introduction ? (
+            <p className="max-w-3xl text-base leading-relaxed text-neutral-600 sm:text-lg">
+              {introduction}
+            </p>
+          ) : null}
         </header>
 
-        <div className="border-b border-neutral-200 px-6 py-8 sm:px-8">
-          <div className="grid gap-8 md:grid-cols-3 md:gap-10">
-            <InfoColumn
-              title="From"
-              className="md:border-r md:border-neutral-200 md:pr-10"
-            >
-              <p className="font-medium text-neutral-950">Candid Creative Limited</p>
-              <p>Innovation House</p>
-              <p>Cray Road</p>
-              <p>Sidcup</p>
-              <p>DA14 5DP</p>
+        <section
+          aria-label="Quote summary"
+          className="mb-12 grid gap-4 sm:mb-16 sm:grid-cols-2 lg:grid-cols-3 lg:gap-5"
+        >
+          <SummaryCard icon={Building2} title="From">
+            <p className="font-medium text-neutral-950">Candid Creative Limited</p>
+            <p>Innovation House</p>
+            <p>Cray Road, Sidcup</p>
+            <p>DA14 5DP</p>
+            <p>
+              <a
+                href="https://www.candidcreative.uk"
+                className="font-medium text-neutral-950 underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-950"
+              >
+                www.candidcreative.uk
+              </a>
+            </p>
+            <p>020 3149 8995</p>
+            <p className="pt-1 text-neutral-500">Company no. 15150018</p>
+            <p className="text-neutral-500">VAT no. 451 8762 73</p>
+          </SummaryCard>
+
+          <SummaryCard icon={Users} title="Prepared for">
+            {customerCompanyName ? (
+              <p className="font-medium text-neutral-950">{customerCompanyName}</p>
+            ) : null}
+            {customerContactName ? <p>{customerContactName}</p> : null}
+            {customerEmail ? (
               <p>
                 <a
-                  href="https://www.candidcreative.uk"
-                  className="text-neutral-950 underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-950"
+                  href={`mailto:${customerEmail}`}
+                  className="font-medium text-neutral-950 underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-950"
                 >
-                  www.candidcreative.uk
+                  {customerEmail}
                 </a>
               </p>
-              <p>020 3149 8995</p>
-              <p>Company number: 15150018</p>
-              <p>VAT number: 451 8762 73</p>
-            </InfoColumn>
+            ) : null}
+            {!customerCompanyName &&
+              !customerContactName &&
+              !customerEmail && <p className="text-neutral-400">—</p>}
+          </SummaryCard>
 
-            <InfoColumn
-              title="Prepared for"
-              className="md:border-r md:border-neutral-200 md:pr-10"
-            >
-              {customerCompanyName ? (
-                <p className="font-medium text-neutral-950">{customerCompanyName}</p>
-              ) : null}
-              {customerContactName ? <p>{customerContactName}</p> : null}
-              {customerEmail ? (
-                <p>
-                  <a
-                    href={`mailto:${customerEmail}`}
-                    className="text-neutral-950 underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-950"
-                  >
-                    {customerEmail}
-                  </a>
-                </p>
-              ) : null}
-              {!customerCompanyName &&
-                !customerContactName &&
-                !customerEmail && <p className="text-neutral-500">—</p>}
-            </InfoColumn>
-
-            <InfoColumn title="Quote details">
+          <SummaryCard icon={FileText} title="Quote details">
+            <p>
+              <span className="text-neutral-500">Quote number</span>
+              <br />
+              <span className="font-medium text-neutral-950">Q-{quoteNumber}</span>
+            </p>
+            {dateSent ? (
               <p>
-                <span className="text-neutral-500">Quote number</span>
+                <span className="text-neutral-500">Date sent</span>
                 <br />
                 <span className="font-medium text-neutral-950">
-                  Q-{quoteNumber}
+                  {formatDate(dateSent)}
                 </span>
               </p>
+            ) : null}
+            {paymentTermsDays !== null ? (
               <p>
-                <span className="text-neutral-500">Version</span>
+                <span className="text-neutral-500">Payment terms</span>
                 <br />
                 <span className="font-medium text-neutral-950">
-                  {versionNumber}
+                  {paymentTermsDays} days
                 </span>
               </p>
-              {dateSent ? (
-                <p>
-                  <span className="text-neutral-500">Date sent</span>
-                  <br />
-                  <span className="font-medium text-neutral-950">
-                    {formatDate(dateSent)}
-                  </span>
-                </p>
-              ) : null}
-              {expiryDate ? (
-                <p>
-                  <span className="text-neutral-500">Expiry date</span>
+            ) : null}
+            {expiryDate ? (
+              <p className="flex items-start gap-2">
+                <CalendarDays
+                  className="mt-0.5 h-4 w-4 shrink-0 text-neutral-400"
+                  aria-hidden
+                />
+                <span>
+                  <span className="text-neutral-500">Valid until</span>
                   <br />
                   <span className="font-medium text-neutral-950">
                     {formatDate(expiryDate)}
                   </span>
-                </p>
-              ) : null}
-              {paymentTermsDays !== null ? (
-                <p>
-                  <span className="text-neutral-500">Payment terms</span>
-                  <br />
-                  <span className="font-medium text-neutral-950">
-                    {paymentTermsDays} days
-                  </span>
-                </p>
-              ) : null}
-            </InfoColumn>
-          </div>
-        </div>
+                </span>
+              </p>
+            ) : null}
+          </SummaryCard>
+        </section>
 
-        <div className="border-b border-neutral-200 px-6 py-8 sm:px-8">
-          <h1 className="text-2xl font-semibold tracking-tight text-neutral-950 sm:text-3xl">
-            {displayProjectName}
-          </h1>
-          {introduction ? (
-            <p className="mt-4 max-w-3xl whitespace-pre-wrap text-sm leading-relaxed text-neutral-600 sm:text-base">
-              {introduction}
+        <section aria-label="Products" className="mb-12 space-y-5 sm:mb-16">
+          <div className="flex items-end justify-between gap-4">
+            <h2 className="text-2xl font-semibold tracking-tight text-neutral-950 sm:text-3xl">
+              Products
+            </h2>
+            <p className="text-sm text-neutral-500">
+              {lineItems.length} item{lineItems.length === 1 ? "" : "s"}
             </p>
-          ) : null}
-        </div>
+          </div>
 
-        <div className="px-6 py-8 sm:px-8">
-          <h2 className="mb-6 text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
-            Quote items
-          </h2>
-
-          <div className="divide-y divide-neutral-100 border-y border-neutral-100">
+          <div className="space-y-4">
             {lineItems.map((item) => (
-              <article key={item.id} className="py-6 first:pt-0 last:pb-0">
-                <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:gap-8">
+              <article
+                key={item.id}
+                className="overflow-hidden rounded-2xl border border-neutral-200/80 bg-white p-5 shadow-sm sm:p-6"
+              >
+                <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
                   {item.imageUrl ? (
-                    <div className="flex h-40 w-40 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-neutral-200 bg-neutral-50 lg:h-[180px] lg:w-[180px]">
+                    <div className="mx-auto flex h-[180px] w-[180px] shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-neutral-100 bg-neutral-50 shadow-md lg:mx-0">
                       <img
                         src={item.imageUrl}
                         alt={item.title}
-                        className="h-full w-full object-contain"
+                        className="h-full w-full object-contain p-2"
                       />
                     </div>
                   ) : null}
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-lg font-medium text-neutral-950">
-                        {item.title}
-                      </h3>
-                      {item.isOptional && (
-                        <span className="inline-flex items-center rounded-md bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-600 ring-1 ring-neutral-200">
-                          Optional
-                        </span>
-                      )}
+                  <div className="min-w-0 flex-1 space-y-4">
+                    <div className="space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-xl font-semibold tracking-tight text-neutral-950 sm:text-2xl">
+                          {item.title}
+                        </h3>
+                        {item.isOptional && (
+                          <span className="inline-flex items-center rounded-full bg-neutral-100 px-2.5 py-0.5 text-xs font-medium text-neutral-600 ring-1 ring-neutral-200">
+                            Optional
+                          </span>
+                        )}
+                      </div>
+
+                      {item.description ? (
+                        <p className="max-w-3xl whitespace-pre-wrap text-sm leading-relaxed text-neutral-600 sm:text-base">
+                          {item.description}
+                        </p>
+                      ) : null}
                     </div>
 
-                    {item.description ? (
-                      <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-neutral-600">
-                        {item.description}
-                      </p>
-                    ) : null}
-
-                    <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3 lg:max-w-xl">
-                      <div>
-                        <dt className="text-neutral-500">Quantity</dt>
-                        <dd className="mt-0.5 font-medium text-neutral-950">
+                    <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                      <div className="rounded-xl bg-neutral-50 px-4 py-3 ring-1 ring-neutral-100">
+                        <dt className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                          Quantity
+                        </dt>
+                        <dd className="mt-1 text-lg font-semibold text-neutral-950">
                           {item.quantity}
                         </dd>
                       </div>
-                      <div>
-                        <dt className="text-neutral-500">Unit price ex VAT</dt>
-                        <dd className="mt-0.5 font-medium text-neutral-950">
+                      <div className="rounded-xl bg-neutral-50 px-4 py-3 ring-1 ring-neutral-100">
+                        <dt className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                          Unit price
+                        </dt>
+                        <dd className="mt-1 text-lg font-semibold text-neutral-950">
                           {formatGbp(item.unitPrice)}
                         </dd>
                       </div>
-                      <div>
-                        <dt className="text-neutral-500">Line total</dt>
-                        <dd className="mt-0.5 font-medium text-neutral-950">
+                      <div className="col-span-2 rounded-xl bg-neutral-50 px-4 py-3 ring-1 ring-neutral-100 sm:col-span-2">
+                        <dt className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                          Line total
+                        </dt>
+                        <dd className="mt-1 text-lg font-semibold text-neutral-950">
                           {formatGbp(item.lineTotal)}
                         </dd>
                       </div>
@@ -303,50 +359,61 @@ export function CustomerFormalQuoteView({
               </article>
             ))}
           </div>
+        </section>
 
-          {customerNotes ? (
-            <section className="mt-10 border-t border-neutral-100 pt-8">
-              <h2 className="text-xs font-semibold uppercase tracking-[0.14em] text-neutral-500">
+        <section aria-label="Totals" className="mb-12 sm:mb-16">
+          <article className="ml-auto max-w-md overflow-hidden rounded-2xl border border-neutral-200/80 bg-white shadow-sm">
+            <div className="space-y-4 px-6 py-6">
+              <div className="flex items-center justify-between gap-4 text-sm">
+                <span className="text-neutral-500">Subtotal</span>
+                <span className="font-medium text-neutral-950">
+                  {formatGbp(subtotal)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-4 text-sm">
+                <span className="text-neutral-500">VAT (20%)</span>
+                <span className="font-medium text-neutral-950">
+                  {formatGbp(vatAmount)}
+                </span>
+              </div>
+            </div>
+
+            <div
+              className="px-6 py-6"
+              style={{ backgroundColor: `${CANDID_YELLOW}22` }}
+            >
+              <div className="flex items-end justify-between gap-4">
+                <span className="text-sm font-medium uppercase tracking-[0.12em] text-neutral-700">
+                  Total
+                </span>
+                <span
+                  className="text-4xl font-bold tracking-tight sm:text-5xl"
+                  style={{ color: "#1e1e1c" }}
+                >
+                  {formatGbp(total)}
+                </span>
+              </div>
+            </div>
+          </article>
+        </section>
+
+        {customerNotes ? (
+          <section aria-label="Notes" className="mb-12 sm:mb-16">
+            <article className="rounded-2xl border border-neutral-200/80 bg-white p-6 shadow-sm sm:p-8">
+              <h2 className="text-xl font-semibold tracking-tight text-neutral-950 sm:text-2xl">
                 Notes
               </h2>
-              <p className="mt-3 max-w-3xl whitespace-pre-wrap text-sm leading-relaxed text-neutral-700 sm:text-base">
+              <p className="mt-4 max-w-3xl whitespace-pre-wrap text-base leading-relaxed text-neutral-600">
                 {customerNotes}
               </p>
-            </section>
-          ) : null}
+            </article>
+          </section>
+        ) : null}
 
-          <div className="mt-10 flex justify-end">
-            <div className="w-full max-w-sm rounded-xl border border-neutral-200 bg-neutral-50/80 p-5 shadow-sm">
-              <dl className="space-y-3 text-sm">
-                <div className="flex items-center justify-between gap-4">
-                  <dt className="text-neutral-600">Subtotal</dt>
-                  <dd className="font-medium text-neutral-950">
-                    {formatGbp(subtotal)}
-                  </dd>
-                </div>
-                <div className="flex items-center justify-between gap-4">
-                  <dt className="text-neutral-600">VAT 20%</dt>
-                  <dd className="font-medium text-neutral-950">
-                    {formatGbp(vatAmount)}
-                  </dd>
-                </div>
-                <div className="flex items-center justify-between gap-4 border-t border-neutral-200 pt-4">
-                  <dt className="text-base font-medium text-neutral-950">
-                    Total GBP
-                  </dt>
-                  <dd className="text-2xl font-semibold tracking-tight text-neutral-950">
-                    {formatGbp(total)}
-                  </dd>
-                </div>
-              </dl>
-            </div>
-          </div>
-        </div>
-
-        <footer className="border-t border-neutral-200 bg-neutral-50/40 px-6 py-6 sm:px-8">
+        <section aria-label="Terms and conditions">
           <CustomerQuoteTermsSection />
-        </footer>
-      </article>
+        </section>
+      </div>
     </div>
   );
 }
