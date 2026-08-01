@@ -13,7 +13,9 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { QuoteRequestFilePicker } from "@/components/quote-request-file-picker";
 import { cn } from "@/lib/utils";
+import { uploadQuoteRequestAttachments } from "@/lib/quote-request-attachments";
 import { createClient } from "@/lib/supabase/client";
 
 type FulfilmentMethod = "delivery" | "collection";
@@ -103,6 +105,9 @@ export function QuoteRequestForm({
   const [deliveryContactPhone, setDeliveryContactPhone] = useState("");
   const [purchaseOrderNumber, setPurchaseOrderNumber] = useState("");
   const [notes, setNotes] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [attachmentValidationError, setAttachmentValidationError] = useState("");
+  const [uploadProgress, setUploadProgress] = useState("");
 
   const minDate = useMemo(() => getTodayString(), []);
 
@@ -190,6 +195,7 @@ export function QuoteRequestForm({
     }
 
     setIsSubmitting(true);
+    setUploadProgress("");
 
     const isDelivery = fulfilmentMethod === "delivery";
 
@@ -218,17 +224,42 @@ export function QuoteRequestForm({
       request_status: "submitted",
     };
 
-    const { error: insertError } = await supabase
+    const { data: createdQuote, error: insertError } = await supabase
       .from("quote_requests")
-      .insert(insertPayload);
+      .insert(insertPayload)
+      .select("id")
+      .single();
 
-    setIsSubmitting(false);
-
-    if (insertError) {
-      setError(insertError.message);
+    if (insertError || !createdQuote) {
+      setIsSubmitting(false);
+      setError(insertError?.message ?? "Unable to create quote request.");
       return;
     }
 
+    if (pendingFiles.length > 0) {
+      setUploadProgress(`Uploading ${pendingFiles.length} file(s)...`);
+
+      try {
+        await uploadQuoteRequestAttachments(supabase, {
+          files: pendingFiles,
+          companyId,
+          quoteRequestId: createdQuote.id,
+          uploadedBy: requestedBy,
+        });
+      } catch (uploadError) {
+        setIsSubmitting(false);
+        setUploadProgress("");
+        setError(
+          uploadError instanceof Error
+            ? uploadError.message
+            : "Unable to upload attachments."
+        );
+        return;
+      }
+    }
+
+    setIsSubmitting(false);
+    setUploadProgress("");
     router.push("/quotes");
     router.refresh();
   }
@@ -505,6 +536,17 @@ export function QuoteRequestForm({
                 />
               </div>
 
+              <QuoteRequestFilePicker
+                files={pendingFiles}
+                onFilesChange={setPendingFiles}
+                disabled={isSubmitting}
+                onValidationError={setAttachmentValidationError}
+              />
+
+              {attachmentValidationError && (
+                <p className="text-sm text-red-600">{attachmentValidationError}</p>
+              )}
+
               <div className="rounded-xl border border-neutral-200 bg-neutral-50/50 p-4">
                 <h3 className="text-sm font-medium text-neutral-950">
                   Review summary
@@ -579,12 +621,33 @@ export function QuoteRequestForm({
                       <dd className="text-neutral-950">{notes}</dd>
                     </div>
                   )}
+
+                  {pendingFiles.length > 0 && (
+                    <div>
+                      <dt className="text-neutral-500">Attachments</dt>
+                      <dd className="text-neutral-950">
+                        {pendingFiles.length} file
+                        {pendingFiles.length === 1 ? "" : "s"} ready to upload
+                      </dd>
+                    </div>
+                  )}
                 </dl>
               </div>
             </div>
           )}
 
-          {error && <p className="text-sm text-red-600">{error}</p>}
+          {error && (
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+              <p className="text-sm font-medium text-red-800">
+                Unable to submit quote request
+              </p>
+              <p className="mt-1 text-sm text-red-700">{error}</p>
+            </div>
+          )}
+
+          {uploadProgress && (
+            <p className="text-sm text-neutral-600">{uploadProgress}</p>
+          )}
 
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
             {step > 1 ? (
@@ -606,7 +669,9 @@ export function QuoteRequestForm({
               </Button>
             ) : (
               <Button type="submit" disabled={isSubmitting}>
-                {isSubmitting ? "Submitting..." : "Submit quote request"}
+                {isSubmitting
+                  ? uploadProgress || "Submitting..."
+                  : "Submit quote request"}
               </Button>
             )}
           </div>

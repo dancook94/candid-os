@@ -2,6 +2,8 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
+import { QuoteRequestAttachmentUpload } from "@/components/quote-request-attachment-upload";
+import { QuoteRequestAttachmentsList } from "@/components/quote-request-attachments-list";
 import {
   EditQuoteRequestForm,
   type QuoteRequestEditableValues,
@@ -16,6 +18,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import type { QuoteRequestAttachmentRecord } from "@/lib/quote-request-attachments";
 
 type QuoteRequestDetail = {
   id: string;
@@ -198,6 +201,14 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
     notFound();
   }
 
+  const { data: attachments } = await supabase
+    .from("quote_request_attachments")
+    .select("id, file_name, file_size, file_type, storage_path, created_at")
+    .eq("quote_request_id", id)
+    .order("created_at", { ascending: false });
+
+  const quoteAttachments: QuoteRequestAttachmentRecord[] = attachments ?? [];
+
   const canEdit =
     quoteRequest.request_status === "submitted" ||
     quoteRequest.request_status === "reviewing";
@@ -315,6 +326,16 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
             </CardContent>
           </Card>
         </EditQuoteRequestForm>
+
+        <QuoteRequestAttachmentsList attachments={quoteAttachments} />
+
+        {canEdit && (
+          <QuoteRequestAttachmentUpload
+            quoteRequestId={quoteRequest.id}
+            companyId={quoteRequest.company_id}
+            uploadedBy={user.id}
+          />
+        )}
       </div>
     </AppShell>
   );
