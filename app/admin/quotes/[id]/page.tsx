@@ -21,6 +21,10 @@ type QuoteDetailPageProps = {
   searchParams: Promise<{ version?: string }>;
 };
 
+function formatQuotePageTitle(projectName: string) {
+  return projectName.replace(/^Hi\s+/i, "");
+}
+
 export default async function QuoteDetailPage({
   params,
   searchParams,
@@ -146,7 +150,7 @@ export default async function QuoteDetailPage({
       <div className="mx-auto max-w-5xl">
         <PageHeader
           eyebrow="Administration"
-          title={quote.project_name}
+          title={formatQuotePageTitle(quote.project_name)}
           description={`Quote Q-${quote.quote_number}`}
           actions={
             <Link href="/admin/quotes">
