@@ -1,21 +1,32 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { CreateQuoteVersionButton } from "@/components/create-quote-version-button";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
 import {
   QuoteBuilderForm,
   type QuoteBuilderInitialValues,
 } from "@/components/quote-builder-form";
+import {
+  QuoteVersionSelector,
+  type QuoteVersionOption,
+} from "@/components/quote-version-selector";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 
 type QuoteDetailPageProps = {
   params: Promise<{ id: string }>;
+  searchParams: Promise<{ version?: string }>;
 };
 
-export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) {
+export default async function QuoteDetailPage({
+  params,
+  searchParams,
+}: QuoteDetailPageProps) {
   const { id } = await params;
+  const { version: versionParam } = await searchParams;
   const supabase = await createClient();
 
   const {
@@ -52,16 +63,39 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
     notFound();
   }
 
-  const { data: quoteVersion, error: versionError } = await supabase
+  const { data: allVersions, error: versionsError } = await supabase
     .from("quote_versions")
     .select(
-      "id, version_number, version_status, expiry_date, payment_terms_days, introduction, customer_notes, internal_notes, subtotal, vat_amount, total"
+      "id, version_number, version_status, created_at, expiry_date, payment_terms_days, introduction, customer_notes, internal_notes, subtotal, vat_rate, vat_amount, total"
     )
     .eq("quote_id", quote.id)
-    .eq("version_number", quote.current_version)
-    .maybeSingle();
+    .order("version_number", { ascending: false });
 
-  if (versionError || !quoteVersion) {
+  if (versionsError || !allVersions || allVersions.length === 0) {
+    notFound();
+  }
+
+  const parsedVersionParam = versionParam
+    ? Number.parseInt(versionParam, 10)
+    : quote.current_version;
+
+  const selectedVersionNumber = Number.isFinite(parsedVersionParam)
+    ? parsedVersionParam
+    : quote.current_version;
+
+  const quoteVersion = allVersions.find(
+    (version) => version.version_number === selectedVersionNumber
+  );
+
+  if (!quoteVersion) {
+    notFound();
+  }
+
+  const currentVersionRecord = allVersions.find(
+    (version) => version.version_number === quote.current_version
+  );
+
+  if (!currentVersionRecord) {
     notFound();
   }
 
@@ -71,6 +105,14 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
       "id, title, description, quantity, unit_price, is_optional, line_total, sort_order"
     )
     .eq("quote_version_id", quoteVersion.id)
+    .order("sort_order", { ascending: true });
+
+  const { data: currentVersionItems } = await supabase
+    .from("quote_items")
+    .select(
+      "title, description, quantity, unit_price, is_optional, line_total, sort_order"
+    )
+    .eq("quote_version_id", currentVersionRecord.id)
     .order("sort_order", { ascending: true });
 
   const [{ data: companies }, { data: quoteRequests }] = await Promise.all([
@@ -104,7 +146,21 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
     })),
   };
 
-  const canEdit = quote.status === "draft";
+  const isViewingCurrentVersion =
+    selectedVersionNumber === quote.current_version;
+  const canEdit =
+    isViewingCurrentVersion && quoteVersion.version_status === "draft";
+  const showCreateVersionButton =
+    isViewingCurrentVersion &&
+    !(
+      quote.status === "draft" && quoteVersion.version_status === "draft"
+    );
+
+  const versionOptions: QuoteVersionOption[] = allVersions.map((version) => ({
+    version_number: version.version_number,
+    version_status: version.version_status,
+    created_at: version.created_at,
+  }));
 
   return (
     <AppShell
@@ -124,6 +180,51 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
           }
         />
 
+        <Card className="mb-6 rounded-2xl border-neutral-200 shadow-sm ring-0">
+          <CardContent className="space-y-4 pt-6">
+            <QuoteVersionSelector
+              quoteId={quote.id}
+              versions={versionOptions}
+              selectedVersion={selectedVersionNumber}
+            />
+
+            {!isViewingCurrentVersion && (
+              <p className="text-sm text-neutral-500">
+                Viewing version {selectedVersionNumber}. Only the current
+                draft version can be edited.
+              </p>
+            )}
+
+            {showCreateVersionButton && (
+              <CreateQuoteVersionButton
+                quoteId={quote.id}
+                sourceVersion={{
+                  id: currentVersionRecord.id,
+                  version_number: currentVersionRecord.version_number,
+                  introduction: currentVersionRecord.introduction,
+                  customer_notes: currentVersionRecord.customer_notes,
+                  internal_notes: currentVersionRecord.internal_notes,
+                  expiry_date: currentVersionRecord.expiry_date,
+                  payment_terms_days: currentVersionRecord.payment_terms_days,
+                  subtotal: currentVersionRecord.subtotal,
+                  vat_rate: currentVersionRecord.vat_rate,
+                  vat_amount: currentVersionRecord.vat_amount,
+                  total: currentVersionRecord.total,
+                }}
+                sourceItems={(currentVersionItems ?? []).map((item) => ({
+                  title: item.title,
+                  description: item.description,
+                  quantity: Number(item.quantity),
+                  unit_price: Number(item.unit_price),
+                  is_optional: Boolean(item.is_optional),
+                  line_total: Number(item.line_total),
+                  sort_order: Number(item.sort_order),
+                }))}
+              />
+            )}
+          </CardContent>
+        </Card>
+
         <QuoteBuilderForm
           mode="edit"
           createdBy={user.id}
@@ -134,6 +235,9 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
           quoteVersionId={quoteVersion.id}
           quoteNumber={quote.quote_number}
           quoteStatus={quote.status}
+          versionStatus={quoteVersion.version_status}
+          selectedVersionNumber={selectedVersionNumber}
+          currentVersionNumber={quote.current_version}
           canEdit={canEdit}
         />
       </div>

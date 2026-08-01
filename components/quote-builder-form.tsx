@@ -69,6 +69,9 @@ type QuoteBuilderFormProps = {
   quoteVersionId?: string;
   quoteNumber?: number;
   quoteStatus?: string;
+  versionStatus?: string;
+  selectedVersionNumber?: number;
+  currentVersionNumber?: number;
   canEdit?: boolean;
 };
 
@@ -142,6 +145,9 @@ export function QuoteBuilderForm({
   quoteVersionId,
   quoteNumber,
   quoteStatus,
+  versionStatus,
+  selectedVersionNumber,
+  currentVersionNumber,
   canEdit = true,
 }: QuoteBuilderFormProps) {
   const router = useRouter();
@@ -291,6 +297,7 @@ export function QuoteBuilderForm({
         customer_notes: customerNotes.trim() || null,
         internal_notes: internalNotes.trim() || null,
         subtotal: totals.subtotal,
+        vat_rate: VAT_RATE,
         vat_amount: totals.vatAmount,
         total: totals.total,
       };
@@ -382,6 +389,19 @@ export function QuoteBuilderForm({
         throw new Error("Quote details are missing.");
       }
 
+      if (targetStatus === "sent") {
+        const { error: supersedeError } = await supabase
+          .from("quote_versions")
+          .update({ version_status: "superseded" })
+          .eq("quote_id", quoteId)
+          .eq("version_status", "sent")
+          .neq("id", quoteVersionId);
+
+        if (supersedeError) {
+          throw new Error(supersedeError.message);
+        }
+      }
+
       const { error: quoteUpdateError } = await supabase
         .from("quotes")
         .update({
@@ -389,6 +409,7 @@ export function QuoteBuilderForm({
           quote_request_id: quoteRequestId || null,
           project_name: trimmedProjectName,
           status: targetStatus,
+          updated_at: new Date().toISOString(),
         })
         .eq("id", quoteId);
 
@@ -466,19 +487,37 @@ export function QuoteBuilderForm({
             {mode === "create"
               ? "Create a draft quote with line items and customer details."
               : isReadOnly
-                ? "This quote is no longer editable."
+                ? selectedVersionNumber !== currentVersionNumber
+                  ? "This version is read-only."
+                  : "This version is no longer editable."
                 : "Edit the current draft version."}
           </CardDescription>
         </CardHeader>
 
         <CardContent className="space-y-4 pt-6">
-          {quoteStatus && (
-            <p className="text-sm text-neutral-500">
-              Status:{" "}
-              <span className="font-medium capitalize text-neutral-950">
-                {quoteStatus}
-              </span>
-            </p>
+          {mode === "edit" && (
+            <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-neutral-500">
+              {quoteStatus && (
+                <p>
+                  Quote status:{" "}
+                  <span className="font-medium capitalize text-neutral-950">
+                    {quoteStatus}
+                  </span>
+                </p>
+              )}
+              {versionStatus && selectedVersionNumber !== undefined && (
+                <p>
+                  Version {selectedVersionNumber}
+                  {currentVersionNumber !== undefined &&
+                    selectedVersionNumber !== currentVersionNumber &&
+                    ` (current: v${currentVersionNumber})`}
+                  :{" "}
+                  <span className="font-medium capitalize text-neutral-950">
+                    {versionStatus}
+                  </span>
+                </p>
+              )}
+            </div>
           )}
 
           <div className="grid gap-4 md:grid-cols-2">

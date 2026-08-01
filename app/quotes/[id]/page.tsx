@@ -18,6 +18,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import { resolveCustomerQuoteStatus } from "@/lib/quote-customer-status";
 import type { QuoteRequestAttachmentRecord } from "@/lib/quote-request-attachments";
 
 type QuoteRequestDetail = {
@@ -252,9 +253,12 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
     .maybeSingle();
 
   const quoteAttachments: QuoteRequestAttachmentRecord[] = attachments ?? [];
-  const quoteStatusLabel = getCustomerQuoteStatusLabel(linkedQuote?.status);
-  const quoteStatusIsClickable = linkedQuote
-    ? isCustomerQuoteStatusClickable(linkedQuote.status)
+  const customerQuoteStatus = linkedQuote
+    ? await resolveCustomerQuoteStatus(supabase, linkedQuote)
+    : undefined;
+  const quoteStatusLabel = getCustomerQuoteStatusLabel(customerQuoteStatus);
+  const quoteStatusIsClickable = customerQuoteStatus
+    ? isCustomerQuoteStatusClickable(customerQuoteStatus)
     : false;
 
   const canEdit =
@@ -310,7 +314,7 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
                     {quoteStatusIsClickable && linkedQuote ? (
                       <Link href={`/quotes/${linkedQuote.id}`} className="inline-flex">
                         <StatusBadge
-                          status={mapCustomerQuoteStatusToBadge(linkedQuote.status)}
+                          status={mapCustomerQuoteStatusToBadge(customerQuoteStatus!)}
                           label={quoteStatusLabel}
                         />
                       </Link>
@@ -414,7 +418,7 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
                     {quoteStatusIsClickable && linkedQuote ? (
                       <Link href={`/quotes/${linkedQuote.id}`} className="inline-flex">
                         <StatusBadge
-                          status={mapCustomerQuoteStatusToBadge(linkedQuote.status)}
+                          status={mapCustomerQuoteStatusToBadge(customerQuoteStatus!)}
                           label={quoteStatusLabel}
                         />
                       </Link>

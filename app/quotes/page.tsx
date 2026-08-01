@@ -8,6 +8,7 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import { resolveCustomerQuoteStatuses } from "@/lib/quote-customer-status";
 
 type QuoteRequest = {
   id: string;
@@ -196,6 +197,11 @@ export default async function QuotesPage() {
     }
   }
 
+  const customerQuoteStatuses = await resolveCustomerQuoteStatuses(
+    supabase,
+    (linkedQuotes ?? []).map((quote) => ({ id: quote.id, status: quote.status }))
+  );
+
   const requestQuoteButton = (
     <Link href="/quotes/request">
       <Button>Request a quote</Button>
@@ -260,11 +266,15 @@ export default async function QuotesPage() {
                   <tbody>
                     {quoteRequests.map((request) => {
                       const linkedQuote = quoteByRequestId.get(request.id);
+                      const customerQuoteStatus = linkedQuote
+                        ? (customerQuoteStatuses.get(linkedQuote.id) ??
+                          linkedQuote.status)
+                        : undefined;
                       const quoteStatusLabel = getCustomerQuoteStatusLabel(
-                        linkedQuote?.status
+                        customerQuoteStatus
                       );
-                      const quoteStatusIsClickable = linkedQuote
-                        ? isCustomerQuoteStatusClickable(linkedQuote.status)
+                      const quoteStatusIsClickable = customerQuoteStatus
+                        ? isCustomerQuoteStatusClickable(customerQuoteStatus)
                         : false;
 
                       return (
@@ -343,7 +353,7 @@ export default async function QuotesPage() {
                             >
                               <StatusBadge
                                 status={mapCustomerQuoteStatusToBadge(
-                                  linkedQuote.status
+                                  customerQuoteStatus!
                                 )}
                                 label={quoteStatusLabel}
                               />
