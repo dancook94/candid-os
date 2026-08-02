@@ -533,6 +533,8 @@ export async function finishArtworkUpload(
     );
   }
 
+  await syncJobStatusAfterArtworkUpload(adminClient, jobId);
+
   try {
     await logJobActivity(adminClient, {
       activityType: file.supersedes_file_id
@@ -570,8 +572,6 @@ export async function finishArtworkUpload(
     jobId,
     fileId: file.id,
   });
-
-  await syncJobStatusAfterArtworkUpload(adminClient, jobId);
 
   revalidateJobPages({
     jobId,

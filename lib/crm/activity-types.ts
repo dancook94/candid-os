@@ -57,6 +57,7 @@ export const CRM_ACTIVITY_TYPES = {
   artworkChangesRequested: "artwork_changes_requested",
   artworkApproved: "artwork_approved",
   artworkUploadFailed: "artwork_upload_failed",
+  jobStatusReconciled: "job_status_reconciled",
 } as const;
 
 /** @deprecated Use CRM_ACTIVITY_TYPES */

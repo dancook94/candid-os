@@ -8,6 +8,7 @@ export const CUSTOMER_JOB_STATUS_FILTERS = [
   { id: "all", label: "All" },
   { id: "active", label: "Active" },
   { id: "awaiting_artwork", label: "Awaiting artwork" },
+  { id: "artwork_uploaded", label: "Artwork uploaded" },
   { id: "in_production", label: "In production" },
   { id: "ready", label: "Ready" },
   { id: "completed", label: "Completed" },

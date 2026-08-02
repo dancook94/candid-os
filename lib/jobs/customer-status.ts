@@ -1,38 +1,27 @@
 import { JOB_STATUS_LABELS } from "@/lib/jobs/constants";
-import type { JobFileRecord, JobRecord, JobStatus } from "@/lib/jobs/types";
+import type { JobFileRecord, JobRecord } from "@/lib/jobs/types";
+import {
+  getCurrentArtworkFile,
+  jobHasCompletedArtworkUpload,
+  resolveJobStatusView,
+  type JobStatusView,
+} from "@/lib/jobs/status";
 
-export type CustomerJobStatusView = {
-  status: JobStatus | string;
-  statusLabel: string;
-};
+export type CustomerJobStatusView = JobStatusView;
 
-function getActiveArtworkFiles(files: JobFileRecord[]) {
-  return files.filter(
-    (file) =>
-      !file.deleted_at &&
-      file.upload_status === "complete" &&
-      file.artwork_status !== "superseded"
-  );
-}
-
-export function getCurrentArtworkFile(files: JobFileRecord[]) {
-  const activeFiles = getActiveArtworkFiles(files);
-
-  if (activeFiles.length === 0) {
-    return null;
-  }
-
-  return activeFiles.reduce((latest, file) =>
-    file.version_number > latest.version_number ? file : latest
-  );
-}
+export { getCurrentArtworkFile, jobHasCompletedArtworkUpload, resolveJobStatusView };
 
 export function jobNeedsArtworkUpload(
-  job: Pick<JobRecord, "artwork_required">,
+  job: Pick<JobRecord, "artwork_required" | "status">,
   files: JobFileRecord[]
 ) {
   if (!job.artwork_required) {
     return false;
+  }
+
+  if (job.status === "artwork_uploaded" || job.status === "in_production") {
+    const currentFile = getCurrentArtworkFile(files);
+    return currentFile?.artwork_status === "changes_required";
   }
 
   const currentFile = getCurrentArtworkFile(files);
@@ -48,32 +37,7 @@ export function resolveCustomerJobStatus(
   job: JobRecord,
   files: JobFileRecord[] = []
 ): CustomerJobStatusView {
-  if (job.status !== "awaiting_artwork") {
-    return {
-      status: job.status,
-      statusLabel: JOB_STATUS_LABELS[job.status] ?? job.status,
-    };
-  }
-
-  const currentFile = getCurrentArtworkFile(files);
-
-  if (!currentFile) {
-    return {
-      status: job.status,
-      statusLabel: "Awaiting artwork",
-    };
-  }
-
-  switch (currentFile.artwork_status) {
-    case "under_review":
-      return { status: job.status, statusLabel: "Under review" };
-    case "changes_required":
-      return { status: job.status, statusLabel: "Changes required" };
-    case "approved":
-      return { status: job.status, statusLabel: "Artwork approved" };
-    default:
-      return { status: job.status, statusLabel: "Artwork uploaded" };
-  }
+  return resolveJobStatusView(job, files);
 }
 
 export function getCustomerChangesRequiredComment(files: JobFileRecord[]) {
@@ -84,4 +48,8 @@ export function getCustomerChangesRequiredComment(files: JobFileRecord[]) {
   }
 
   return null;
+}
+
+export function getJobStatusLabel(status: string) {
+  return JOB_STATUS_LABELS[status] ?? status;
 }

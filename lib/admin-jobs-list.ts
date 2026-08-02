@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { isMissingJobsSchemaError } from "@/lib/jobs/errors";
 import { JOB_LIST_COLUMNS } from "@/lib/jobs/job-select";
-import { JOB_STATUS_LABELS } from "@/lib/jobs/constants";
+import { resolveJobStatusView } from "@/lib/jobs/status";
 import type { JobRecord } from "@/lib/jobs/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -66,22 +66,26 @@ export async function fetchAdminJobsList(
   );
 
   return {
-    jobs: jobs.map((job) => ({
-      id: job.id,
-      reference: job.job_reference,
-      projectTitle: job.project_name,
-      status: job.status,
-      statusLabel: JOB_STATUS_LABELS[job.status] ?? job.status,
-      companyId: job.company_id,
-      companyName: companyNameById.get(job.company_id) ?? "Unknown company",
-      quoteId: job.quote_id,
-      quoteNumber: quoteNumberById.has(job.quote_id)
-        ? `Q-${quoteNumberById.get(job.quote_id)}`
-        : null,
-      artworkRequired: job.artwork_required,
-      dropboxSetupStatus: job.dropbox_setup_status,
-      updatedAt: job.updated_at,
-    })),
+    jobs: jobs.map((job) => {
+      const statusView = resolveJobStatusView(job);
+
+      return {
+        id: job.id,
+        reference: job.job_reference,
+        projectTitle: job.project_name,
+        status: statusView.status,
+        statusLabel: statusView.statusLabel,
+        companyId: job.company_id,
+        companyName: companyNameById.get(job.company_id) ?? "Unknown company",
+        quoteId: job.quote_id,
+        quoteNumber: quoteNumberById.has(job.quote_id)
+          ? `Q-${quoteNumberById.get(job.quote_id)}`
+          : null,
+        artworkRequired: job.artwork_required,
+        dropboxSetupStatus: job.dropbox_setup_status,
+        updatedAt: job.updated_at,
+      };
+    }),
     schemaMissing: false,
     loadError: null,
   };

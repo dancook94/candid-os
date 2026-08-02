@@ -1,5 +1,6 @@
 export const JOB_STATUSES = [
   "awaiting_artwork",
+  "artwork_uploaded",
   "in_production",
   "ready",
   "completed",

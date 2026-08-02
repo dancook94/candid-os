@@ -89,7 +89,12 @@ export async function loadCustomerJobs(
 
   if (options.filter && options.filter !== "all") {
     if (options.filter === "active") {
-      query = query.in("status", ["awaiting_artwork", "in_production", "ready"]);
+      query = query.in("status", [
+        "awaiting_artwork",
+        "artwork_uploaded",
+        "in_production",
+        "ready",
+      ]);
     } else {
       query = query.eq("status", options.filter);
     }

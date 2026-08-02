@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS public.jobs (
   CONSTRAINT jobs_status_check CHECK (
     status IN (
       'awaiting_artwork',
+      'artwork_uploaded',
       'in_production',
       'ready',
       'completed',
