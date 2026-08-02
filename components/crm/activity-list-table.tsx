@@ -7,12 +7,11 @@ import {
   MessageSquare,
   Phone,
   Quote,
-  Server,
   User,
   Users,
 } from "lucide-react";
 
-import { StaffAvatarDisplay } from "@/components/staff-avatar-display";
+import { CrmActivityActorDisplay } from "@/components/crm/crm-activity-actor-display";
 import { Button } from "@/components/ui/button";
 import { formatCrmDateTime } from "@/lib/crm/format-datetime";
 import type { ActivityListItem } from "@/lib/crm/activity-list";
@@ -83,17 +82,12 @@ function ActivityRowContent({
         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {item.actor_name ? (
             <span className="inline-flex items-center gap-2">
-              {item.actor_profile_id ? (
-                <StaffAvatarDisplay
-                  fullName={item.actor_name}
-                  avatarUrl={null}
-                  size="sm"
-                />
-              ) : (
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted">
-                  <Server className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                </span>
-              )}
+              <CrmActivityActorDisplay
+                actorProfileId={item.actor_profile_id}
+                actorName={item.actor_name}
+                actorAvatarUrl={item.actor_avatar_url}
+                size="sm"
+              />
               <span>
                 {item.actor_name}
                 {item.actor_role ? (
@@ -234,20 +228,12 @@ export function ActivityListTable({
                 <div className="min-w-0">
                   {item.actor_name ? (
                     <div className="flex items-center gap-2">
-                      {item.actor_profile_id ? (
-                        <StaffAvatarDisplay
-                          fullName={item.actor_name}
-                          avatarUrl={null}
-                          size="sm"
-                        />
-                      ) : (
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted">
-                          <Server
-                            className="h-4 w-4 text-muted-foreground"
-                            aria-hidden="true"
-                          />
-                        </span>
-                      )}
+                      <CrmActivityActorDisplay
+                        actorProfileId={item.actor_profile_id}
+                        actorName={item.actor_name}
+                        actorAvatarUrl={item.actor_avatar_url}
+                        size="sm"
+                      />
                       <div className="min-w-0">
                         <p className="truncate text-sm text-foreground">
                           {item.actor_name}
@@ -299,20 +285,12 @@ export function ActivityListTable({
                 <div className="min-w-0">
                   {item.actor_name ? (
                     <div className="flex items-center gap-2">
-                      {item.actor_profile_id ? (
-                        <StaffAvatarDisplay
-                          fullName={item.actor_name}
-                          avatarUrl={null}
-                          size="sm"
-                        />
-                      ) : (
-                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-muted">
-                          <Server
-                            className="h-4 w-4 text-muted-foreground"
-                            aria-hidden="true"
-                          />
-                        </span>
-                      )}
+                      <CrmActivityActorDisplay
+                        actorProfileId={item.actor_profile_id}
+                        actorName={item.actor_name}
+                        actorAvatarUrl={item.actor_avatar_url}
+                        size="sm"
+                      />
                       <div className="min-w-0">
                         <p className="truncate text-sm text-foreground">
                           {item.actor_name}

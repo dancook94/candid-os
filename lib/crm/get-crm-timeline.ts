@@ -7,9 +7,9 @@ import {
   isCrmNoteType,
   type CrmNoteType,
 } from "@/lib/crm/crm-note-types";
-import { getStaffDisplayName } from "@/lib/crm/crm-staff";
 import type { CrmTimelineCategory } from "@/lib/crm/activity-types";
 import { categorizeCrmActivityType } from "@/lib/crm/activity-types";
+import { loadCrmActivityActorProfiles } from "@/lib/crm/crm-activity-actors";
 
 export type CrmNoteRecord = {
   id: string;
@@ -57,6 +57,7 @@ export type CrmTimelineItem = {
   activity_type: string;
   description: string;
   metadata: Record<string, unknown>;
+  actor_profile_id: string | null;
   actor_name: string | null;
   actor_avatar_url: string | null;
   created_at: string;
@@ -154,21 +155,14 @@ async function loadActorProfiles(
   supabase: SupabaseClient,
   profileIds: string[]
 ) {
-  if (profileIds.length === 0) {
-    return new Map<string, { name: string; avatar_url: string | null }>();
-  }
-
-  const { data } = await supabase
-    .from("profiles")
-    .select("id, full_name")
-    .in("id", profileIds);
+  const actors = await loadCrmActivityActorProfiles(supabase, profileIds);
 
   return new Map(
-    (data ?? []).map((profile) => [
-      profile.id,
+    [...actors.entries()].map(([id, actor]) => [
+      id,
       {
-        name: getStaffDisplayName(profile),
-        avatar_url: null,
+        name: actor.name,
+        avatar_url: actor.avatarUrl,
       },
     ])
   );
@@ -605,7 +599,8 @@ export async function getCrmTimeline(
       activity_type: entry.activity_type,
       description: entry.description,
       metadata: (entry.metadata ?? {}) as Record<string, unknown>,
-      actor_name: actor?.name ?? null,
+      actor_profile_id: entry.actor_profile_id,
+      actor_name: actor?.name ?? (entry.actor_profile_id ? null : "System"),
       actor_avatar_url: actor?.avatar_url ?? null,
       created_at: entry.created_at,
       company_id: entry.company_id,
@@ -627,6 +622,7 @@ export async function getCrmTimeline(
       activity_type: "note",
       description: note.body,
       metadata: { note_id: note.id, note_type: note.note_type },
+      actor_profile_id: note.created_by,
       actor_name: note.author_name,
       actor_avatar_url: note.author_avatar_url,
       created_at: note.created_at,

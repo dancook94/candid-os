@@ -8,7 +8,13 @@ import {
 } from "@/lib/crm/activity-links";
 import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
 import { formatActivityTypeLabel } from "@/lib/crm/activity-types";
-import { getStaffDisplayName } from "@/lib/crm/crm-staff";
+import {
+  buildCrmActivityActorEmbedSelect,
+  buildCrmActivityActorViewsFromEmbed,
+  normalizeCrmActivityActorEmbed,
+  type CrmActivityActorRecord,
+  type CrmActivityActorView,
+} from "@/lib/crm/crm-activity-actors";
 import {
   getLondonDateRangeBounds,
   getLondonDayBounds,
@@ -157,6 +163,7 @@ export type ActivityListItem = {
   actor_profile_id: string | null;
   actor_name: string | null;
   actor_role: string | null;
+  actor_avatar_url: string | null;
   company_id: string | null;
   company_name: string | null;
   record_type: ActivityRecordType | null;
@@ -194,35 +201,19 @@ type ActivityRow = {
   created_at: string;
 };
 
-async function loadActivityActors(
-  supabase: SupabaseClient,
-  profileIds: string[]
-) {
-  if (profileIds.length === 0) {
-    return new Map<
-      string,
-      { name: string; role: string | null }
-    >();
-  }
+type ActivityRowRaw = ActivityRow & {
+  actor: CrmActivityActorRecord | CrmActivityActorRecord[] | null;
+};
 
-  const { data, error } = await supabase
-    .from("profiles")
-    .select("id, full_name, user_role")
-    .in("id", profileIds);
+function parseActivityRows(data: ActivityRowRaw[]) {
+  return data.map((row) => {
+    const { actor: actorEmbed, ...activityRow } = row;
 
-  if (error) {
-    throw new Error(error.message);
-  }
-
-  return new Map(
-    (data ?? []).map((profile) => [
-      profile.id,
-      {
-        name: getStaffDisplayName(profile),
-        role: profile.user_role ?? null,
-      },
-    ])
-  );
+    return {
+      row: activityRow as ActivityRow,
+      actor: normalizeCrmActivityActorEmbed(actorEmbed),
+    };
+  });
 }
 
 function parseGroupParam(value: string | undefined): ActivityListGroup {
@@ -602,7 +593,7 @@ async function buildLinkedRecordLabels(
 function mapActivityRows(
   rows: ActivityRow[],
   labels: Awaited<ReturnType<typeof buildLinkedRecordLabels>>,
-  actors: Map<string, { name: string; role: string | null }>
+  actors: Map<string, CrmActivityActorView>
 ): ActivityListItem[] {
   return rows.map((row) => {
     const { recordType, primaryLink, secondaryLinks } = pickActivityPrimaryLink(
@@ -623,6 +614,7 @@ function mapActivityRows(
       actor_profile_id: row.actor_profile_id,
       actor_name: actor?.name ?? (row.actor_profile_id ? null : "System"),
       actor_role: actor?.role ?? null,
+      actor_avatar_url: actor?.avatarUrl ?? null,
       company_id: row.company_id,
       company_name: row.company_id
         ? labels.companyNameById.get(row.company_id) ?? null
@@ -652,11 +644,11 @@ export async function fetchActivityList(
     ? await buildSearchOrFilter(supabase, filters.search)
     : null;
 
-  const actorSelect = `id, activity_type, description, metadata, company_id, contact_id, opportunity_id, quote_id, task_id, actor_profile_id, created_at`;
+  const activitySelect = `id, activity_type, description, metadata, company_id, contact_id, opportunity_id, quote_id, task_id, actor_profile_id, created_at, ${buildCrmActivityActorEmbedSelect()}`;
 
   let query = supabase
     .from("crm_activity")
-    .select(actorSelect, { count: "exact" })
+    .select(activitySelect, { count: "exact" })
     .order("created_at", { ascending: filters.sort === "oldest" })
     .range(offset, offset + ACTIVITY_LIST_PAGE_SIZE - 1);
 
@@ -697,22 +689,19 @@ export async function fetchActivityList(
     };
   }
 
-  const rows = (data ?? []) as ActivityRow[];
-  const actorIds = [
-    ...new Set(
-      rows
-        .map((row) => row.actor_profile_id)
-        .filter((value): value is string => Boolean(value))
-    ),
-  ];
+  const parsedRows = parseActivityRows((data ?? []) as unknown as ActivityRowRaw[]);
+  const rows = parsedRows.map((entry) => entry.row);
 
   let labels: Awaited<ReturnType<typeof buildLinkedRecordLabels>>;
-  let actors: Map<string, { name: string; role: string | null }>;
+  let actors: Map<string, CrmActivityActorView>;
 
   try {
     [labels, actors] = await Promise.all([
       buildLinkedRecordLabels(supabase, rows),
-      loadActivityActors(supabase, actorIds),
+      buildCrmActivityActorViewsFromEmbed(
+        supabase,
+        parsedRows.map((entry) => entry.actor)
+      ),
     ]);
   } catch (enrichmentError) {
     return {

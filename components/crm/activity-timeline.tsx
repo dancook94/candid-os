@@ -16,7 +16,7 @@ import {
   Users,
 } from "lucide-react";
 
-import { StaffAvatarDisplay } from "@/components/staff-avatar-display";
+import { CrmActivityActorDisplay } from "@/components/crm/crm-activity-actor-display";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -226,9 +226,10 @@ export function ActivityTimeline({
                       <div className="mt-3 flex flex-wrap items-center gap-3">
                         {item.actor_name ? (
                           <div className="flex items-center gap-2">
-                            <StaffAvatarDisplay
-                              fullName={item.actor_name}
-                              avatarUrl={item.actor_avatar_url}
+                            <CrmActivityActorDisplay
+                              actorProfileId={item.actor_profile_id}
+                              actorName={item.actor_name}
+                              actorAvatarUrl={item.actor_avatar_url}
                               size="sm"
                             />
                             <span className="text-sm text-muted-foreground">

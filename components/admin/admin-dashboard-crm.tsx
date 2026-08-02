@@ -1,5 +1,6 @@
 import Link from "next/link";
 
+import { CrmActivityActorDisplay } from "@/components/crm/crm-activity-actor-display";
 import { TaskAssigneeDisplay } from "@/components/crm/task-assignee-display";
 import { OpportunityStageBadge } from "@/components/crm/opportunity-stage-badge";
 import { TaskPriorityBadge, TaskStatusBadge } from "@/components/crm/task-badges";
@@ -126,8 +127,18 @@ export function AdminDashboardRecentActivityPanel({ data }: AdminDashboardCrmPro
               <p className="text-sm font-medium text-foreground">
                 {item.description}
               </p>
-              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                {item.actor_name ? <span>{item.actor_name}</span> : null}
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                {item.actor_name ? (
+                  <span className="inline-flex items-center gap-2">
+                    <CrmActivityActorDisplay
+                      actorProfileId={item.actor_profile_id}
+                      actorName={item.actor_name}
+                      actorAvatarUrl={item.actor_avatar_url}
+                      size="sm"
+                    />
+                    <span>{item.actor_name}</span>
+                  </span>
+                ) : null}
                 <span>{formatCrmDateTime(item.created_at)}</span>
                 {item.context_label ? <span>{item.context_label}</span> : null}
               </div>

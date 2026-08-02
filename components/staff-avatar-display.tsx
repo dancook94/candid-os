@@ -1,3 +1,7 @@
+"use client";
+
+import { useEffect, useState } from "react";
+
 import { getStaffInitials } from "@/lib/staff-avatars";
 import { cn } from "@/lib/utils";
 
@@ -21,8 +25,15 @@ export function StaffAvatarDisplay({
   className,
 }: StaffAvatarDisplayProps) {
   const initials = getStaffInitials(fullName);
+  const [imageError, setImageError] = useState(false);
 
-  if (avatarUrl) {
+  useEffect(() => {
+    setImageError(false);
+  }, [avatarUrl]);
+
+  const showImage = Boolean(avatarUrl) && !imageError;
+
+  if (showImage) {
     return (
       <div
         className={cn(
@@ -32,9 +43,10 @@ export function StaffAvatarDisplay({
         )}
       >
         <img
-          src={avatarUrl}
+          src={avatarUrl ?? undefined}
           alt={`${fullName} avatar`}
           className="h-full w-full object-cover"
+          onError={() => setImageError(true)}
         />
       </div>
     );

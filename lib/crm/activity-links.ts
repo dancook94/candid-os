@@ -1,5 +1,4 @@
-export const CRM_ACTIVITY_ACTOR_PROFILE_ID_FKEY =
-  "crm_activity_actor_profile_id_fkey";
+export { CRM_ACTIVITY_ACTOR_PROFILE_ID_FKEY } from "@/lib/crm/crm-activity-actors";
 
 export type ActivityRecordType =
   | "quote"

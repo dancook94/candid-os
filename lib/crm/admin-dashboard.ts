@@ -49,6 +49,8 @@ export type AdminDashboardRecentActivity = {
   id: string;
   description: string;
   actor_name: string | null;
+  actor_avatar_url: string | null;
+  actor_profile_id: string | null;
   created_at: string;
   href: string;
   context_label: string | null;
@@ -161,6 +163,8 @@ function mapTimelineToDashboardActivity(
     id: item.id,
     description: item.description,
     actor_name: item.actor_name,
+    actor_avatar_url: item.actor_avatar_url,
+    actor_profile_id: item.actor_profile_id,
     created_at: item.created_at,
     href: item.linked_record_href ?? "/admin",
     context_label: item.linked_record_label,
