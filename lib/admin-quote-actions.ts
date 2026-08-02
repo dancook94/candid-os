@@ -7,6 +7,7 @@ import {
   type QuoteResponseAction,
   type QuoteStatusResponseResult,
 } from "@/lib/quote-status-response";
+import { syncOpportunityFromQuoteEvent } from "@/lib/crm/opportunity-stage-sync";
 import {
   deleteQuoteItemImageObject,
   formatSupabaseStorageError,
@@ -19,6 +20,7 @@ type LoadedAdminQuoteContext = {
     quote_number: number;
     status: string;
     current_version: number;
+    opportunity_id: string | null;
   };
   version: {
     id: string;
@@ -39,7 +41,7 @@ async function loadAdminQuoteContext(
 ): Promise<AdminQuoteActionResult | LoadedAdminQuoteContext> {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
-    .select("id, quote_number, status, current_version")
+    .select("id, quote_number, status, current_version, opportunity_id")
     .eq("id", quoteId)
     .maybeSingle();
 
@@ -88,9 +90,11 @@ export async function respondToQuoteAsAdmin(
   {
     quoteId,
     action,
+    changedBy,
   }: {
     quoteId: string;
     action: QuoteResponseAction;
+    changedBy: string;
   }
 ): Promise<AdminQuoteActionResult> {
   const loaded = await loadAdminQuoteContext(supabase, quoteId);
@@ -99,7 +103,22 @@ export async function respondToQuoteAsAdmin(
     return loaded;
   }
 
-  return applyQuoteStatusResponse(supabase, loaded, action);
+  const result = await applyQuoteStatusResponse(supabase, loaded, action);
+
+  if (!result.ok) {
+    return result;
+  }
+
+  const syncEvent =
+    action === "accept" ? "quote_accepted" : "quote_declined";
+
+  await syncOpportunityFromQuoteEvent(supabase, {
+    quoteId,
+    event: syncEvent,
+    changedBy,
+  });
+
+  return result;
 }
 
 export type PermanentDeleteQuoteResult =

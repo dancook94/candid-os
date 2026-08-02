@@ -33,6 +33,7 @@ export async function POST(_request: Request, context: RouteContext) {
   const result = await respondToQuoteAsAdmin(supabase, {
     quoteId: id,
     action: "decline",
+    changedBy: authResult.userId,
   });
 
   if (!result.ok) {

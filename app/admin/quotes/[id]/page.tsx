@@ -48,7 +48,7 @@ export default async function QuoteDetailPage({
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, quote_number, company_id, quote_request_id, project_name, status, current_version, created_by, updated_at"
+      "id, quote_number, company_id, quote_request_id, opportunity_id, project_name, status, current_version, created_by, updated_at"
     )
     .eq("id", id)
     .maybeSingle();
@@ -126,6 +126,7 @@ export default async function QuoteDetailPage({
   const initialValues: QuoteBuilderInitialValues = {
     companyId: quote.company_id,
     quoteRequestId: quote.quote_request_id,
+    opportunityId: quote.opportunity_id,
     projectName: quote.project_name,
     expiryDate: quoteVersion.expiry_date ?? "",
     paymentTermsDays: quoteVersion.payment_terms_days ?? 14,

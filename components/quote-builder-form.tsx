@@ -68,6 +68,7 @@ export type QuoteBuilderLineItem = {
 export type QuoteBuilderInitialValues = {
   companyId: string;
   quoteRequestId: string | null;
+  opportunityId: string | null;
   projectName: string;
   expiryDate: string;
   paymentTermsDays: number;
@@ -105,6 +106,7 @@ type QuoteBuilderFormProps = {
   currentVersionNumber?: number;
   canEdit?: boolean;
   fallbackQuotePaymentTermsDays?: number;
+  createOpportunityOnSave?: boolean;
 };
 
 function formatSupabaseError(error: unknown) {
@@ -242,6 +244,23 @@ function buildItemsPayload(
   }));
 }
 
+async function syncQuoteOpportunityStage(
+  quoteId: string,
+  event: "quote_draft_created" | "quote_sent"
+) {
+  const response = await fetch(`/api/crm/quotes/${quoteId}/sync`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ event }),
+  });
+
+  const payload = (await response.json()) as { error?: string };
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Unable to sync opportunity stage.");
+  }
+}
+
 function formatSaveError(error: unknown) {
   const storageMessage = formatSupabaseStorageError(error);
 
@@ -334,6 +353,7 @@ export function QuoteBuilderForm({
   currentVersionNumber,
   canEdit = true,
   fallbackQuotePaymentTermsDays = 14,
+  createOpportunityOnSave = false,
 }: QuoteBuilderFormProps) {
   const router = useRouter();
   const supabase = createClient();
@@ -341,6 +361,9 @@ export function QuoteBuilderForm({
   const [companyId, setCompanyId] = useState(initialValues.companyId);
   const [quoteRequestId, setQuoteRequestId] = useState(
     initialValues.quoteRequestId ?? ""
+  );
+  const [opportunityId, setOpportunityId] = useState(
+    initialValues.opportunityId ?? ""
   );
   const [projectName, setProjectName] = useState(initialValues.projectName);
   const [expiryDate, setExpiryDate] = useState(initialValues.expiryDate);
@@ -645,12 +668,43 @@ export function QuoteBuilderForm({
 
         const nextQuoteNumber = await getNextQuoteNumber();
 
+        let linkedOpportunityId = opportunityId || null;
+
+        if (createOpportunityOnSave && !linkedOpportunityId) {
+          const createResponse = await fetch(
+            "/api/crm/opportunities/create-for-quote",
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                companyId,
+                title: trimmedProjectName,
+                description: customerNotes.trim() || null,
+              }),
+            }
+          );
+          const createPayload = (await createResponse.json()) as {
+            opportunityId?: string;
+            error?: string;
+          };
+
+          if (!createResponse.ok || !createPayload.opportunityId) {
+            throw new Error(
+              createPayload.error ?? "Unable to create linked opportunity."
+            );
+          }
+
+          linkedOpportunityId = createPayload.opportunityId;
+          setOpportunityId(createPayload.opportunityId);
+        }
+
         const { data: createdQuote, error: quoteError } = await supabase
           .from("quotes")
           .insert({
             quote_number: nextQuoteNumber,
             company_id: companyId,
             quote_request_id: quoteRequestId || null,
+            opportunity_id: linkedOpportunityId,
             project_name: trimmedProjectName,
             status: "draft",
             current_version: 1,
@@ -718,13 +772,22 @@ export function QuoteBuilderForm({
         if (quoteRequestId) {
           const { error: requestUpdateError } = await supabase
             .from("quote_requests")
-            .update({ request_status: "quoted" })
+            .update({
+              request_status: "quoted",
+              ...(linkedOpportunityId
+                ? { opportunity_id: linkedOpportunityId }
+                : {}),
+            })
             .eq("id", quoteRequestId);
 
           if (requestUpdateError) {
             await rollbackCreatedQuote(createdQuote.id, createdVersion.id);
             throw new Error(requestUpdateError.message);
           }
+        }
+
+        if (linkedOpportunityId) {
+          await syncQuoteOpportunityStage(createdQuote.id, "quote_draft_created");
         }
 
         router.push(`/admin/quotes/${createdQuote.id}`);
@@ -771,6 +834,7 @@ export function QuoteBuilderForm({
         .update({
           company_id: companyId,
           quote_request_id: quoteRequestId || null,
+          opportunity_id: opportunityId || null,
           project_name: trimmedProjectName,
           status: targetStatus,
           ...(targetStatus === "sent" && selectedVersionNumber !== undefined
@@ -853,6 +917,10 @@ export function QuoteBuilderForm({
         if (requestUpdateError) {
           throw requestUpdateError;
         }
+      }
+
+      if (targetStatus === "sent" && opportunityId) {
+        await syncQuoteOpportunityStage(quoteId, "quote_sent");
       }
 
       router.refresh();

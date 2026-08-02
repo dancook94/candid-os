@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
+import { CreateQuoteButton } from "@/components/crm/create-quote-button";
 import { OpportunityNoteForm } from "@/components/crm/opportunity-note-form";
+import { OpportunityQuickActions } from "@/components/crm/opportunity-quick-actions";
 import { OpportunityStageBadge } from "@/components/crm/opportunity-stage-badge";
 import { OpportunityStageChange } from "@/components/crm/opportunity-stage-change";
 import { StaffAvatarStack } from "@/components/crm/staff-avatar-stack";
@@ -22,6 +24,8 @@ import {
 } from "@/lib/crm/format-datetime";
 import { loadOpportunityDetail } from "@/lib/crm/opportunity-detail";
 import { formatOpportunitySourceLabel } from "@/lib/crm/source-labels";
+import { getActiveQuotesForOpportunity } from "@/lib/crm/opportunity-linking";
+import { OPEN_TASK_STATUSES } from "@/lib/crm/task-config";
 import { formatGbp } from "@/lib/format-currency";
 import { createClient } from "@/lib/supabase/server";
 
@@ -57,7 +61,17 @@ export default async function OpportunityDetailPage({
     notFound();
   }
 
+  const activeQuotes = await getActiveQuotesForOpportunity(supabase, id);
+
   const { opportunity } = detail;
+  const openTasks = detail.tasks.filter((task) =>
+    OPEN_TASK_STATUSES.includes(task.status)
+  );
+  const overdueTasks = openTasks.filter(
+    (task) => task.due_at && new Date(task.due_at).getTime() < Date.now()
+  );
+  const nextTask = openTasks[0] ?? null;
+  const primaryQuote = detail.quotes[0] ?? null;
 
   return (
     <AppShell {...shellProps}>
@@ -71,19 +85,89 @@ export default async function OpportunityDetailPage({
               <Link href={`/admin/opportunities/${id}/edit`}>
                 <Button variant="outline">Edit opportunity</Button>
               </Link>
-              <Link
-                href={`/admin/quotes/new?opportunityId=${encodeURIComponent(id)}`}
-              >
-                <Button variant="outline">Create quote</Button>
-              </Link>
+              <CreateQuoteButton
+                opportunityId={id}
+                activeQuotes={activeQuotes}
+              />
               <Link
                 href={`/admin/tasks/new?opportunityId=${encodeURIComponent(id)}`}
               >
                 <Button variant="outline">Add task</Button>
               </Link>
+              <OpportunityQuickActions
+                opportunityId={id}
+                currentStage={opportunity.stage}
+              />
             </div>
           }
         />
+
+        {primaryQuote ? (
+          <Card className="portal-surface mb-6">
+            <CardHeader>
+              <CardTitle>Linked quote summary</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Quote
+                </p>
+                <Link
+                  href={`/admin/quotes/${primaryQuote.id}`}
+                  className="mt-1 block font-medium hover:underline"
+                >
+                  Q-{primaryQuote.quote_number} · {primaryQuote.project_name}
+                </Link>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Status
+                </p>
+                <p className="mt-1 font-medium capitalize">{primaryQuote.status}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Current value
+                </p>
+                <p className="mt-1 font-medium">
+                  {primaryQuote.current_version_total !== null
+                    ? formatGbp(primaryQuote.current_version_total)
+                    : "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Next task
+                </p>
+                <p className="mt-1 font-medium">
+                  {nextTask ? nextTask.title : "None scheduled"}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {overdueTasks.length > 0 ? (
+          <Card className="portal-surface mb-6 border-amber-400/50">
+            <CardHeader>
+              <CardTitle>Overdue tasks</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {overdueTasks.map((task) => (
+                <Link
+                  key={task.id}
+                  href={`/admin/tasks/${task.id}/edit`}
+                  className="block rounded-lg border border-border px-4 py-3 hover:bg-muted/30"
+                >
+                  <p className="font-medium">{task.title}</p>
+                  <p className="text-sm text-muted-foreground">
+                    Due {formatCrmDateTime(task.due_at)}
+                  </p>
+                </Link>
+              ))}
+            </CardContent>
+          </Card>
+        ) : null}
 
         <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
           <Card className="portal-surface">

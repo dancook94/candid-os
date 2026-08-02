@@ -7,6 +7,7 @@ import {
   type QuoteResponseAction,
   type QuoteStatusResponseResult,
 } from "@/lib/quote-status-response";
+import { syncOpportunityFromQuoteEvent } from "@/lib/crm/opportunity-stage-sync";
 
 type LoadedQuoteContext = {
   quote: {
@@ -122,7 +123,19 @@ export async function respondToCustomerQuote(
     return loaded;
   }
 
-  return applyQuoteStatusResponse(supabase, loaded, action);
+  const result = await applyQuoteStatusResponse(supabase, loaded, action);
+
+  if (!result.ok) {
+    return result;
+  }
+
+  await syncOpportunityFromQuoteEvent(supabase, {
+    quoteId,
+    event: action === "accept" ? "quote_accepted" : "quote_declined",
+    changedBy: userId,
+  });
+
+  return result;
 }
 
 export function canCustomerRespondToQuote({

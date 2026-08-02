@@ -36,6 +36,7 @@ async function handleAdminQuoteResponse(
   const result = await respondToQuoteAsAdmin(supabase, {
     quoteId: id,
     action,
+    changedBy: authResult.userId,
   });
 
   if (!result.ok) {

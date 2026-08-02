@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/app-shell";
+import { NewQuoteBuilderShell } from "@/components/crm/new-quote-builder-shell";
 import { PageHeader } from "@/components/page-header";
 import {
   QuoteBuilderForm,
@@ -9,8 +10,6 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   parsePaymentTermsDays,
-  PAYMENT_TERMS_MAX_DAYS,
-  PAYMENT_TERMS_MIN_DAYS,
   resolveQuotePaymentTermsDays,
 } from "@/lib/payment-terms";
 import { computeDefaultQuoteExpiryDate } from "@/lib/app-settings";
@@ -20,7 +19,10 @@ import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { createClient } from "@/lib/supabase/server";
 
 type NewQuotePageProps = {
-  searchParams: Promise<{ quoteRequestId?: string }>;
+  searchParams: Promise<{
+    quoteRequestId?: string;
+    opportunityId?: string;
+  }>;
 };
 
 function buildCustomerNotes(description: string, notes: string | null) {
@@ -28,36 +30,45 @@ function buildCustomerNotes(description: string, notes: string | null) {
 }
 
 export default async function NewQuotePage({ searchParams }: NewQuotePageProps) {
-  const { quoteRequestId } = await searchParams;
+  const { quoteRequestId, opportunityId } = await searchParams;
   const supabase = await createClient();
-  const loginPath = quoteRequestId
-    ? `/admin/quotes/new?quoteRequestId=${encodeURIComponent(quoteRequestId)}`
-    : "/admin/quotes/new";
+  const loginPath = opportunityId
+    ? `/admin/quotes/new?opportunityId=${encodeURIComponent(opportunityId)}`
+    : quoteRequestId
+      ? `/admin/quotes/new?quoteRequestId=${encodeURIComponent(quoteRequestId)}`
+      : "/admin/quotes/new";
   const profile = await requireAdminPageAccess(supabase, loginPath);
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [{ data: companies }, { data: quoteRequests }, appSettingsResult] =
+  const [{ data: companies }, { data: quoteRequests }, { data: opportunities }, appSettingsResult] =
     await Promise.all([
-    supabase
-      .from("companies")
-      .select("id, company_name, payment_terms_days")
-      .eq("is_active", true)
-      .order("company_name"),
-    supabase
-      .from("quote_requests")
-      .select("id, company_id, project_name")
-      .order("created_at", { ascending: false }),
-    loadAppSettings(supabase),
-  ]);
+      supabase
+        .from("companies")
+        .select("id, company_name, payment_terms_days")
+        .eq("is_active", true)
+        .order("company_name"),
+      supabase
+        .from("quote_requests")
+        .select("id, company_id, project_name, opportunity_id")
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("opportunities")
+        .select("id, title, company_id")
+        .not("stage", "in", '("won","lost")')
+        .order("updated_at", { ascending: false })
+        .limit(200),
+      loadAppSettings(supabase),
+    ]);
 
   const appSettings = appSettingsResult.settings;
 
   let initialValues: QuoteBuilderInitialValues = {
     companyId: "",
     quoteRequestId: null,
+    opportunityId: null,
     projectName: "",
     expiryDate: computeDefaultQuoteExpiryDate(appSettings.default_quote_expiry_days),
     paymentTermsDays: resolveQuotePaymentTermsDays(
@@ -74,7 +85,7 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
   if (quoteRequestId) {
     const { data: quoteRequest } = await supabase
       .from("quote_requests")
-      .select("id, company_id, project_name, description, notes")
+      .select("id, company_id, project_name, description, notes, opportunity_id")
       .eq("id", quoteRequestId)
       .maybeSingle();
 
@@ -86,6 +97,7 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
       initialValues = {
         companyId: quoteRequest.company_id,
         quoteRequestId: quoteRequest.id,
+        opportunityId: quoteRequest.opportunity_id,
         projectName: quoteRequest.project_name,
         expiryDate: computeDefaultQuoteExpiryDate(appSettings.default_quote_expiry_days),
         paymentTermsDays: resolveQuotePaymentTermsDays(
@@ -104,7 +116,37 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
     }
   }
 
+  if (opportunityId) {
+    const { data: opportunity } = await supabase
+      .from("opportunities")
+      .select("id, company_id, title, description")
+      .eq("id", opportunityId)
+      .maybeSingle();
+
+    if (opportunity) {
+      const linkedCompany = (companies ?? []).find(
+        (company) => company.id === opportunity.company_id
+      );
+
+      initialValues = {
+        ...initialValues,
+        companyId: opportunity.company_id,
+        opportunityId: opportunity.id,
+        projectName: opportunity.title,
+        paymentTermsDays: resolveQuotePaymentTermsDays(
+          linkedCompany?.payment_terms_days,
+          appSettings.default_payment_terms_days
+        ),
+        customerNotes: buildCustomerNotes(
+          opportunity.description ?? "",
+          initialValues.customerNotes
+        ),
+      };
+    }
+  }
+
   const shellProps = await buildAdminAppShellProps(supabase, profile);
+  const useDirectBuilder = Boolean(opportunityId || quoteRequestId);
 
   return (
     <AppShell {...shellProps}>
@@ -114,20 +156,37 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
           title="New quote"
           description="Build a draft quote for a customer."
           actions={
-            <Link href="/admin/quotes">
-              <Button variant="outline">Back to quotes</Button>
-            </Link>
+            opportunityId ? (
+              <Link href={`/admin/opportunities/${opportunityId}`}>
+                <Button variant="outline">Back to opportunity</Button>
+              </Link>
+            ) : (
+              <Link href="/admin/quotes">
+                <Button variant="outline">Back to quotes</Button>
+              </Link>
+            )
           }
         />
 
-        <QuoteBuilderForm
-          mode="create"
-          createdBy={user!.id}
-          companies={companies ?? []}
-          quoteRequests={quoteRequests ?? []}
-          initialValues={initialValues}
-          fallbackQuotePaymentTermsDays={appSettings.default_payment_terms_days}
-        />
+        {useDirectBuilder ? (
+          <QuoteBuilderForm
+            mode="create"
+            createdBy={user!.id}
+            companies={companies ?? []}
+            quoteRequests={quoteRequests ?? []}
+            initialValues={initialValues}
+            fallbackQuotePaymentTermsDays={appSettings.default_payment_terms_days}
+          />
+        ) : (
+          <NewQuoteBuilderShell
+            createdBy={user!.id}
+            companies={companies ?? []}
+            quoteRequests={quoteRequests ?? []}
+            opportunities={opportunities ?? []}
+            initialValues={initialValues}
+            fallbackQuotePaymentTermsDays={appSettings.default_payment_terms_days}
+          />
+        )}
       </div>
     </AppShell>
   );
