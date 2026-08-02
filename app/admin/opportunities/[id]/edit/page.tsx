@@ -1,14 +1,12 @@
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
-import {
-  buildOpportunityFormInitialValues,
-  OpportunityForm,
-} from "@/components/crm/opportunity-form";
+import { OpportunityForm } from "@/components/crm/opportunity-form";
 import { PageHeader } from "@/components/page-header";
 import { buildCrmAppShellProps } from "@/lib/admin-shell-props";
 import { requireCrmPageAccess } from "@/lib/crm-page-access";
 import { loadCrmStaffProfiles } from "@/lib/crm/crm-staff";
+import { buildOpportunityFormInitialValues } from "@/lib/crm/opportunity-form-values";
 import {
   loadOpportunityCollaboratorIds,
 } from "@/lib/crm/opportunity-detail";

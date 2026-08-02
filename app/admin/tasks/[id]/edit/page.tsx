@@ -1,14 +1,12 @@
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
-import {
-  buildTaskFormInitialValues,
-  TaskForm,
-} from "@/components/crm/task-form";
+import { TaskForm } from "@/components/crm/task-form";
 import { PageHeader } from "@/components/page-header";
 import { buildCrmAppShellProps } from "@/lib/admin-shell-props";
 import { requireCrmPageAccess } from "@/lib/crm-page-access";
 import { loadCrmStaffProfiles } from "@/lib/crm/crm-staff";
+import { buildTaskFormInitialValues } from "@/lib/crm/task-form-values";
 import { loadTaskAssigneeIds } from "@/lib/crm/task-assignees";
 import { createClient } from "@/lib/supabase/server";
 
