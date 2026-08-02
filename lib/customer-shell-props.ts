@@ -31,7 +31,9 @@ export async function loadCustomerPortalProfile(
 ) {
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, company_id, account_status, user_role, avatar_storage_path")
+    .select(
+      "full_name, company_id, account_status, user_role, avatar_storage_path, updated_at"
+    )
     .eq("id", userId)
     .single();
 

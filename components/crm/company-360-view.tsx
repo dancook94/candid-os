@@ -519,6 +519,69 @@ function CompanyContactsSection({
   );
 }
 
+function CompanyAddressesSection({
+  addresses,
+  available,
+}: {
+  addresses: Company360Data["addresses"];
+  available: boolean;
+}) {
+  if (!available) {
+    return null;
+  }
+
+  return (
+    <Card className="portal-surface overflow-hidden">
+      <CardHeader className="border-b border-border">
+        <CardTitle className="text-lg font-semibold">Saved addresses</CardTitle>
+        <CardDescription>
+          Shared with the customer portal settings page.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4 pt-6">
+        {addresses.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No saved addresses yet.</p>
+        ) : (
+          addresses.map((address) => (
+            <div key={address.id} className="rounded-xl border border-border p-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-medium text-foreground">
+                  {address.label || "Address"}
+                </p>
+                {!address.is_active ? (
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs">
+                    Inactive
+                  </span>
+                ) : null}
+                {address.is_default_delivery ? (
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs">
+                    Default delivery
+                  </span>
+                ) : null}
+                {address.is_default_billing ? (
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs">
+                    Default billing
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {[
+                  address.address_line_1,
+                  address.address_line_2,
+                  address.city,
+                  address.postcode,
+                ]
+                  .filter(Boolean)
+                  .join(", ")}
+              </p>
+            </div>
+          ))
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 function CompanyDetailsSection({ company }: { company: Company360Company }) {
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
@@ -695,6 +758,10 @@ export function Company360View({ company, data }: Company360ViewProps) {
           <QuotesTable companyId={company.id} quotes={data.quotes.slice(0, 5)} />
           <TasksTable companyId={company.id} tasks={data.tasks.slice(0, 5)} />
           <CompanyDetailsSection company={company} />
+          <CompanyAddressesSection
+            addresses={data.addresses}
+            available={data.addressesAvailable}
+          />
           <Card className="portal-surface overflow-hidden">
             <CardHeader className="border-b border-border">
               <CardTitle className="text-lg font-semibold">

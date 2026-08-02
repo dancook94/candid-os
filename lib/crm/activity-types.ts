@@ -42,6 +42,12 @@ export const CRM_ACTIVITY_TYPES = {
   notePinned: "note_pinned",
   noteUnpinned: "note_unpinned",
   noteDeleted: "note_deleted",
+  customerContactUpdated: "customer_contact_updated",
+  customerCompanyUpdated: "customer_company_updated",
+  companyAddressCreated: "company_address_created",
+  companyAddressUpdated: "company_address_updated",
+  companyAddressDeactivated: "company_address_deactivated",
+  notificationPreferencesUpdated: "notification_preferences_updated",
 } as const;
 
 /** @deprecated Use CRM_ACTIVITY_TYPES */

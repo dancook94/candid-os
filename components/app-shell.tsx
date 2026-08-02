@@ -58,6 +58,11 @@ const customerLinks = [
     label: "Jobs",
     icon: Package,
   },
+  {
+    href: "/settings",
+    label: "Settings",
+    icon: Settings,
+  },
 ];
 
 const adminLinks = [

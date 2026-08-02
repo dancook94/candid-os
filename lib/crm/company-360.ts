@@ -20,6 +20,10 @@ import {
   fetchContactsList,
   type ContactListRow,
 } from "@/lib/crm/contacts";
+import {
+  loadAllCompanyAddressesForAdmin,
+  type CompanyAddressRecord,
+} from "@/lib/customer-settings/addresses";
 
 const TERMINAL_STAGE_FILTER = '("won","lost")';
 
@@ -76,6 +80,8 @@ export type Company360Data = {
   quotes: AdminQuoteListRow[];
   tasks: Company360Task[];
   contacts: Company360Contact[];
+  addresses: CompanyAddressRecord[];
+  addressesAvailable: boolean;
   activity: Company360ActivityItem[];
   notes: CrmNoteListItem[];
   errors: string[];
@@ -492,7 +498,7 @@ export async function fetchCompany360(
   );
   const quoteIds = [...quoteLabelById.keys()];
 
-  const [contacts, tasks, crmFeed] = await Promise.all([
+  const [contacts, tasks, crmFeed, addressFeature] = await Promise.all([
     loadCompanyContacts(supabase, companyId, errors),
     fetchCompanyTasks(
       supabase,
@@ -503,6 +509,10 @@ export async function fetchCompany360(
       errors
     ),
     fetchCompanyCrmFeed(supabase, companyId, errors, options),
+    loadAllCompanyAddressesForAdmin(supabase, companyId).catch(() => ({
+      available: false,
+      addresses: [],
+    })),
   ]);
 
   const opportunities = opportunitiesResult.opportunities.filter(
@@ -524,6 +534,8 @@ export async function fetchCompany360(
     quotes: quotesResult.quotes,
     tasks,
     contacts,
+    addresses: addressFeature.addresses,
+    addressesAvailable: addressFeature.available,
     activity: crmFeed.activity,
     notes: crmFeed.notes,
     errors,
