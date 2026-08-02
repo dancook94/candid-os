@@ -13,7 +13,7 @@ import { createRouteHandlerClient } from "@/lib/supabase/server";
 
 const isDevelopment = process.env.NODE_ENV === "development";
 
-function logInviteCallback(message: string, details?: Record<string, unknown>) {
+function logAuthCallback(message: string, details?: Record<string, unknown>) {
   if (!isDevelopment) {
     return;
   }
@@ -56,7 +56,7 @@ export async function GET(request: Request) {
   const authErrorDescription = requestUrl.searchParams.get("error_description");
   const safeNext = resolveInviteCallbackNextPath(next);
 
-  logInviteCallback("Invite callback received", {
+  logAuthCallback("Auth callback received", {
     hasCode: Boolean(code),
     safeNext,
     hasAuthError: Boolean(authError),
@@ -65,7 +65,7 @@ export async function GET(request: Request) {
   });
 
   if (authError) {
-    logInviteCallback("Supabase returned an auth error", {
+    logAuthCallback("Supabase returned an auth error", {
       authError,
       authErrorDescription,
     });
@@ -83,7 +83,7 @@ export async function GET(request: Request) {
   }
 
   if (!code) {
-    logInviteCallback("No auth code present; redirecting to login");
+    logAuthCallback("No auth code present; redirecting to login");
 
     return loginErrorRedirect(
       requestUrl.origin,
@@ -99,7 +99,7 @@ export async function GET(request: Request) {
   const { error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
-    logInviteCallback("exchangeCodeForSession failed", {
+    logAuthCallback("exchangeCodeForSession failed", {
       message: error.message,
       status: error.status,
       name: error.name,
@@ -117,7 +117,7 @@ export async function GET(request: Request) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  logInviteCallback("exchangeCodeForSession succeeded", {
+  logAuthCallback("exchangeCodeForSession succeeded", {
     safeNext,
     hasAuthenticatedUser: Boolean(user),
   });
@@ -132,7 +132,7 @@ export async function GET(request: Request) {
       .single();
 
     if (profileError) {
-      logInviteCallback("Profile lookup failed after auth callback", {
+      logAuthCallback("Profile lookup failed after auth callback", {
         message: profileError.message,
       });
 

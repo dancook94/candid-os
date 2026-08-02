@@ -75,8 +75,8 @@ export default function SetPasswordForm() {
 
   return (
     <AuthPageLayout
-      title="Create your password"
-      description="Set a password to complete your Candid OS account."
+      title="Set your password"
+      description="Choose a password for your Candid OS account."
     >
       <form className="space-y-5" onSubmit={handleSubmit}>
         <div className="space-y-2">

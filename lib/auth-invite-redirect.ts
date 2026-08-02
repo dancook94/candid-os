@@ -1,5 +1,5 @@
 /**
- * Supabase invite redirect target for password setup after email acceptance.
+ * Supabase redirect target for password setup after invite or recovery email.
  */
 export function buildInvitePasswordSetupRedirect(origin: string) {
   return `${origin}/auth/callback?next=/set-password`;
@@ -36,15 +36,15 @@ export function getAuthCallbackErrorMessage(code: string | null | undefined) {
     case AUTH_CALLBACK_ERRORS.missingInvitationCode:
       return "This invitation link is missing a verification code. Open the latest invitation email and try again.";
     case AUTH_CALLBACK_ERRORS.invitationExpired:
-      return "This invitation link has expired. Ask your administrator to send a new portal invitation.";
+      return "This link has expired. Request a new password reset or ask your administrator to resend your portal invitation.";
     case AUTH_CALLBACK_ERRORS.invitationExchangeFailed:
-      return "We could not verify your invitation. Ask your administrator to resend the invite.";
+      return "We could not verify your sign-in link. Request a new password reset or ask your administrator to resend your invite.";
     case AUTH_CALLBACK_ERRORS.inviteAuthError:
-      return "The invitation link could not be accepted. Ask your administrator to resend the invite.";
+      return "The sign-in link could not be accepted. Request a new password reset or ask your administrator to resend your invite.";
     case "invite_callback_failed":
       return "We could not complete your invitation sign-in. Ask your administrator to resend the invite.";
     case "invitation_session_required":
-      return "Your invitation session is not active. Open the invitation email again or ask for a new invite.";
+      return "Your password setup session is not active. Open the link from your invitation or reset email, or request a new one.";
     default:
       return null;
   }

@@ -4,6 +4,7 @@ import { NextResponse, type NextRequest } from "next/server";
 const PUBLIC_AUTH_PATHS = [
   "/login",
   "/register",
+  "/forgot-password",
   "/auth/callback",
   "/set-password",
 ];
