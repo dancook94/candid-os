@@ -235,7 +235,7 @@ async function provisionDropboxForJob({
   }
 }
 
-async function ensureDropboxOnExistingJob(
+export async function ensureDropboxOnExistingJob(
   adminClient: SupabaseClient,
   job: JobRecord
 ): Promise<JobRecord> {
@@ -253,7 +253,14 @@ async function ensureDropboxOnExistingJob(
   });
 
   if (!provisioned.dropboxReady) {
-    return job;
+    if (job.dropbox_setup_status !== "failed") {
+      await adminClient
+        .from("jobs")
+        .update({ dropbox_setup_status: "failed" })
+        .eq("id", job.id);
+    }
+
+    return { ...job, dropbox_setup_status: "failed" as DropboxSetupStatus };
   }
 
   const { data: updatedJob, error } = await adminClient
@@ -578,4 +585,38 @@ export async function loadJobIdForQuote(
   }
 
   return data?.id ?? null;
+}
+
+export async function retryDropboxSetupForJob(jobId: string) {
+  const adminClient = createAdminClient();
+
+  const { data: job, error } = await adminClient
+    .from("jobs")
+    .select(JOB_LIST_COLUMNS)
+    .eq("id", jobId)
+    .maybeSingle();
+
+  if (error) {
+    throw new JobError(error.message, 500);
+  }
+
+  if (!job) {
+    throw new JobError("Job not found.", 404);
+  }
+
+  if (!isDropboxConfigured()) {
+    throw new JobError(
+      "Dropbox integration is not configured. Set DROPBOX_APP_KEY, DROPBOX_APP_SECRET, DROPBOX_REFRESH_TOKEN, and DROPBOX_ROOT_FOLDER.",
+      503
+    );
+  }
+
+  const updatedJob = await ensureDropboxOnExistingJob(adminClient, job as JobRecord);
+
+  return {
+    job: updatedJob,
+    dropboxReady:
+      updatedJob.dropbox_setup_status === "ready" &&
+      Boolean(updatedJob.dropbox_folder_path),
+  };
 }

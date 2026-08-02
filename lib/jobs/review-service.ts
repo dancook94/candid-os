@@ -6,6 +6,8 @@ import {
 } from "@/lib/jobs/activity";
 import { JobError } from "@/lib/jobs/errors";
 import type { JobArtworkStatus } from "@/lib/jobs/types";
+import { syncJobStatusAfterArtworkReview } from "@/lib/jobs/job-status-sync";
+import { revalidateJobPages } from "@/lib/jobs/revalidation";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function updateArtworkReviewStatus({
@@ -39,7 +41,7 @@ export async function updateArtworkReviewStatus({
 
   const { data: job, error: jobError } = await adminClient
     .from("jobs")
-    .select("id, company_id, quote_id, opportunity_id, job_reference")
+    .select("id, company_id, quote_id, opportunity_id, job_reference, status")
     .eq("id", jobId)
     .maybeSingle();
 
@@ -117,6 +119,16 @@ export async function updateArtworkReviewStatus({
       job_file_id: fileId,
       artwork_status: artworkStatus,
       version_number: file.version_number,
+      file_name: file.file_name,
+      file_size_bytes: file.file_size_bytes,
     },
+  });
+
+  await syncJobStatusAfterArtworkReview(adminClient, job, artworkStatus);
+
+  revalidateJobPages({
+    jobId: job.id,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
   });
 }

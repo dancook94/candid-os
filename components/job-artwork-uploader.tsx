@@ -5,7 +5,7 @@ import { useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { JOB_ARTWORK_ACCEPT } from "@/lib/jobs/constants";
+import { JOB_ARTWORK_ACCEPT, getJobArtworkMaxBytes } from "@/lib/jobs/constants";
 import { cn } from "@/lib/utils";
 import { formatFileSize } from "@/lib/quote-request-attachments";
 
@@ -39,10 +39,10 @@ export function JobArtworkUploader({
   const [dragActive, setDragActive] = useState(false);
   const [upload, setUpload] = useState<UploadState | null>(null);
 
-  const heading = replaceFileId ? "Upload replacement artwork" : "Upload Artwork";
+  const heading = replaceFileId ? "Upload replacement artwork" : "Upload artwork";
   const supportingText = replaceFileId
     ? "Upload a replacement file. The previous version will be kept for reference."
-    : "Upload print-ready artwork for this job. Large files may take several minutes.";
+    : "Upload your print-ready artwork for this job. Large files may take several minutes.";
 
   const canInteract =
     enabled &&
@@ -248,7 +248,8 @@ export function JobArtworkUploader({
               Drag and drop artwork here
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              PDF, AI, EPS, SVG, PSD, TIFF, JPG, PNG, or ZIP
+              PDF, AI, EPS, SVG, PSD, TIFF, JPG, PNG, or ZIP · up to{" "}
+              {formatFileSize(getJobArtworkMaxBytes())}
             </p>
             <div className="mt-4 flex justify-center gap-3">
               <Button

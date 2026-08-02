@@ -109,13 +109,16 @@ export type CustomerJobDetail = {
   id: string;
   reference: string;
   projectTitle: string;
-  status: JobStatus;
+  status: JobStatus | string;
   statusLabel: string;
   requiredDate: string | null;
   fulfilmentMethod: string | null;
+  deliveryDetails: string | null;
   quoteId: string;
   quoteNumber: string | null;
   artworkRequired: boolean;
+  needsArtworkUpload: boolean;
+  changesRequiredComment: string | null;
   dropboxConfigured: boolean;
   files: CustomerJobFileView[];
 };

@@ -26,6 +26,8 @@ export type CustomerJobRecord = {
   fulfilmentMethod: string | null;
   quoteId: string | null;
   quoteNumber: string | null;
+  artworkRequired: boolean;
+  needsArtworkUpload: boolean;
   updatedAt: string;
 };
 

@@ -5,6 +5,11 @@ import {
   CUSTOMER_ARTWORK_STATUS_LABELS,
   JOB_STATUS_LABELS,
 } from "@/lib/jobs/constants";
+import {
+  getCustomerChangesRequiredComment,
+  jobNeedsArtworkUpload,
+  resolveCustomerJobStatus,
+} from "@/lib/jobs/customer-status";
 import { isMissingJobsSchemaError } from "@/lib/jobs/errors";
 import { JOB_LIST_COLUMNS } from "@/lib/jobs/job-select";
 import type {
@@ -18,18 +23,23 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 function mapJobToCustomerListRecord(
   job: JobRecord,
-  quoteNumber: number | null
+  quoteNumber: number | null,
+  files: JobFileRecord[]
 ): CustomerJobRecord {
+  const statusView = resolveCustomerJobStatus(job, files);
+
   return {
     id: job.id,
     reference: job.job_reference,
     projectTitle: job.project_name,
-    status: job.status,
-    statusLabel: JOB_STATUS_LABELS[job.status] ?? job.status,
+    status: statusView.status,
+    statusLabel: statusView.statusLabel,
     requiredDate: job.required_date,
     fulfilmentMethod: job.fulfilment_method,
     quoteId: job.quote_id,
     quoteNumber: quoteNumber ? `Q-${quoteNumber}` : null,
+    artworkRequired: job.artwork_required,
+    needsArtworkUpload: jobNeedsArtworkUpload(job, files),
     updatedAt: job.updated_at,
   };
 }
@@ -102,22 +112,39 @@ export async function loadCustomerJobs(
 
   const jobs = (data ?? []) as JobRecord[];
   const quoteIds = jobs.map((job) => job.quote_id);
+  const jobIds = jobs.map((job) => job.id);
 
-  const { data: quotes } =
+  const [{ data: quotes }, { data: files }] = await Promise.all([
     quoteIds.length > 0
-      ? await adminClient
-          .from("quotes")
-          .select("id, quote_number")
-          .in("id", quoteIds)
-      : { data: [] as { id: string; quote_number: number }[] };
+      ? adminClient.from("quotes").select("id, quote_number").in("id", quoteIds)
+      : Promise.resolve({ data: [] as { id: string; quote_number: number }[] }),
+    jobIds.length > 0
+      ? adminClient
+          .from("job_files")
+          .select("id, job_id, upload_status, artwork_status, version_number, deleted_at")
+          .in("job_id", jobIds)
+          .is("deleted_at", null)
+      : Promise.resolve({ data: [] as JobFileRecord[] }),
+  ]);
 
   const quoteNumberById = new Map(
     (quotes ?? []).map((quote) => [quote.id, quote.quote_number])
   );
 
+  const filesByJobId = new Map<string, JobFileRecord[]>();
+  for (const file of (files ?? []) as JobFileRecord[]) {
+    const existing = filesByJobId.get(file.job_id) ?? [];
+    existing.push(file);
+    filesByJobId.set(file.job_id, existing);
+  }
+
   return {
     jobs: jobs.map((job) =>
-      mapJobToCustomerListRecord(job, quoteNumberById.get(job.quote_id) ?? null)
+      mapJobToCustomerListRecord(
+        job,
+        quoteNumberById.get(job.quote_id) ?? null,
+        filesByJobId.get(job.id) ?? []
+      )
     ),
     jobsDataAvailable: true,
     loadError: null as string | null,
@@ -176,20 +203,54 @@ export async function loadCustomerJobDetail(
   );
 
   const typedJob = job as JobRecord;
+  const typedFiles = (files ?? []) as JobFileRecord[];
+  const statusView = resolveCustomerJobStatus(typedJob, typedFiles);
+
+  let deliveryDetails: string | null = null;
+
+  if (typedJob.fulfilment_method === "delivery" && typedJob.quote_request_id) {
+    const { data: quoteRequest } = await adminClient
+      .from("quote_requests")
+      .select(
+        "delivery_address_line_1, delivery_address_line_2, delivery_city, delivery_postcode, delivery_contact_name, delivery_contact_phone"
+      )
+      .eq("id", typedJob.quote_request_id)
+      .maybeSingle();
+
+    if (quoteRequest) {
+      const address = [
+        quoteRequest.delivery_address_line_1,
+        quoteRequest.delivery_address_line_2,
+        quoteRequest.delivery_city,
+        quoteRequest.delivery_postcode,
+      ]
+        .filter(Boolean)
+        .join(", ");
+
+      const contact = [quoteRequest.delivery_contact_name, quoteRequest.delivery_contact_phone]
+        .filter(Boolean)
+        .join(" · ");
+
+      deliveryDetails = [address, contact].filter(Boolean).join(" — ") || null;
+    }
+  }
 
   return {
     id: typedJob.id,
     reference: typedJob.job_reference,
     projectTitle: typedJob.project_name,
-    status: typedJob.status,
-    statusLabel: JOB_STATUS_LABELS[typedJob.status] ?? typedJob.status,
+    status: statusView.status,
+    statusLabel: statusView.statusLabel,
     requiredDate: typedJob.required_date,
     fulfilmentMethod: typedJob.fulfilment_method,
+    deliveryDetails,
     quoteId: typedJob.quote_id,
     quoteNumber: quote?.quote_number ? `Q-${quote.quote_number}` : null,
     artworkRequired: typedJob.artwork_required,
+    needsArtworkUpload: jobNeedsArtworkUpload(typedJob, typedFiles),
+    changesRequiredComment: getCustomerChangesRequiredComment(typedFiles),
     dropboxConfigured: isDropboxConfigured(),
-    files: ((files ?? []) as JobFileRecord[]).map((file) =>
+    files: typedFiles.map((file) =>
       mapJobFileToCustomerView(
         file,
         uploaderNameById.get(file.uploaded_by_profile_id) ?? null

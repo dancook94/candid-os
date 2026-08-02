@@ -65,6 +65,7 @@ export function CustomerJobsList({ jobs }: CustomerJobsListProps) {
             <th>Required date</th>
             <th>Fulfilment</th>
             <th>Related quote</th>
+            <th>Artwork</th>
             <th>Last updated</th>
           </tr>
         </thead>
@@ -106,6 +107,17 @@ export function CustomerJobsList({ jobs }: CustomerJobsListProps) {
                   </Link>
                 ) : (
                   "—"
+                )}
+              </td>
+              <td className="p-4">
+                {job.artworkRequired ? (
+                  job.needsArtworkUpload ? (
+                    <StatusBadge status="pending" label="Artwork required" />
+                  ) : (
+                    <span className="text-sm text-muted-foreground">Provided</span>
+                  )
+                ) : (
+                  <span className="text-sm text-muted-foreground">Not required</span>
                 )}
               </td>
               <td className="p-4 text-muted-foreground">

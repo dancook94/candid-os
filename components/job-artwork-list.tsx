@@ -76,7 +76,7 @@ export function JobArtworkList({
         disabledMessage={
           dropboxConfigured
             ? null
-            : "Artwork upload is not available yet. Please contact Candid Creative."
+            : "Artwork upload is temporarily unavailable. Please contact Candid Creative."
         }
         replaceFileId={replaceFileId}
         onComplete={() => {

@@ -21,7 +21,7 @@ export function CustomerJobArtworkSection({ job }: { job: CustomerJobDetail }) {
       jobId={job.id}
       files={job.files}
       dropboxConfigured={job.dropboxConfigured}
-      showArtworkRequired={job.status === "awaiting_artwork"}
+      showArtworkRequired={job.needsArtworkUpload}
       onChanged={() => router.refresh()}
     />
   );

@@ -119,6 +119,12 @@ export default async function CustomerJobDetailPage({
                 {job.fulfilmentMethod === "collection" ? "Collection" : "Delivery"}
               </p>
             </div>
+            {job.fulfilmentMethod === "delivery" && job.deliveryDetails ? (
+              <div className="md:col-span-2">
+                <p className="text-muted-foreground">Delivery details</p>
+                <p className="mt-2 font-medium text-neutral-950">{job.deliveryDetails}</p>
+              </div>
+            ) : null}
             <div>
               <p className="text-muted-foreground">Related quote</p>
               <p className="mt-2 font-medium text-neutral-950">
@@ -136,6 +142,15 @@ export default async function CustomerJobDetailPage({
             </div>
           </CardContent>
         </Card>
+
+        {job.changesRequiredComment ? (
+          <Card className="portal-surface mb-6 overflow-hidden border-amber-200 bg-amber-50">
+            <CardContent className="pt-6">
+              <p className="text-base font-semibold text-amber-950">Changes required</p>
+              <p className="mt-2 text-sm text-amber-900">{job.changesRequiredComment}</p>
+            </CardContent>
+          </Card>
+        ) : null}
 
         <Card className="portal-surface overflow-hidden">
           <CardContent className="pt-6">

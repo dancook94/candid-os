@@ -1,12 +1,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { buildCustomerArtworkFolderPath } from "@/lib/dropbox/job-folders";
+import { isDropboxConfigured } from "@/lib/dropbox/client";
 import {
   appendDropboxUploadSession,
   finishDropboxUploadSession,
   startDropboxUploadSession,
 } from "@/lib/dropbox/upload-session";
-import { isDropboxConfigured } from "@/lib/dropbox/client";
+import { ensureDropboxOnExistingJob } from "@/lib/jobs/create-from-quote";
 import {
   JOB_ACTIVITY_TYPES,
   logJobActivity,
@@ -21,6 +21,8 @@ import {
   validateArtworkUploadInput,
 } from "@/lib/jobs/file-validation";
 import type { JobFileRecord } from "@/lib/jobs/types";
+import { syncJobStatusAfterArtworkUpload } from "@/lib/jobs/job-status-sync";
+import { revalidateJobPages } from "@/lib/jobs/revalidation";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 async function getNextArtworkVersion(
@@ -86,13 +88,25 @@ export async function createArtworkUploadSession(
     throw new JobError("Dropbox integration is not configured.", 503);
   }
 
+  const adminClient = createAdminClient();
+  const jobWithDropbox = await ensureDropboxOnExistingJob(adminClient, context.job);
+
+  if (
+    jobWithDropbox.dropbox_setup_status !== "ready" ||
+    !jobWithDropbox.dropbox_folder_path
+  ) {
+    throw new JobError(
+      "Artwork upload is temporarily unavailable. Please contact Candid Creative.",
+      503
+    );
+  }
+
   const validationError = validateArtworkUploadInput(input);
   if (validationError) {
     throw new JobError(validationError, 400);
   }
 
   if (input.supersedesFileId) {
-    const adminClient = createAdminClient();
     const { data: existing, error: existingError } = await adminClient
       .from("job_files")
       .select("id, artwork_status, upload_status")
@@ -116,7 +130,6 @@ export async function createArtworkUploadSession(
     }
   }
 
-  const adminClient = createAdminClient();
   const { versionNumber, originalFileName } = await getNextArtworkVersion(
     adminClient,
     context.job.id,
@@ -125,10 +138,7 @@ export async function createArtworkUploadSession(
   );
 
   const storedFileName = buildVersionedArtworkFileName(input.fileName, versionNumber);
-  const dropboxFolder = buildCustomerArtworkFolderPath(
-    context.job.job_reference,
-    context.job.project_name
-  );
+  const dropboxFolder = `${jobWithDropbox.dropbox_folder_path}/01 Customer Artwork`;
   const dropboxPath = `${dropboxFolder}/${storedFileName}`;
 
   const dropboxSession = await startDropboxUploadSession();
@@ -237,10 +247,16 @@ export async function finishArtworkUpload(
     throw new JobError("Upload is incomplete.", 400);
   }
 
-  const dropboxPath = `${buildCustomerArtworkFolderPath(
-    context.job.job_reference,
-    context.job.project_name
-  )}/${file.file_name}`;
+  const jobWithDropbox = await ensureDropboxOnExistingJob(adminClient, context.job);
+
+  if (!jobWithDropbox.dropbox_folder_path) {
+    throw new JobError(
+      "Artwork upload is temporarily unavailable. Please contact Candid Creative.",
+      503
+    );
+  }
+
+  const dropboxPath = `${jobWithDropbox.dropbox_folder_path}/01 Customer Artwork/${file.file_name}`;
 
   await adminClient
     .from("job_files")
@@ -304,6 +320,7 @@ export async function finishArtworkUpload(
         job_file_id: file.id,
         version_number: file.version_number,
         file_name: file.file_name,
+        file_size_bytes: file.file_size_bytes,
       },
     });
 
@@ -311,6 +328,14 @@ export async function finishArtworkUpload(
       companyId: context.company.id,
       jobId: context.job.id,
       fileId: file.id,
+    });
+
+    await syncJobStatusAfterArtworkUpload(adminClient, context.job.id);
+
+    revalidateJobPages({
+      jobId: context.job.id,
+      quoteId: context.job.quote_id,
+      opportunityId: context.job.opportunity_id,
     });
 
     return completedFile as JobFileRecord;

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AdminJobArtworkPanel } from "@/components/admin-job-artwork-panel";
+import { AdminJobDropboxPanel } from "@/components/admin-job-dropbox-panel";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
@@ -17,6 +18,7 @@ import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { isMissingJobsSchemaError } from "@/lib/jobs/errors";
 import { loadAdminJobDetail } from "@/lib/jobs/loaders";
 import { JOB_STATUS_LABELS } from "@/lib/jobs/constants";
+import { isDropboxConfigured } from "@/lib/dropbox/client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -153,6 +155,12 @@ export default async function AdminJobDetailPage({
             ) : null}
           </CardContent>
         </Card>
+
+        <AdminJobDropboxPanel
+          jobId={detail.job.id}
+          dropboxSetupStatus={detail.job.dropbox_setup_status}
+          dropboxConfigured={isDropboxConfigured()}
+        />
 
         <Card className="portal-surface overflow-hidden">
           <CardContent className="pt-6">

@@ -45,8 +45,8 @@ function mapArtworkStatusToBadge(status: string) {
 
 export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps) {
   const [pendingFileId, setPendingFileId] = useState<string | null>(null);
-  const [changesComment, setChangesComment] = useState("");
-  const [internalNotes, setInternalNotes] = useState("");
+  const [changesComments, setChangesComments] = useState<Record<string, string>>({});
+  const [internalNotesByFile, setInternalNotesByFile] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
   async function updateStatus(
@@ -148,7 +148,7 @@ export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps
                   disabled={pendingFileId === file.id}
                   onClick={() =>
                     updateStatus(file.id, "approved", {
-                      internalNotes,
+                      internalNotes: internalNotesByFile[file.id],
                     })
                   }
                 >
@@ -161,8 +161,13 @@ export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps
                   <Label htmlFor={`changes-${file.id}`}>Customer-facing comment</Label>
                   <Input
                     id={`changes-${file.id}`}
-                    value={changesComment}
-                    onChange={(event) => setChangesComment(event.target.value)}
+                    value={changesComments[file.id] ?? ""}
+                    onChange={(event) =>
+                      setChangesComments((current) => ({
+                        ...current,
+                        [file.id]: event.target.value,
+                      }))
+                    }
                     placeholder="Required when requesting changes"
                   />
                 </div>
@@ -170,8 +175,13 @@ export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps
                   <Label htmlFor={`internal-${file.id}`}>Internal notes</Label>
                   <Input
                     id={`internal-${file.id}`}
-                    value={internalNotes}
-                    onChange={(event) => setInternalNotes(event.target.value)}
+                    value={internalNotesByFile[file.id] ?? ""}
+                    onChange={(event) =>
+                      setInternalNotesByFile((current) => ({
+                        ...current,
+                        [file.id]: event.target.value,
+                      }))
+                    }
                     placeholder="Internal review notes"
                   />
                 </div>
@@ -185,8 +195,8 @@ export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps
                   disabled={pendingFileId === file.id}
                   onClick={() =>
                     updateStatus(file.id, "changes_required", {
-                      changesRequiredComment: changesComment,
-                      internalNotes,
+                      changesRequiredComment: changesComments[file.id],
+                      internalNotes: internalNotesByFile[file.id],
                     })
                   }
                 >
