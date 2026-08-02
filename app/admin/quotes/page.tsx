@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatAdminQuoteStatusLabel } from "@/lib/admin-quote-status";
 import { buildLoginUrl } from "@/lib/auth-redirect";
+import { isCandidAdminRole, isSuperAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -100,10 +101,10 @@ export default async function AdminQuotesPage() {
 
   if (
     !profile ||
-    profile.user_role !== "admin" ||
+    !isCandidAdminRole(profile.user_role) ||
     profile.account_status !== "approved"
   ) {
-    redirect("/dashboard");
+    redirect(resolveAdminAccessDeniedPath(profile?.user_role));
   }
 
   const { data, error } = await supabase
@@ -140,6 +141,7 @@ export default async function AdminQuotesPage() {
   return (
     <AppShell
       userRole="admin"
+      showStaffNav={isSuperAdminRole(profile.user_role)}
       userName={profile.full_name || "Candid administrator"}
       companyName="Candid Creative"
     >

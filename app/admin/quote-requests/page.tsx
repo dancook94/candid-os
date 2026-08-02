@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { formatAdminQuoteStatusLabel } from "@/lib/admin-quote-status";
 import { buildLoginUrl } from "@/lib/auth-redirect";
+import { isCandidAdminRole, isSuperAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
 import { createClient } from "@/lib/supabase/server";
 
 type QuoteRequestRow = {
@@ -176,10 +177,10 @@ export default async function AdminQuoteRequestsPage({
 
   if (
     !profile ||
-    profile.user_role !== "admin" ||
+    !isCandidAdminRole(profile.user_role) ||
     profile.account_status !== "approved"
   ) {
-    redirect("/dashboard");
+    redirect(resolveAdminAccessDeniedPath(profile?.user_role));
   }
 
   let query = supabase
@@ -274,6 +275,7 @@ export default async function AdminQuoteRequestsPage({
   return (
     <AppShell
       userRole="admin"
+      showStaffNav={isSuperAdminRole(profile.user_role)}
       userName={profile.full_name || "Candid administrator"}
       companyName="Candid Creative"
     >

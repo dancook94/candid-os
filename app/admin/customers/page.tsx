@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { formatPaymentTermsLabel } from "@/lib/payment-terms";
 import { createClient } from "@/lib/supabase/server";
 import { buildLoginUrl } from "@/lib/auth-redirect";
+import { isCandidAdminRole, isSuperAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
 
 type CustomerProfile = {
   id: string;
@@ -100,10 +101,10 @@ export default async function AdminCustomersPage() {
 
   if (
     !profile ||
-    profile.user_role !== "admin" ||
+    !isCandidAdminRole(profile.user_role) ||
     profile.account_status !== "approved"
   ) {
-    redirect("/dashboard");
+    redirect(resolveAdminAccessDeniedPath(profile?.user_role));
   }
 
   const { data, error } = await supabase
@@ -150,6 +151,7 @@ export default async function AdminCustomersPage() {
   return (
     <AppShell
       userRole="admin"
+      showStaffNav={isSuperAdminRole(profile.user_role)}
       userName={profile.full_name || "Candid administrator"}
       companyName="Candid Creative"
     >

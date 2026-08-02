@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
 import { buildLoginUrl } from "@/lib/auth-redirect";
+import { isCandidAdminRole, isSuperAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
 
 const plannedSections = [
   {
@@ -50,15 +51,16 @@ export default async function AdminSettingsPage() {
 
   if (
     !profile ||
-    profile.user_role !== "admin" ||
+    !isCandidAdminRole(profile.user_role) ||
     profile.account_status !== "approved"
   ) {
-    redirect("/dashboard");
+    redirect(resolveAdminAccessDeniedPath(profile?.user_role));
   }
 
   return (
     <AppShell
       userRole="admin"
+      showStaffNav={isSuperAdminRole(profile.user_role)}
       userName={profile.full_name || "Candid administrator"}
       companyName="Candid Creative"
     >

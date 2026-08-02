@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { resolvePaymentTermsDays } from "@/lib/payment-terms";
 import { createClient } from "@/lib/supabase/server";
 import { buildLoginUrl } from "@/lib/auth-redirect";
+import { isCandidAdminRole, isSuperAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
 
 type NewQuotePageProps = {
   searchParams: Promise<{ quoteRequestId?: string }>;
@@ -43,10 +44,10 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
 
   if (
     !profile ||
-    profile.user_role !== "admin" ||
+    !isCandidAdminRole(profile.user_role) ||
     profile.account_status !== "approved"
   ) {
-    redirect("/dashboard");
+    redirect(resolveAdminAccessDeniedPath(profile?.user_role));
   }
 
   const [{ data: companies }, { data: quoteRequests }] = await Promise.all([
@@ -107,6 +108,7 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
   return (
     <AppShell
       userRole="admin"
+      showStaffNav={isSuperAdminRole(profile.user_role)}
       userName={profile.full_name || "Candid administrator"}
       companyName="Candid Creative"
     >

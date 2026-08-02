@@ -1,3 +1,8 @@
+import {
+  isCandidAdminRole,
+  isLimitedStaffRole,
+} from "@/lib/staff-roles";
+
 export type ProfileRedirectInfo = {
   account_status: string;
   user_role: string;
@@ -39,10 +44,7 @@ export function resolvePostLoginPath(
 ) {
   const safeNext = sanitizeNextPath(next ?? null);
 
-  if (
-    profile?.account_status === "approved" &&
-    profile.user_role === "admin"
-  ) {
+  if (profile?.account_status === "approved" && isCandidAdminRole(profile.user_role)) {
     if (safeNext?.startsWith("/admin")) {
       return safeNext;
     }
@@ -50,7 +52,15 @@ export function resolvePostLoginPath(
     return "/admin";
   }
 
-  if (safeNext?.startsWith("/admin")) {
+  if (profile?.account_status === "approved" && isLimitedStaffRole(profile.user_role)) {
+    if (safeNext?.startsWith("/staff")) {
+      return safeNext;
+    }
+
+    return "/staff";
+  }
+
+  if (safeNext?.startsWith("/admin") || safeNext?.startsWith("/staff")) {
     return "/dashboard";
   }
 

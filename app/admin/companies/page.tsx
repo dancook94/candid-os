@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { formatPaymentTermsLabel } from "@/lib/payment-terms";
 import { createClient } from "@/lib/supabase/server";
 import { buildLoginUrl } from "@/lib/auth-redirect";
+import { isCandidAdminRole, isSuperAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
 
 export default async function CompaniesPage() {
   const supabase = await createClient();
@@ -29,10 +30,10 @@ export default async function CompaniesPage() {
 
   if (
     !profile ||
-    profile.user_role !== "admin" ||
+    !isCandidAdminRole(profile.user_role) ||
     profile.account_status !== "approved"
   ) {
-    redirect("/dashboard");
+    redirect(resolveAdminAccessDeniedPath(profile?.user_role));
   }
 
   const { data: companies } = await supabase
@@ -43,6 +44,7 @@ export default async function CompaniesPage() {
   return (
     <AppShell
       userRole="admin"
+      showStaffNav={isSuperAdminRole(profile.user_role)}
       userName={profile.full_name}
       companyName="Candid Creative"
     >

@@ -16,6 +16,7 @@ import {
 import { formatPaymentTermsLabel } from "@/lib/payment-terms";
 import { createClient } from "@/lib/supabase/server";
 import { buildLoginUrl } from "@/lib/auth-redirect";
+import { isCandidAdminRole, isSuperAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
 
 type CompanyDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -58,10 +59,10 @@ export default async function CompanyDetailPage({
 
   if (
     !profile ||
-    profile.user_role !== "admin" ||
+    !isCandidAdminRole(profile.user_role) ||
     profile.account_status !== "approved"
   ) {
-    redirect("/dashboard");
+    redirect(resolveAdminAccessDeniedPath(profile?.user_role));
   }
 
   const { data: company, error: companyError } = await supabase
@@ -87,6 +88,7 @@ export default async function CompanyDetailPage({
   return (
     <AppShell
       userRole="admin"
+      showStaffNav={isSuperAdminRole(profile.user_role)}
       userName={profile.full_name || "Candid administrator"}
       companyName="Candid Creative"
     >

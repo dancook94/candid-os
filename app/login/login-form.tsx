@@ -56,6 +56,14 @@ export default function LoginForm() {
       return;
     }
 
+    if (profile.account_status === "disabled") {
+      await supabase.auth.signOut();
+      setError(
+        "Your account has been deactivated. Contact Candid Creative for assistance."
+      );
+      return;
+    }
+
     router.push(resolvePostLoginPath(profile, next));
     router.refresh();
   }

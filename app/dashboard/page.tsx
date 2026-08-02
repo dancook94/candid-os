@@ -15,6 +15,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import {
+  isCandidAdminRole,
+  isLimitedStaffRole,
+} from "@/lib/staff-roles";
 
 export const dynamic = "force-dynamic";
 
@@ -81,6 +85,14 @@ export default async function DashboardPage() {
     .select("full_name, company_id, account_status, user_role")
     .eq("id", user.id)
     .single();
+
+  if (profile && isCandidAdminRole(profile.user_role)) {
+    redirect("/admin");
+  }
+
+  if (profile && isLimitedStaffRole(profile.user_role)) {
+    redirect("/staff");
+  }
 
   const [
     { count: formalQuotesCount, error: quotesError },

@@ -11,6 +11,7 @@ import {
   LogOut,
   Package,
   Settings,
+  UserCog,
   Users,
 } from "lucide-react";
 
@@ -19,7 +20,8 @@ import { cn } from "@/lib/utils";
 
 type AppShellProps = {
   children: React.ReactNode;
-  userRole?: "customer" | "admin";
+  userRole?: "customer" | "admin" | "staff";
+  showStaffNav?: boolean;
   userName?: string;
   companyName?: string;
 };
@@ -75,6 +77,12 @@ const adminLinks = [
   },
 ];
 
+const staffManagementLink = {
+  href: "/admin/staff",
+  label: "Staff",
+  icon: UserCog,
+};
+
 function getInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
 
@@ -89,9 +97,18 @@ function getInitials(name: string) {
   return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
 }
 
+const staffLinks = [
+  {
+    href: "/staff",
+    label: "Workspace",
+    icon: Gauge,
+  },
+];
+
 export function AppShell({
   children,
   userRole = "customer",
+  showStaffNav = false,
   userName,
   companyName,
 }: AppShellProps) {
@@ -99,8 +116,22 @@ export function AppShell({
   const router = useRouter();
   const supabase = createClient();
 
-  const links = userRole === "admin" ? adminLinks : customerLinks;
-  const homeHref = userRole === "admin" ? "/admin" : "/dashboard";
+  const links =
+    userRole === "admin"
+      ? showStaffNav
+        ? [...adminLinks, staffManagementLink]
+        : adminLinks
+      : userRole === "staff"
+        ? staffLinks
+        : customerLinks;
+  const homeHref =
+    userRole === "admin" ? "/admin" : userRole === "staff" ? "/staff" : "/dashboard";
+  const portalLabel =
+    userRole === "admin"
+      ? "Administration"
+      : userRole === "staff"
+        ? "Staff workspace"
+        : "Customer portal";
   const displayName = userName || "Candid OS user";
   const displayCompany = companyName || "Candid Creative";
 
@@ -129,7 +160,7 @@ export function AppShell({
                 Candid OS
               </p>
               <p className="truncate text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                {userRole === "admin" ? "Administration" : "Customer portal"}
+                {portalLabel}
               </p>
             </div>
           </Link>
@@ -143,6 +174,7 @@ export function AppShell({
               pathname === link.href ||
               (link.href !== "/admin" &&
                 link.href !== "/dashboard" &&
+                link.href !== "/staff" &&
                 pathname.startsWith(`${link.href}/`));
 
             return (
@@ -206,7 +238,7 @@ export function AppShell({
             <div>
               <p className="text-sm font-semibold text-foreground">Candid OS</p>
               <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                {userRole === "admin" ? "Administration" : "Customer portal"}
+                {portalLabel}
               </p>
             </div>
           </div>
