@@ -10,20 +10,17 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { buildLoginUrl } from "@/lib/auth-redirect";
 import { buildStaffAppShellProps } from "@/lib/admin-shell-props";
+import { buildLoginUrl } from "@/lib/auth-redirect";
+import { getStaffPortalRedirect } from "@/lib/portal-access";
 import { loadStaffAvatarSignedUrl } from "@/lib/staff-avatar-server";
-import {
-  isCandidAdminRole,
-  isLimitedStaffRole,
-  isStaffRole,
-} from "@/lib/staff-roles";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function StaffWorkspacePage() {
   const supabase = await createClient();
+  const isDevelopment = process.env.NODE_ENV === "development";
 
   const {
     data: { user },
@@ -33,28 +30,28 @@ export default async function StaffWorkspacePage() {
     redirect(buildLoginUrl("/staff"));
   }
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
-    .select(
-      "full_name, user_role, account_status, avatar_storage_path"
-    )
+    .select("full_name, user_role, account_status, avatar_storage_path")
     .eq("id", user.id)
     .single();
 
-  if (!profile || profile.account_status !== "approved" || !isStaffRole(profile.user_role)) {
-    redirect("/login");
+  const access = getStaffPortalRedirect(profile, profileError);
+
+  if (access === "login") {
+    if (isDevelopment && profileError) {
+      console.error("[staff] profile load failed:", profileError.message);
+    }
+
+    redirect(buildLoginUrl("/staff"));
   }
 
-  if (isCandidAdminRole(profile.user_role)) {
-    redirect("/admin");
+  if (access !== "allow") {
+    redirect(access);
   }
 
-  if (!isLimitedStaffRole(profile.user_role)) {
-    redirect("/dashboard");
-  }
-
-  const shellProps = await buildStaffAppShellProps(supabase, profile);
-  const avatarPreviewUrl = await loadStaffAvatarSignedUrl(supabase, profile);
+  const shellProps = await buildStaffAppShellProps(supabase, profile!);
+  const avatarPreviewUrl = await loadStaffAvatarSignedUrl(supabase, profile!);
 
   return (
     <AppShell {...shellProps}>
@@ -67,7 +64,7 @@ export default async function StaffWorkspacePage() {
           />
 
           <StaffAvatarDisplay
-            fullName={profile.full_name || "Candid team member"}
+            fullName={profile!.full_name || "Candid team member"}
             avatarUrl={avatarPreviewUrl}
             size="lg"
           />
@@ -87,7 +84,7 @@ export default async function StaffWorkspacePage() {
             <p className="text-sm leading-relaxed text-muted-foreground">
               You&apos;re signed in with the{" "}
               <span className="font-medium text-foreground">
-                {profile.user_role.replace("_", " ")}
+                {profile!.user_role.replace("_", " ")}
               </span>{" "}
               role. We&apos;ll enable your tools here as Candid OS staff modules
               roll out.

@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { CreateCompanyDialog } from "@/components/create-company-dialog";
@@ -8,35 +7,13 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatPaymentTermsLabel } from "@/lib/payment-terms";
 import { loadAppSettings } from "@/lib/app-settings-server";
+import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { createClient } from "@/lib/supabase/server";
-import { buildLoginUrl } from "@/lib/auth-redirect";
-import { isCandidAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
 
 export default async function CompaniesPage() {
   const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect(buildLoginUrl("/admin/companies"));
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, user_role, account_status, avatar_storage_path")
-    .eq("id", user.id)
-    .single();
-
-  if (
-    !profile ||
-    !isCandidAdminRole(profile.user_role) ||
-    profile.account_status !== "approved"
-  ) {
-    redirect(resolveAdminAccessDeniedPath(profile?.user_role));
-  }
+  const profile = await requireAdminPageAccess(supabase, "/admin/companies");
 
   const [{ data: companies }, appSettingsResult] = await Promise.all([
     supabase

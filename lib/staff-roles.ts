@@ -1,3 +1,5 @@
+export const ADMIN_ROLES = ["super_admin", "admin"] as const;
+
 export const STAFF_ROLES = [
   "super_admin",
   "admin",
@@ -13,11 +15,16 @@ export const INVITEABLE_STAFF_ROLES = [
   "accounts",
 ] as const;
 
+export type AdminRole = (typeof ADMIN_ROLES)[number];
 export type StaffRole = (typeof STAFF_ROLES)[number];
 export type InviteableStaffRole = (typeof INVITEABLE_STAFF_ROLES)[number];
 
+export function isAdminRole(role: string): role is AdminRole {
+  return (ADMIN_ROLES as readonly string[]).includes(role);
+}
+
 export function isCandidAdminRole(role: string) {
-  return role === "admin" || role === "super_admin";
+  return isAdminRole(role);
 }
 
 export function isSuperAdminRole(role: string) {
@@ -41,12 +48,4 @@ export function formatRoleLabel(role: string) {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-}
-
-export function resolveAdminAccessDeniedPath(role: string | undefined) {
-  if (isLimitedStaffRole(role ?? "")) {
-    return "/staff";
-  }
-
-  return "/dashboard";
 }

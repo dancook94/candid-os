@@ -1,45 +1,18 @@
-import { redirect } from "next/navigation";
-
 import { AdminSettingsPanel } from "@/components/admin-settings-panel";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
 import { getEmailConfigStatus } from "@/lib/app-settings";
 import { loadAppSettings } from "@/lib/app-settings-server";
+import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
-import { buildLoginUrl } from "@/lib/auth-redirect";
-import {
-  isCandidAdminRole,
-  isSuperAdminRole,
-  resolveAdminAccessDeniedPath,
-} from "@/lib/staff-roles";
+import { isSuperAdminRole } from "@/lib/staff-roles";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminSettingsPage() {
   const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect(buildLoginUrl("/admin/settings"));
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, user_role, account_status, avatar_storage_path")
-    .eq("id", user.id)
-    .single();
-
-  if (
-    !profile ||
-    !isCandidAdminRole(profile.user_role) ||
-    profile.account_status !== "approved"
-  ) {
-    redirect(resolveAdminAccessDeniedPath(profile?.user_role));
-  }
+  const profile = await requireAdminPageAccess(supabase, "/admin/settings");
 
   const { settings, error: settingsLoadError } = await loadAppSettings(supabase);
   const emailConfig = getEmailConfigStatus(settings);

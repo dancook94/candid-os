@@ -1,12 +1,11 @@
 import {
-  isCandidAdminRole,
+  isAdminRole,
   isLimitedStaffRole,
 } from "@/lib/staff-roles";
+import type { PortalProfile } from "@/lib/portal-access";
+import { resolveApprovedRoleHomePath } from "@/lib/portal-access";
 
-export type ProfileRedirectInfo = {
-  account_status: string;
-  user_role: string;
-};
+export type ProfileRedirectInfo = PortalProfile;
 
 export function sanitizeNextPath(next: string | null | undefined) {
   if (!next) {
@@ -42,31 +41,43 @@ export function resolvePostLoginPath(
   profile: ProfileRedirectInfo | null,
   next: string | null | undefined
 ) {
-  const safeNext = sanitizeNextPath(next ?? null);
-
-  if (profile?.account_status === "approved" && isCandidAdminRole(profile.user_role)) {
-    if (safeNext?.startsWith("/admin")) {
-      return safeNext;
-    }
-
-    return "/admin";
+  if (!profile) {
+    return "/login";
   }
 
-  if (profile?.account_status === "approved" && isLimitedStaffRole(profile.user_role)) {
-    if (safeNext?.startsWith("/staff")) {
-      return safeNext;
+  const safeNext = sanitizeNextPath(next ?? null);
+  const homePath = resolveApprovedRoleHomePath(profile);
+
+  if (profile.account_status === "approved") {
+    if (isAdminRole(profile.user_role)) {
+      if (safeNext?.startsWith("/admin")) {
+        return safeNext;
+      }
+
+      return "/admin";
     }
 
-    return "/staff";
+    if (isLimitedStaffRole(profile.user_role)) {
+      if (safeNext?.startsWith("/staff")) {
+        return safeNext;
+      }
+
+      return "/staff";
+    }
   }
 
   if (safeNext?.startsWith("/admin") || safeNext?.startsWith("/staff")) {
-    return "/dashboard";
+    return homePath;
   }
 
   if (safeNext) {
     return safeNext;
   }
 
-  return "/dashboard";
+  return homePath;
 }
+
+export {
+  getDashboardRoleRedirect,
+  resolveApprovedRoleHomePath,
+} from "@/lib/portal-access";

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { resolveInviteCallbackNextPath } from "@/lib/auth-redirect";
+import {
+  resolveInviteCallbackNextPath,
+  resolvePostLoginPath,
+} from "@/lib/auth-redirect";
 import { createRouteHandlerClient } from "@/lib/supabase/server";
 
 const isDevelopment = process.env.NODE_ENV === "development";
@@ -11,6 +14,18 @@ function logInviteCallback(message: string, details?: Record<string, unknown>) {
   }
 
   console.info("[auth/callback]", message, details ?? {});
+}
+
+function redirectWithCookies(url: URL, cookieSource: NextResponse) {
+  const response = NextResponse.redirect(url);
+
+  cookieSource.cookies.getAll().forEach((cookie) => {
+    response.cookies.set(cookie);
+  });
+
+  response.headers.set("Cache-Control", "private, no-store");
+
+  return response;
 }
 
 export async function GET(request: Request) {
@@ -48,10 +63,8 @@ export async function GET(request: Request) {
     );
   }
 
-  const redirectResponse = NextResponse.redirect(
-    new URL(safeNext, requestUrl.origin)
-  );
-  const supabase = await createRouteHandlerClient(redirectResponse);
+  const cookieResponse = NextResponse.redirect(new URL(safeNext, requestUrl.origin));
+  const supabase = await createRouteHandlerClient(cookieResponse);
 
   const { error } = await supabase.auth.exchangeCodeForSession(code);
 
@@ -77,7 +90,24 @@ export async function GET(request: Request) {
     hasAuthenticatedUser: Boolean(user),
   });
 
-  redirectResponse.headers.set("Cache-Control", "private, no-store");
+  let destination = safeNext;
 
-  return redirectResponse;
+  if (user && safeNext !== "/set-password") {
+    const { data: profile, error: profileError } = await supabase
+      .from("profiles")
+      .select("account_status, user_role")
+      .eq("id", user.id)
+      .single();
+
+    if (profileError) {
+      logInviteCallback("Profile lookup failed after auth callback", {
+        message: profileError.message,
+      });
+      destination = "/login";
+    } else {
+      destination = resolvePostLoginPath(profile, next);
+    }
+  }
+
+  return redirectWithCookies(new URL(destination, requestUrl.origin), cookieResponse);
 }

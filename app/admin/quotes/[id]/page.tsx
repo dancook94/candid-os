@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
 import { AdminQuoteManagementActions } from "@/components/admin-quote-management-actions";
 import { CreateQuoteVersionButton } from "@/components/create-quote-version-button";
@@ -15,10 +15,9 @@ import {
 } from "@/components/quote-version-selector";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { createClient } from "@/lib/supabase/server";
-import { buildLoginUrl } from "@/lib/auth-redirect";
-import { isCandidAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
 import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
 import { isQuoteAwaitingDecision } from "@/lib/quote-status-response";
 
@@ -40,28 +39,11 @@ export default async function QuoteDetailPage({
   const { id } = await params;
   const { version: versionParam } = await searchParams;
   const supabase = await createClient();
+  const profile = await requireAdminPageAccess(supabase, `/admin/quotes/${id}`);
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect(buildLoginUrl(`/admin/quotes/${id}`));
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, user_role, account_status, avatar_storage_path")
-    .eq("id", user.id)
-    .single();
-
-  if (
-    !profile ||
-    !isCandidAdminRole(profile.user_role) ||
-    profile.account_status !== "approved"
-  ) {
-    redirect(resolveAdminAccessDeniedPath(profile?.user_role));
-  }
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
@@ -259,7 +241,7 @@ export default async function QuoteDetailPage({
         <QuoteBuilderForm
           key={quoteVersion.id}
           mode="edit"
-          createdBy={user.id}
+          createdBy={user!.id}
           companies={companies ?? []}
           quoteRequests={quoteRequests ?? []}
           initialValues={initialValues}

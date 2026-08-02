@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
@@ -16,10 +15,9 @@ import {
 } from "@/lib/payment-terms";
 import { computeDefaultQuoteExpiryDate } from "@/lib/app-settings";
 import { loadAppSettings } from "@/lib/app-settings-server";
+import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { createClient } from "@/lib/supabase/server";
-import { buildLoginUrl } from "@/lib/auth-redirect";
-import { isCandidAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
 
 type NewQuotePageProps = {
   searchParams: Promise<{ quoteRequestId?: string }>;
@@ -32,31 +30,14 @@ function buildCustomerNotes(description: string, notes: string | null) {
 export default async function NewQuotePage({ searchParams }: NewQuotePageProps) {
   const { quoteRequestId } = await searchParams;
   const supabase = await createClient();
+  const loginPath = quoteRequestId
+    ? `/admin/quotes/new?quoteRequestId=${encodeURIComponent(quoteRequestId)}`
+    : "/admin/quotes/new";
+  const profile = await requireAdminPageAccess(supabase, loginPath);
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  if (!user) {
-    const nextPath = quoteRequestId
-      ? `/admin/quotes/new?quoteRequestId=${encodeURIComponent(quoteRequestId)}`
-      : "/admin/quotes/new";
-    redirect(buildLoginUrl(nextPath));
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, user_role, account_status, avatar_storage_path")
-    .eq("id", user.id)
-    .single();
-
-  if (
-    !profile ||
-    !isCandidAdminRole(profile.user_role) ||
-    profile.account_status !== "approved"
-  ) {
-    redirect(resolveAdminAccessDeniedPath(profile?.user_role));
-  }
 
   const [{ data: companies }, { data: quoteRequests }, appSettingsResult] =
     await Promise.all([
@@ -141,7 +122,7 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
 
         <QuoteBuilderForm
           mode="create"
-          createdBy={user.id}
+          createdBy={user!.id}
           companies={companies ?? []}
           quoteRequests={quoteRequests ?? []}
           initialValues={initialValues}

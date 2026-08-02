@@ -1,5 +1,4 @@
 import { unstable_noStore as noStore } from "next/cache";
-import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { ApproveCustomer } from "@/components/approve-customer";
@@ -13,9 +12,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { fetchAdminQuoteMetrics } from "@/lib/admin-quote-metrics";
+import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
-import { buildLoginUrl } from "@/lib/auth-redirect";
-import { isCandidAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -25,28 +23,7 @@ export default async function AdminPage() {
 
   const supabase = await createClient();
   const isDevelopment = process.env.NODE_ENV === "development";
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect(buildLoginUrl("/admin"));
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, account_status, user_role, avatar_storage_path")
-    .eq("id", user.id)
-    .single();
-
-  if (
-    !profile ||
-    profile.account_status !== "approved" ||
-    !isCandidAdminRole(profile.user_role)
-  ) {
-    redirect(resolveAdminAccessDeniedPath(profile?.user_role));
-  }
+  const profile = await requireAdminPageAccess(supabase, "/admin");
 
   const [quoteMetrics, { data: pendingUsers }, { data: companies }] =
     await Promise.all([

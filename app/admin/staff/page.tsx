@@ -8,8 +8,9 @@ import { StaffManagementTable } from "@/components/staff-management-table";
 import { Card, CardContent } from "@/components/ui/card";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { buildLoginUrl } from "@/lib/auth-redirect";
+import { resolveAdminAccessDeniedPath } from "@/lib/portal-access";
 import { loadStaffMembersWithAuth, type StaffMemberRecord } from "@/lib/staff-members";
-import { isCandidAdminRole, isSuperAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
+import { isAdminRole, isSuperAdminRole } from "@/lib/staff-roles";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -36,11 +37,11 @@ export default async function AdminStaffPage() {
     profile.account_status !== "approved" ||
     !isSuperAdminRole(profile.user_role)
   ) {
-    if (profile && isCandidAdminRole(profile.user_role)) {
+    if (profile && isAdminRole(profile.user_role)) {
       redirect("/admin");
     }
 
-    redirect(resolveAdminAccessDeniedPath(profile?.user_role));
+    redirect(resolveAdminAccessDeniedPath(profile));
   }
 
   let staffMembers: StaffMemberRecord[] = [];

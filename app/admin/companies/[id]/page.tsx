@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { CompanyLogoForm } from "@/components/company-logo-form";
@@ -16,10 +16,9 @@ import {
 } from "@/components/ui/card";
 import { createCompanyLogoSignedUrl } from "@/lib/company-logos";
 import { formatPaymentTermsLabel } from "@/lib/payment-terms";
+import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { createClient } from "@/lib/supabase/server";
-import { buildLoginUrl } from "@/lib/auth-redirect";
-import { isCandidAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
 
 type CompanyDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -45,28 +44,10 @@ export default async function CompanyDetailPage({
 }: CompanyDetailPageProps) {
   const { id } = await params;
   const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect(buildLoginUrl(`/admin/companies/${id}`));
-  }
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, user_role, account_status, avatar_storage_path")
-    .eq("id", user.id)
-    .single();
-
-  if (
-    !profile ||
-    !isCandidAdminRole(profile.user_role) ||
-    profile.account_status !== "approved"
-  ) {
-    redirect(resolveAdminAccessDeniedPath(profile?.user_role));
-  }
+  const profile = await requireAdminPageAccess(
+    supabase,
+    `/admin/companies/${id}`
+  );
 
   const { data: company, error: companyError } = await supabase
     .from("companies")

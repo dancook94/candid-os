@@ -12,14 +12,16 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { buildLoginUrl } from "@/lib/auth-redirect";
+import { getStaffPortalRedirect } from "@/lib/portal-access";
 import { loadStaffAvatarSignedUrl } from "@/lib/staff-avatar-server";
-import { isStaffRole } from "@/lib/staff-roles";
+import { isAdminRole } from "@/lib/staff-roles";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
 export default async function StaffProfilePage() {
   const supabase = await createClient();
+  const isDevelopment = process.env.NODE_ENV === "development";
 
   const {
     data: { user },
@@ -29,7 +31,7 @@ export default async function StaffProfilePage() {
     redirect(buildLoginUrl("/staff/profile"));
   }
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select(
       "full_name, user_role, account_status, avatar_storage_path, avatar_file_name, avatar_file_type, avatar_file_size"
@@ -37,20 +39,28 @@ export default async function StaffProfilePage() {
     .eq("id", user.id)
     .single();
 
-  if (!profile || profile.account_status !== "approved" || !isStaffRole(profile.user_role)) {
-    redirect("/login");
+  const access = getStaffPortalRedirect(profile, profileError);
+
+  if (access === "login") {
+    if (isDevelopment && profileError) {
+      console.error("[staff] profile load failed:", profileError.message);
+    }
+
+    redirect(buildLoginUrl("/staff/profile"));
   }
 
-  const avatarPreviewUrl = await loadStaffAvatarSignedUrl(supabase, profile);
-  const userRole = profile.user_role === "admin" || profile.user_role === "super_admin"
-    ? "admin"
-    : "staff";
+  if (access !== "allow") {
+    redirect(access);
+  }
+
+  const avatarPreviewUrl = await loadStaffAvatarSignedUrl(supabase, profile!);
+  const userRole = isAdminRole(profile!.user_role) ? "admin" : "staff";
 
   return (
     <AppShell
       userRole={userRole}
-      showStaffNav={profile.user_role === "super_admin"}
-      userName={profile.full_name || "Candid team member"}
+      showStaffNav={profile!.user_role === "super_admin"}
+      userName={profile!.full_name || "Candid team member"}
       companyName="Candid Creative"
       userAvatarUrl={avatarPreviewUrl}
     >
@@ -71,12 +81,12 @@ export default async function StaffProfilePage() {
 
           <CardContent className="pt-6">
             <StaffAvatarForm
-              fullName={profile.full_name || "Candid team member"}
+              fullName={profile!.full_name || "Candid team member"}
               initialAvatar={{
-                avatar_storage_path: profile.avatar_storage_path,
-                avatar_file_name: profile.avatar_file_name,
-                avatar_file_type: profile.avatar_file_type,
-                avatar_file_size: profile.avatar_file_size,
+                avatar_storage_path: profile!.avatar_storage_path,
+                avatar_file_name: profile!.avatar_file_name,
+                avatar_file_type: profile!.avatar_file_type,
+                avatar_file_size: profile!.avatar_file_size,
               }}
               initialPreviewUrl={avatarPreviewUrl}
               uploadUrl="/api/staff/avatar"

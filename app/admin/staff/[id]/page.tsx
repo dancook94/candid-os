@@ -14,14 +14,14 @@ import {
 } from "@/components/ui/card";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { buildLoginUrl } from "@/lib/auth-redirect";
+import { resolveAdminAccessDeniedPath } from "@/lib/portal-access";
 import { loadStaffAvatarSignedUrl } from "@/lib/staff-avatar-server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
-  isCandidAdminRole,
+  isAdminRole,
   isStaffRole,
   isSuperAdminRole,
-  resolveAdminAccessDeniedPath,
 } from "@/lib/staff-roles";
 
 export const dynamic = "force-dynamic";
@@ -55,11 +55,11 @@ export default async function AdminStaffDetailPage({
     profile.account_status !== "approved" ||
     !isSuperAdminRole(profile.user_role)
   ) {
-    if (profile && isCandidAdminRole(profile.user_role)) {
+    if (profile && isAdminRole(profile.user_role)) {
       redirect("/admin");
     }
 
-    redirect(resolveAdminAccessDeniedPath(profile?.user_role));
+    redirect(resolveAdminAccessDeniedPath(profile));
   }
 
   let adminClient;

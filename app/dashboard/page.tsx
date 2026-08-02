@@ -15,12 +15,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { getDashboardRoleRedirect } from "@/lib/auth-redirect";
 import { loadCustomerCompanyBranding } from "@/lib/customer-company-branding";
 import { createClient } from "@/lib/supabase/server";
-import {
-  isCandidAdminRole,
-  isLimitedStaffRole,
-} from "@/lib/staff-roles";
 
 export const dynamic = "force-dynamic";
 
@@ -88,12 +85,16 @@ export default async function DashboardPage() {
     .eq("id", user.id)
     .single();
 
-  if (profile && isCandidAdminRole(profile.user_role)) {
-    redirect("/admin");
-  }
+  if (profileError) {
+    if (isDevelopment) {
+      console.error("[dashboard] profile load failed:", profileError.message);
+    }
+  } else {
+    const roleRedirect = getDashboardRoleRedirect(profile);
 
-  if (profile && isLimitedStaffRole(profile.user_role)) {
-    redirect("/staff");
+    if (roleRedirect) {
+      redirect(roleRedirect);
+    }
   }
 
   const fallbackCompanyName =
@@ -111,11 +112,16 @@ export default async function DashboardPage() {
     supabase
       .from("quote_requests")
       .select("*", { count: "exact", head: true }),
-    loadCustomerCompanyBranding(
-      supabase,
-      profile?.company_id,
-      fallbackCompanyName
-    ),
+    profile?.company_id
+      ? loadCustomerCompanyBranding(
+          supabase,
+          profile.company_id,
+          fallbackCompanyName
+        )
+      : Promise.resolve({
+          companyName: fallbackCompanyName,
+          companyLogoUrl: null,
+        }),
   ]);
 
   const fullName =
