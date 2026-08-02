@@ -117,6 +117,7 @@ export const ACTIVITY_TYPE_GROUPS: Record<
     CRM_ACTIVITY_TYPES.taskCompleted,
     CRM_ACTIVITY_TYPES.taskReopened,
     CRM_ACTIVITY_TYPES.taskCancelled,
+    CRM_ACTIVITY_TYPES.taskDeleted,
   ],
   notes: [
     CRM_ACTIVITY_TYPES.noteAdded,

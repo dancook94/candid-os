@@ -100,6 +100,7 @@ export default async function EditOpportunityPage({
             companyName={company?.company_name ?? "Unknown company"}
             canDelete={deletionBlockers.canDelete}
             blockReason={deletionBlockers.blockReason}
+            blockingTasks={deletionBlockers.blockingTasks}
           />
         ) : null}
       </div>

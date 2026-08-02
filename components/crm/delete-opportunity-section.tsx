@@ -1,9 +1,11 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { ConfirmTextMatchDialog } from "@/components/crm/confirm-text-match-dialog";
+import type { OpportunityBlockingTask } from "@/lib/crm/opportunity-delete";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -19,7 +21,29 @@ type DeleteOpportunitySectionProps = {
   companyName: string;
   canDelete: boolean;
   blockReason: string | null;
+  blockingTasks: OpportunityBlockingTask[];
 };
+
+function formatTaskStatus(status: string) {
+  return status
+    .split("_")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function formatDueDate(dueAt: string | null) {
+  if (!dueAt) {
+    return "No due date";
+  }
+
+  return new Date(dueAt).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 export function DeleteOpportunitySection({
   opportunityId,
@@ -27,11 +51,13 @@ export function DeleteOpportunitySection({
   companyName,
   canDelete,
   blockReason,
+  blockingTasks,
 }: DeleteOpportunitySectionProps) {
   const router = useRouter();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmationTitle, setConfirmationTitle] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState("");
 
   async function handlePermanentDelete() {
@@ -60,6 +86,12 @@ export function DeleteOpportunitySection({
     }
   }
 
+  function handleRefreshBlockers() {
+    setIsRefreshing(true);
+    router.refresh();
+    setTimeout(() => setIsRefreshing(false), 500);
+  }
+
   return (
     <>
       <Card className="portal-surface mt-8 border-red-200">
@@ -76,6 +108,57 @@ export function DeleteOpportunitySection({
         <CardContent className="space-y-4 pt-6">
           {blockReason ? (
             <p className="text-sm text-muted-foreground">{blockReason}</p>
+          ) : null}
+
+          {blockingTasks.length > 0 ? (
+            <div className="space-y-3 rounded-xl border border-border bg-muted/30 p-4">
+              <p className="text-sm font-medium text-foreground">
+                Blocking tasks
+              </p>
+              <ul className="space-y-3">
+                {blockingTasks.map((task) => (
+                  <li
+                    key={task.id}
+                    className="rounded-lg border border-border bg-background p-3 text-sm"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <Link
+                          href={`/admin/tasks/${task.id}/edit`}
+                          className="font-medium text-foreground underline"
+                        >
+                          {task.title}
+                        </Link>
+                        <p className="text-muted-foreground">
+                          {formatTaskStatus(task.status)} ·{" "}
+                          {formatDueDate(task.dueAt)}
+                        </p>
+                        <p className="text-muted-foreground">
+                          Assignees:{" "}
+                          {task.assigneeNames.length > 0
+                            ? task.assigneeNames.join(", ")
+                            : "Unassigned"}
+                        </p>
+                      </div>
+                      <Link href={`/admin/tasks/${task.id}/edit`}>
+                        <Button type="button" variant="outline" size="sm">
+                          Edit task
+                        </Button>
+                      </Link>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isRefreshing}
+                onClick={handleRefreshBlockers}
+              >
+                {isRefreshing ? "Refreshing..." : "Refresh blockers"}
+              </Button>
+            </div>
           ) : null}
 
           <Button

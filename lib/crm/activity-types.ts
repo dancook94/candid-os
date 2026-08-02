@@ -36,6 +36,7 @@ export const CRM_ACTIVITY_TYPES = {
   taskCompleted: "task_completed",
   taskReopened: "task_reopened",
   taskCancelled: "task_cancelled",
+  taskDeleted: "task_deleted",
   noteAdded: "note_added",
   noteEdited: "note_edited",
   notePinned: "note_pinned",

@@ -4,6 +4,7 @@ import { AppShell } from "@/components/app-shell";
 import { ActivityTimeline } from "@/components/crm/activity-timeline";
 import { NoteComposer } from "@/components/crm/note-composer";
 import { NotesList } from "@/components/crm/notes-list";
+import { DeleteTaskSection } from "@/components/crm/delete-task-section";
 import { TaskForm } from "@/components/crm/task-form";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -13,6 +14,8 @@ import { getCrmNotes, getCrmTimeline } from "@/lib/crm/get-crm-timeline";
 import { loadCrmStaffProfiles } from "@/lib/crm/crm-staff";
 import { buildTaskFormInitialValues } from "@/lib/crm/task-form-values";
 import { loadTaskAssigneeIds } from "@/lib/crm/task-assignees";
+import { loadTaskDeleteContext } from "@/lib/crm/task-delete";
+import { isAdminRole } from "@/lib/staff-roles";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -49,7 +52,7 @@ export default async function EditTaskPage({ params }: EditTaskPageProps) {
     notFound();
   }
 
-  const [{ data: companies }, { data: opportunities }, { data: quotes }, crmStaff, assigneeProfileIds] =
+  const [{ data: companies }, { data: opportunities }, { data: quotes }, crmStaff, assigneeProfileIds, taskDeleteContext] =
     await Promise.all([
       supabase
         .from("companies")
@@ -69,10 +72,11 @@ export default async function EditTaskPage({ params }: EditTaskPageProps) {
         .limit(200),
       loadCrmStaffProfiles(supabase),
       loadTaskAssigneeIds(supabase, id),
+      loadTaskDeleteContext(supabase, id),
     ]);
 
   const initialValues = buildTaskFormInitialValues(task, assigneeProfileIds);
-  const isAdmin = ["super_admin", "admin"].includes(profile.user_role);
+  const isAdmin = isAdminRole(profile.user_role);
   const taskScope = {
     type: "task" as const,
     taskId: id,
@@ -140,6 +144,10 @@ export default async function EditTaskPage({ params }: EditTaskPageProps) {
             description="Activity linked to this task."
           />
         </div>
+
+        {isAdmin && taskDeleteContext ? (
+          <DeleteTaskSection task={taskDeleteContext} />
+        ) : null}
       </div>
     </AppShell>
   );

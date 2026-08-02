@@ -1,8 +1,22 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { getStaffDisplayName } from "@/lib/crm/crm-staff";
+import {
+  loadTaskAssigneesByTaskIds,
+} from "@/lib/crm/task-assignees";
+
+export type OpportunityBlockingTask = {
+  id: string;
+  title: string;
+  status: string;
+  dueAt: string | null;
+  assigneeNames: string[];
+};
+
 export type OpportunityDeletionBlockers = {
   linkedQuoteCount: number;
   openTaskCount: number;
+  blockingTasks: OpportunityBlockingTask[];
   canDelete: boolean;
   blockReason: string | null;
 };
@@ -48,7 +62,7 @@ export async function getOpportunityDeletionBlockers(
   supabase: SupabaseClient,
   opportunityId: string
 ): Promise<OpportunityDeletionBlockers> {
-  const [{ count: linkedQuoteCount, error: quoteError }, { count: openTaskCount, error: taskError }] =
+  const [{ count: linkedQuoteCount, error: quoteError }, { data: openTasks, error: taskError }] =
     await Promise.all([
       supabase
         .from("quotes")
@@ -56,9 +70,10 @@ export async function getOpportunityDeletionBlockers(
         .eq("opportunity_id", opportunityId),
       supabase
         .from("tasks")
-        .select("id", { count: "exact", head: true })
+        .select("id, title, status, due_at")
         .eq("opportunity_id", opportunityId)
-        .in("status", ["open", "in_progress"]),
+        .in("status", ["open", "in_progress"])
+        .order("due_at", { ascending: true, nullsFirst: false }),
     ]);
 
   if (quoteError) {
@@ -70,21 +85,37 @@ export async function getOpportunityDeletionBlockers(
   }
 
   const quotes = linkedQuoteCount ?? 0;
-  const openTasks = openTaskCount ?? 0;
+  const taskRows = openTasks ?? [];
+  const assigneesByTask = await loadTaskAssigneesByTaskIds(
+    supabase,
+    taskRows.map((task) => task.id)
+  );
+
+  const blockingTasks: OpportunityBlockingTask[] = taskRows.map((task) => ({
+    id: task.id,
+    title: task.title,
+    status: task.status,
+    dueAt: task.due_at,
+    assigneeNames: (assigneesByTask.get(task.id) ?? []).map((profile) =>
+      getStaffDisplayName(profile)
+    ),
+  }));
 
   if (quotes > 0) {
     return {
       linkedQuoteCount: quotes,
-      openTaskCount: openTasks,
+      openTaskCount: blockingTasks.length,
+      blockingTasks,
       canDelete: false,
       blockReason: LINKED_QUOTES_MESSAGE,
     };
   }
 
-  if (openTasks > 0) {
+  if (blockingTasks.length > 0) {
     return {
       linkedQuoteCount: quotes,
-      openTaskCount: openTasks,
+      openTaskCount: blockingTasks.length,
+      blockingTasks,
       canDelete: false,
       blockReason: OPEN_TASKS_MESSAGE,
     };
@@ -92,7 +123,8 @@ export async function getOpportunityDeletionBlockers(
 
   return {
     linkedQuoteCount: quotes,
-    openTaskCount: openTasks,
+    openTaskCount: 0,
+    blockingTasks: [],
     canDelete: true,
     blockReason: null,
   };
