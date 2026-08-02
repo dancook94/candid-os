@@ -5,11 +5,10 @@ import {
   assertContactOwnership,
   requireCustomerSettingsContext,
 } from "@/lib/customer-settings/auth";
-import {
-  CRM_ACTIVITY_TYPES,
-  logCustomerSettingsActivity,
-} from "@/lib/customer-settings/activity";
+import { CRM_ACTIVITY_TYPES } from "@/lib/customer-settings/activity";
 import { customerSettingsErrorResponse } from "@/lib/customer-settings/api-response";
+import { CustomerSettingsError } from "@/lib/customer-settings/errors";
+import { commitCustomerSettingsChange } from "@/lib/customer-settings/save-with-activity";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -89,32 +88,66 @@ export async function PATCH(request: Request) {
     }
 
     const adminClient = createAdminClient();
+    const contactSnapshot = {
+      full_name: context.contact.full_name,
+      job_title: context.contact.job_title,
+      phone: context.contact.phone,
+      updated_at: context.contact.updated_at,
+    };
+    const profileNameSnapshot = context.profile.full_name;
+    const syncProfileName = changedFields.includes("full_name");
 
-    const { error: contactError } = await adminClient
-      .from("contacts")
-      .update(updates)
-      .eq("id", context.contact.id)
-      .eq("company_id", context.company.id);
+    await commitCustomerSettingsChange({
+      context,
+      devOperationLabel: "profile.update",
+      operation: async () => {
+        const { error: contactError } = await adminClient
+          .from("contacts")
+          .update(updates)
+          .eq("id", context.contact!.id)
+          .eq("company_id", context.company.id);
 
-    if (contactError) {
-      return NextResponse.json({ error: contactError.message }, { status: 400 });
-    }
+        if (contactError) {
+          throw new CustomerSettingsError(contactError.message, 400);
+        }
 
-    if (changedFields.includes("full_name") && typeof updates.full_name === "string") {
-      await adminClient
-        .from("profiles")
-        .update({
-          full_name: updates.full_name,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", user.id);
-    }
+        if (syncProfileName && typeof updates.full_name === "string") {
+          const { error: profileError } = await adminClient
+            .from("profiles")
+            .update({
+              full_name: updates.full_name,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", user.id);
 
-    await logCustomerSettingsActivity(supabase, context, {
-      activityType: CRM_ACTIVITY_TYPES.customerContactUpdated,
-      description: `${context.contact.full_name} updated their contact details in the customer portal.`,
-      changedFields,
-      contactId: context.contact.id,
+          if (profileError) {
+            throw new CustomerSettingsError(profileError.message, 400);
+          }
+        }
+      },
+      rollback: async () => {
+        await adminClient
+          .from("contacts")
+          .update(contactSnapshot)
+          .eq("id", context.contact!.id)
+          .eq("company_id", context.company.id);
+
+        if (syncProfileName) {
+          await adminClient
+            .from("profiles")
+            .update({
+              full_name: profileNameSnapshot,
+              updated_at: context.profile.updated_at,
+            })
+            .eq("id", user.id);
+        }
+      },
+      activity: {
+        activityType: CRM_ACTIVITY_TYPES.customerContactUpdated,
+        description: `${context.contact.full_name} updated their contact details in the customer portal.`,
+        changedFields,
+        contactId: context.contact.id,
+      },
     });
 
     return NextResponse.json({

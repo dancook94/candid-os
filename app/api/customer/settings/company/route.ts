@@ -5,11 +5,10 @@ import {
   assertConcurrency,
   requireCustomerSettingsContext,
 } from "@/lib/customer-settings/auth";
-import {
-  CRM_ACTIVITY_TYPES,
-  logCustomerSettingsActivity,
-} from "@/lib/customer-settings/activity";
+import { CRM_ACTIVITY_TYPES } from "@/lib/customer-settings/activity";
 import { customerSettingsErrorResponse } from "@/lib/customer-settings/api-response";
+import { CustomerSettingsError } from "@/lib/customer-settings/errors";
+import { commitCustomerSettingsChange } from "@/lib/customer-settings/save-with-activity";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -84,30 +83,53 @@ export async function PATCH(request: Request) {
     }
 
     const adminClient = createAdminClient();
+    const companySnapshot: Record<string, unknown> = {};
 
-    const { error } = await adminClient
-      .from("companies")
-      .update(updates)
-      .eq("id", context.company.id);
-
-    if (error) {
-      if (error.message.includes("column") && changedFields.includes("website")) {
-        return NextResponse.json(
-          {
-            error:
-              "Website updates require the customer settings database migration.",
-          },
-          { status: 501 }
-        );
+    for (const field of changedFields) {
+      if (field === "trading_name") {
+        companySnapshot.trading_name = context.company.trading_name;
+      } else if (field === "accounts_email") {
+        companySnapshot.accounts_email = context.company.accounts_email;
+      } else if (field === "phone") {
+        companySnapshot.phone = context.company.phone;
+      } else if (field === "website") {
+        companySnapshot.website = context.company.website ?? null;
       }
-
-      return NextResponse.json({ error: error.message }, { status: 400 });
     }
 
-    await logCustomerSettingsActivity(supabase, context, {
-      activityType: CRM_ACTIVITY_TYPES.customerCompanyUpdated,
-      description: `${context.company.company_name} company details were updated from the customer portal.`,
-      changedFields,
+    companySnapshot.updated_at = context.company.updated_at;
+
+    await commitCustomerSettingsChange({
+      context,
+      devOperationLabel: "company.update",
+      operation: async () => {
+        const { error } = await adminClient
+          .from("companies")
+          .update(updates)
+          .eq("id", context.company.id);
+
+        if (error) {
+          if (error.message.includes("column") && changedFields.includes("website")) {
+            throw new CustomerSettingsError(
+              "Website updates require the customer settings database migration.",
+              501
+            );
+          }
+
+          throw new CustomerSettingsError(error.message, 400);
+        }
+      },
+      rollback: async () => {
+        await adminClient
+          .from("companies")
+          .update(companySnapshot)
+          .eq("id", context.company.id);
+      },
+      activity: {
+        activityType: CRM_ACTIVITY_TYPES.customerCompanyUpdated,
+        description: `${context.company.company_name} company details were updated from the customer portal.`,
+        changedFields,
+      },
     });
 
     return NextResponse.json({

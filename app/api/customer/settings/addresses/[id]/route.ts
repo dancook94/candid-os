@@ -5,12 +5,10 @@ import {
   assertConcurrency,
   requireCustomerSettingsContext,
 } from "@/lib/customer-settings/auth";
-import {
-  CRM_ACTIVITY_TYPES,
-  logCustomerSettingsActivity,
-} from "@/lib/customer-settings/activity";
+import { CRM_ACTIVITY_TYPES } from "@/lib/customer-settings/activity";
 import { customerSettingsErrorResponse } from "@/lib/customer-settings/api-response";
-import { isMissingRelationError } from "@/lib/customer-settings/errors";
+import { CustomerSettingsError, isMissingRelationError } from "@/lib/customer-settings/errors";
+import { commitCustomerSettingsChange } from "@/lib/customer-settings/save-with-activity";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -35,6 +33,9 @@ type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
+const ADDRESS_SNAPSHOT_SELECT =
+  "id, company_id, label, recipient_name, address_line_1, address_line_2, city, county, postcode, country, phone, delivery_instructions, is_default_delivery, is_default_billing, is_active, updated_at";
+
 export async function PATCH(request: Request, { params }: RouteContext) {
   try {
     const { id } = await params;
@@ -54,7 +55,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
     const { data: existing, error: existingError } = await adminClient
       .from("company_addresses")
-      .select("id, company_id, updated_at, is_active")
+      .select(ADDRESS_SNAPSHOT_SELECT)
       .eq("id", id)
       .maybeSingle();
 
@@ -69,7 +70,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
         );
       }
 
-      throw existingError;
+      throw new CustomerSettingsError(existingError.message, 500);
     }
 
     if (!existing || existing.company_id !== context.company.id) {
@@ -193,31 +194,60 @@ export async function PATCH(request: Request, { params }: RouteContext) {
       return NextResponse.json({ error: "No changes to save." }, { status: 400 });
     }
 
-    const { error } = await adminClient
-      .from("company_addresses")
-      .update(updates)
-      .eq("id", id)
-      .eq("company_id", context.company.id);
+    const addressSnapshot = { ...existing };
+    const isDeactivation = body.isActive === false;
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
+    await commitCustomerSettingsChange({
+      context,
+      devOperationLabel: isDeactivation ? "address.deactivate" : "address.update",
+      operation: async () => {
+        const { error } = await adminClient
+          .from("company_addresses")
+          .update(updates)
+          .eq("id", id)
+          .eq("company_id", context.company.id);
 
-    await logCustomerSettingsActivity(supabase, context, {
-      activityType:
-        body.isActive === false
+        if (error) {
+          throw new CustomerSettingsError(error.message, 400);
+        }
+      },
+      rollback: async () => {
+        await adminClient
+          .from("company_addresses")
+          .update({
+            label: addressSnapshot.label,
+            recipient_name: addressSnapshot.recipient_name,
+            address_line_1: addressSnapshot.address_line_1,
+            address_line_2: addressSnapshot.address_line_2,
+            city: addressSnapshot.city,
+            county: addressSnapshot.county,
+            postcode: addressSnapshot.postcode,
+            country: addressSnapshot.country,
+            phone: addressSnapshot.phone,
+            delivery_instructions: addressSnapshot.delivery_instructions,
+            is_default_delivery: addressSnapshot.is_default_delivery,
+            is_default_billing: addressSnapshot.is_default_billing,
+            is_active: addressSnapshot.is_active,
+            updated_at: addressSnapshot.updated_at,
+          })
+          .eq("id", id)
+          .eq("company_id", context.company.id);
+      },
+      activity: {
+        activityType: isDeactivation
           ? CRM_ACTIVITY_TYPES.companyAddressDeactivated
           : CRM_ACTIVITY_TYPES.companyAddressUpdated,
-      description:
-        body.isActive === false
+        description: isDeactivation
           ? `A saved address was deactivated for ${context.company.company_name}.`
           : `A saved address was updated for ${context.company.company_name}.`,
-      changedFields,
+        changedFields,
+        addressId: id,
+      },
     });
 
     return NextResponse.json({
       success: true,
-      message: body.isActive === false ? "Address removed." : "Address updated.",
+      message: isDeactivation ? "Address removed." : "Address updated.",
     });
   } catch (error) {
     return customerSettingsErrorResponse(error);
@@ -243,7 +273,7 @@ export async function DELETE(_request: Request, { params }: RouteContext) {
 
     const { data: existing, error: existingError } = await adminClient
       .from("company_addresses")
-      .select("id, company_id, is_active")
+      .select("id, company_id, is_active, updated_at")
       .eq("id", id)
       .maybeSingle();
 
@@ -258,30 +288,48 @@ export async function DELETE(_request: Request, { params }: RouteContext) {
         );
       }
 
-      throw existingError;
+      throw new CustomerSettingsError(existingError.message, 500);
     }
 
     if (!existing || existing.company_id !== context.company.id) {
       return NextResponse.json({ error: "Address not found." }, { status: 404 });
     }
 
-    const { error } = await adminClient
-      .from("company_addresses")
-      .update({
-        is_active: false,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", id)
-      .eq("company_id", context.company.id);
+    const addressSnapshot = { ...existing };
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 });
-    }
+    await commitCustomerSettingsChange({
+      context,
+      devOperationLabel: "address.deactivate",
+      operation: async () => {
+        const { error } = await adminClient
+          .from("company_addresses")
+          .update({
+            is_active: false,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", id)
+          .eq("company_id", context.company.id);
 
-    await logCustomerSettingsActivity(supabase, context, {
-      activityType: CRM_ACTIVITY_TYPES.companyAddressDeactivated,
-      description: `A saved address was deactivated for ${context.company.company_name}.`,
-      changedFields: ["is_active"],
+        if (error) {
+          throw new CustomerSettingsError(error.message, 400);
+        }
+      },
+      rollback: async () => {
+        await adminClient
+          .from("company_addresses")
+          .update({
+            is_active: addressSnapshot.is_active,
+            updated_at: addressSnapshot.updated_at,
+          })
+          .eq("id", id)
+          .eq("company_id", context.company.id);
+      },
+      activity: {
+        activityType: CRM_ACTIVITY_TYPES.companyAddressDeactivated,
+        description: `A saved address was deactivated for ${context.company.company_name}.`,
+        changedFields: ["is_active"],
+        addressId: id,
+      },
     });
 
     return NextResponse.json({
