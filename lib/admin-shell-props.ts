@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { loadStaffAvatarSignedUrl } from "@/lib/staff-avatar-server";
-import { isAdminRole, isSuperAdminRole } from "@/lib/staff-roles";
+import { isAdminRole, isCrmRole, isSuperAdminRole } from "@/lib/staff-roles";
 
 export type AdminShellProfile = {
   full_name: string | null;
@@ -71,6 +71,33 @@ export async function buildPortalAppShellProps(
 ) {
   if (isAdminRole(profile.user_role)) {
     return buildAdminAppShellProps(supabase, profile, options);
+  }
+
+  return buildStaffAppShellProps(supabase, profile, options);
+}
+
+export async function buildCrmAppShellProps(
+  supabase: SupabaseClient,
+  profile: AdminShellProfile,
+  options?: AppShellPropsOptions
+) {
+  if (isAdminRole(profile.user_role)) {
+    return buildAdminAppShellProps(supabase, profile, options);
+  }
+
+  if (isCrmRole(profile.user_role)) {
+    return {
+      userRole: "staff" as const,
+      showStaffNav: false,
+      showCrmNav: true,
+      userName: profile.full_name || "Candid team member",
+      companyName: "Candid Creative",
+      userAvatarUrl: await resolveAvatarSignedUrl(
+        supabase,
+        profile,
+        options?.avatarSignedUrl
+      ),
+    };
   }
 
   return buildStaffAppShellProps(supabase, profile, options);

@@ -3,8 +3,26 @@ import { redirect } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { buildLoginUrl } from "@/lib/auth-redirect";
-import { ADMIN_PAGE_PROFILE_SELECT, type AdminPageProfile } from "@/lib/admin-page-access";
-import { isAdminRole } from "@/lib/staff-roles";
+import {
+  ADMIN_PAGE_PROFILE_SELECT,
+  type AdminPageProfile,
+} from "@/lib/admin-page-access";
+import { isCrmRole } from "@/lib/staff-roles";
+
+function resolveCrmAccessDeniedPath(profile: AdminPageProfile) {
+  if (profile.user_role === "sales") {
+    return "/staff";
+  }
+
+  if (
+    profile.user_role === "production" ||
+    profile.user_role === "accounts"
+  ) {
+    return "/staff";
+  }
+
+  return "/admin";
+}
 
 export async function requireCrmPageAccess(
   supabase: SupabaseClient,
@@ -32,8 +50,8 @@ export async function requireCrmPageAccess(
     redirect(buildLoginUrl(loginPath));
   }
 
-  if (!isAdminRole(profile.user_role)) {
-    redirect("/admin");
+  if (!isCrmRole(profile.user_role)) {
+    redirect(resolveCrmAccessDeniedPath(profile as AdminPageProfile));
   }
 
   return profile as AdminPageProfile;

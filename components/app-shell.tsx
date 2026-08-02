@@ -148,7 +148,7 @@ export function AppShell({
           ...(showStaffNav ? [staffManagementLink] : []),
         ]
       : userRole === "staff"
-        ? staffLinks
+        ? [...staffLinks, ...(showCrmNav ? crmLinks : [])]
         : customerLinks;
   const homeHref =
     userRole === "admin" ? "/admin" : userRole === "staff" ? "/staff" : "/dashboard";

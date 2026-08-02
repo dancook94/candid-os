@@ -1,0 +1,418 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+
+import { AppShell } from "@/components/app-shell";
+import { OpportunityNoteForm } from "@/components/crm/opportunity-note-form";
+import { OpportunityStageBadge } from "@/components/crm/opportunity-stage-badge";
+import { OpportunityStageChange } from "@/components/crm/opportunity-stage-change";
+import { StaffAvatarStack } from "@/components/crm/staff-avatar-stack";
+import { TaskPriorityBadge, TaskStatusBadge } from "@/components/crm/task-badges";
+import { EmptyState } from "@/components/empty-state";
+import { PageHeader } from "@/components/page-header";
+import { StaffAvatarDisplay } from "@/components/staff-avatar-display";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { buildCrmAppShellProps } from "@/lib/admin-shell-props";
+import { requireCrmPageAccess } from "@/lib/crm-page-access";
+import { formatActivityTypeLabel } from "@/lib/crm/activity-types";
+import { getStaffDisplayName } from "@/lib/crm/crm-staff";
+import {
+  formatCrmDate,
+  formatCrmDateTime,
+} from "@/lib/crm/format-datetime";
+import { loadOpportunityDetail } from "@/lib/crm/opportunity-detail";
+import { formatOpportunitySourceLabel } from "@/lib/crm/source-labels";
+import { formatGbp } from "@/lib/format-currency";
+import { createClient } from "@/lib/supabase/server";
+
+export const dynamic = "force-dynamic";
+
+type OpportunityDetailPageProps = {
+  params: Promise<{ id: string }>;
+};
+
+export default async function OpportunityDetailPage({
+  params,
+}: OpportunityDetailPageProps) {
+  const { id } = await params;
+  const supabase = await createClient();
+  const profile = await requireCrmPageAccess(
+    supabase,
+    `/admin/opportunities/${id}`
+  );
+  const shellProps = await buildCrmAppShellProps(supabase, profile);
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const currentUserId = user?.id;
+
+  if (!currentUserId) {
+    notFound();
+  }
+
+  const detail = await loadOpportunityDetail(supabase, id);
+
+  if (!detail) {
+    notFound();
+  }
+
+  const { opportunity } = detail;
+
+  return (
+    <AppShell {...shellProps}>
+      <div className="mx-auto max-w-7xl">
+        <PageHeader
+          eyebrow="CRM"
+          title={opportunity.title}
+          description={detail.company_name}
+          actions={
+            <div className="flex flex-wrap gap-2">
+              <Link href={`/admin/opportunities/${id}/edit`}>
+                <Button variant="outline">Edit opportunity</Button>
+              </Link>
+              <Link
+                href={`/admin/quotes/new?opportunityId=${encodeURIComponent(id)}`}
+              >
+                <Button variant="outline">Create quote</Button>
+              </Link>
+              <Link
+                href={`/admin/tasks/new?opportunityId=${encodeURIComponent(id)}`}
+              >
+                <Button variant="outline">Add task</Button>
+              </Link>
+            </div>
+          }
+        />
+
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
+          <Card className="portal-surface">
+            <CardHeader>
+              <CardTitle>Overview</CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Stage
+                </p>
+                <div className="mt-1">
+                  <OpportunityStageBadge stage={opportunity.stage} />
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Estimated value
+                </p>
+                <p className="mt-1 font-medium">
+                  {opportunity.estimated_value !== null
+                    ? formatGbp(Number(opportunity.estimated_value))
+                    : "—"}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Current quote value
+                </p>
+                <p className="mt-1 font-medium">
+                  {detail.current_quote_value !== null
+                    ? formatGbp(detail.current_quote_value)
+                    : "—"}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Source
+                </p>
+                <p className="mt-1 font-medium">
+                  {formatOpportunitySourceLabel(opportunity.source)}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Owner
+                </p>
+                <div className="mt-1 flex items-center gap-2">
+                  <StaffAvatarDisplay
+                    fullName={getStaffDisplayName(detail.owner)}
+                    size="sm"
+                  />
+                  <span>{getStaffDisplayName(detail.owner)}</span>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Collaborators
+                </p>
+                <div className="mt-1">
+                  <StaffAvatarStack members={detail.collaborators} size="sm" />
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Expected close
+                </p>
+                <p className="mt-1 font-medium">
+                  {formatCrmDate(opportunity.expected_close_date)}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Next follow-up
+                </p>
+                <p className="mt-1 font-medium">
+                  {formatCrmDateTime(opportunity.next_follow_up_at)}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Created
+                </p>
+                <p className="mt-1 font-medium">
+                  {formatCrmDateTime(opportunity.created_at)}
+                </p>
+              </div>
+
+              <div>
+                <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Updated
+                </p>
+                <p className="mt-1 font-medium">
+                  {formatCrmDateTime(opportunity.updated_at)}
+                </p>
+              </div>
+
+              {opportunity.description ? (
+                <div className="sm:col-span-2">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Description
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">
+                    {opportunity.description}
+                  </p>
+                </div>
+              ) : null}
+
+              {opportunity.stage === "lost" && opportunity.lost_reason ? (
+                <div className="sm:col-span-2">
+                  <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Lost reason
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">
+                    {opportunity.lost_reason}
+                  </p>
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card className="portal-surface">
+            <CardHeader>
+              <CardTitle>Change stage</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <OpportunityStageChange
+                opportunityId={id}
+                currentStage={opportunity.stage}
+                currentUserId={currentUserId}
+              />
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="mt-6 grid gap-6 xl:grid-cols-2">
+          <Card className="portal-surface">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle>Tasks</CardTitle>
+              <Link
+                href={`/admin/tasks/new?opportunityId=${encodeURIComponent(id)}`}
+              >
+                <Button size="sm" variant="outline">
+                  Add task
+                </Button>
+              </Link>
+            </CardHeader>
+            <CardContent>
+              {detail.tasks.length === 0 ? (
+                <EmptyState
+                  title="No tasks yet"
+                  description="Add follow-up tasks for this opportunity."
+                />
+              ) : (
+                <div className="space-y-3">
+                  {detail.tasks.map((task) => (
+                    <div
+                      key={task.id}
+                      className="rounded-xl border border-border p-4"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <Link
+                            href={`/admin/tasks/${task.id}/edit`}
+                            className="font-medium hover:underline"
+                          >
+                            {task.title}
+                          </Link>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Due {formatCrmDateTime(task.due_at)}
+                          </p>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <TaskStatusBadge status={task.status} />
+                          <TaskPriorityBadge priority={task.priority} />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="portal-surface">
+            <CardHeader>
+              <CardTitle>Notes</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <OpportunityNoteForm
+                opportunityId={id}
+                currentUserId={currentUserId}
+              />
+
+              {detail.notes.length === 0 ? (
+                <EmptyState
+                  title="No notes yet"
+                  description="Internal notes will appear here."
+                />
+              ) : (
+                <div className="space-y-3">
+                  {detail.notes.map((note) => (
+                    <div
+                      key={note.id}
+                      className="rounded-xl border border-border p-4"
+                    >
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed">
+                        {note.body}
+                      </p>
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        {note.author_name} · {formatCrmDateTime(note.created_at)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="portal-surface xl:col-span-2">
+            <CardHeader>
+              <CardTitle>Activity</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {detail.activity.length === 0 ? (
+                <EmptyState
+                  title="No activity yet"
+                  description="Changes and updates will be logged here."
+                />
+              ) : (
+                <div className="space-y-3">
+                  {detail.activity.map((entry) => (
+                    <div
+                      key={entry.id}
+                      className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border p-4"
+                    >
+                      <div>
+                        <p className="font-medium">
+                          {formatActivityTypeLabel(entry.activity_type)}
+                        </p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {entry.description}
+                        </p>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {entry.author_name ? `${entry.author_name} · ` : ""}
+                        {formatCrmDateTime(entry.created_at)}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="portal-surface">
+            <CardHeader>
+              <CardTitle>Linked quote requests</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {detail.quoteRequests.length === 0 ? (
+                <EmptyState
+                  title="No linked quote requests"
+                  description="Quote requests linked to this opportunity will appear here."
+                />
+              ) : (
+                <div className="space-y-3">
+                  {detail.quoteRequests.map((request) => (
+                    <Link
+                      key={request.id}
+                      href={`/admin/quote-requests/${request.id}`}
+                      className="block rounded-xl border border-border p-4 transition-colors hover:bg-muted/30"
+                    >
+                      <p className="font-medium">{request.project_name}</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {request.status} · {formatCrmDate(request.created_at)}
+                      </p>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card className="portal-surface">
+            <CardHeader>
+              <CardTitle>Linked quotes</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {detail.quotes.length === 0 ? (
+                <EmptyState
+                  title="No linked quotes"
+                  description="Quotes linked to this opportunity will appear here."
+                />
+              ) : (
+                <div className="space-y-3">
+                  {detail.quotes.map((quote) => (
+                    <Link
+                      key={quote.id}
+                      href={`/admin/quotes/${quote.id}`}
+                      className="block rounded-xl border border-border p-4 transition-colors hover:bg-muted/30"
+                    >
+                      <p className="font-medium">
+                        Q-{quote.quote_number} · {quote.project_name}
+                      </p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {quote.status}
+                        {quote.current_version_total !== null
+                          ? ` · ${formatGbp(quote.current_version_total)}`
+                          : ""}
+                        {" · "}
+                        {formatCrmDate(quote.updated_at)}
+                      </p>
+                    </Link>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </AppShell>
+  );
+}
