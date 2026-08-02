@@ -18,6 +18,7 @@ import {
   getFormalQuoteStatusLabel,
   mapCustomerQuoteStatusToBadge,
 } from "@/lib/customer-quote-request";
+import { formatPaymentTermsLabel } from "@/lib/payment-terms";
 
 const CANDID_YELLOW = "#fbd12c";
 
@@ -305,7 +306,7 @@ export function CustomerFormalQuoteView({
                 <span className="text-neutral-500">Payment terms</span>
                 <br />
                 <span className="font-medium text-neutral-950">
-                  {paymentTermsDays} days
+                  {formatPaymentTermsLabel(paymentTermsDays)}
                 </span>
               </p>
             ) : null}

@@ -8,7 +8,12 @@ import {
   type QuoteBuilderInitialValues,
 } from "@/components/quote-builder-form";
 import { Button } from "@/components/ui/button";
-import { resolvePaymentTermsDays } from "@/lib/payment-terms";
+import {
+  parsePaymentTermsDays,
+  PAYMENT_TERMS_MAX_DAYS,
+  PAYMENT_TERMS_MIN_DAYS,
+  resolveQuotePaymentTermsDays,
+} from "@/lib/payment-terms";
 import { computeDefaultQuoteExpiryDate } from "@/lib/app-settings";
 import { loadAppSettings } from "@/lib/app-settings-server";
 import { createClient } from "@/lib/supabase/server";
@@ -73,7 +78,10 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
     quoteRequestId: null,
     projectName: "",
     expiryDate: computeDefaultQuoteExpiryDate(appSettings.default_quote_expiry_days),
-    paymentTermsDays: appSettings.default_payment_terms_days,
+    paymentTermsDays: resolveQuotePaymentTermsDays(
+      null,
+      appSettings.default_payment_terms_days
+    ),
     introduction: appSettings.default_introduction ?? "",
     customerNotes: appSettings.default_customer_notes ?? "",
     internalNotes: "",
@@ -98,8 +106,9 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
         quoteRequestId: quoteRequest.id,
         projectName: quoteRequest.project_name,
         expiryDate: computeDefaultQuoteExpiryDate(appSettings.default_quote_expiry_days),
-        paymentTermsDays: resolvePaymentTermsDays(
-          linkedCompany?.payment_terms_days ?? appSettings.default_payment_terms_days
+        paymentTermsDays: resolveQuotePaymentTermsDays(
+          linkedCompany?.payment_terms_days,
+          appSettings.default_payment_terms_days
         ),
         introduction: appSettings.default_introduction ?? "",
         customerNotes: buildCustomerNotes(
@@ -138,6 +147,7 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
           companies={companies ?? []}
           quoteRequests={quoteRequests ?? []}
           initialValues={initialValues}
+          fallbackQuotePaymentTermsDays={appSettings.default_payment_terms_days}
         />
       </div>
     </AppShell>

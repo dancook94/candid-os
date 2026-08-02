@@ -2,6 +2,11 @@ import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { verifySuperAdmin } from "@/lib/admin-auth";
+import {
+  parsePaymentTermsDays,
+  PAYMENT_TERMS_MAX_DAYS,
+  PAYMENT_TERMS_MIN_DAYS,
+} from "@/lib/payment-terms";
 import { createClient } from "@/lib/supabase/server";
 
 type CustomerDefaultsBody = {
@@ -32,21 +37,21 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const paymentTerms = body.defaultCompanyPaymentTermsDays;
-  const registrationStatus = body.defaultRegistrationAccountStatus?.trim();
-  const deadlineStatus = body.defaultDeadlineStatus?.trim();
+  const paymentTerms = parsePaymentTermsDays(
+    body.defaultCompanyPaymentTermsDays ?? NaN
+  );
 
-  if (
-    paymentTerms === undefined ||
-    !Number.isFinite(paymentTerms) ||
-    paymentTerms < 0 ||
-    paymentTerms > 365
-  ) {
+  if (paymentTerms === null) {
     return NextResponse.json(
-      { error: "Default company payment terms must be between 0 and 365 days." },
+      {
+        error: `New customer payment terms must be a whole number between ${PAYMENT_TERMS_MIN_DAYS} and ${PAYMENT_TERMS_MAX_DAYS} days.`,
+      },
       { status: 400 }
     );
   }
+
+  const registrationStatus = body.defaultRegistrationAccountStatus?.trim();
+  const deadlineStatus = body.defaultDeadlineStatus?.trim();
 
   if (!registrationStatus || !allowedAccountStatuses.has(registrationStatus)) {
     return NextResponse.json(

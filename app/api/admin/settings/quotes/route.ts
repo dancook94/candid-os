@@ -2,6 +2,7 @@ import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { verifySuperAdmin } from "@/lib/admin-auth";
+import { parsePaymentTermsDays, PAYMENT_TERMS_MAX_DAYS, PAYMENT_TERMS_MIN_DAYS } from "@/lib/payment-terms";
 import { createClient } from "@/lib/supabase/server";
 
 type QuoteSettingsBody = {
@@ -33,22 +34,20 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const paymentTerms = body.defaultPaymentTermsDays;
-  const expiryDays = body.defaultQuoteExpiryDays;
-  const vatRate = body.defaultVatRate;
-  const prefix = body.quoteNumberPrefix?.trim();
+  const paymentTerms = parsePaymentTermsDays(body.defaultPaymentTermsDays ?? NaN);
 
-  if (
-    paymentTerms === undefined ||
-    !Number.isFinite(paymentTerms) ||
-    paymentTerms < 0 ||
-    paymentTerms > 365
-  ) {
+  if (paymentTerms === null) {
     return NextResponse.json(
-      { error: "Default payment terms must be between 0 and 365 days." },
+      {
+        error: `Fallback payment terms must be a whole number between ${PAYMENT_TERMS_MIN_DAYS} and ${PAYMENT_TERMS_MAX_DAYS} days.`,
+      },
       { status: 400 }
     );
   }
+
+  const expiryDays = body.defaultQuoteExpiryDays;
+  const vatRate = body.defaultVatRate;
+  const prefix = body.quoteNumberPrefix?.trim();
 
   if (
     expiryDays === undefined ||

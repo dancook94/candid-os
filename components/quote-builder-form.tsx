@@ -15,7 +15,12 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
-import { resolvePaymentTermsDays } from "@/lib/payment-terms";
+import {
+  parsePaymentTermsDays,
+  PAYMENT_TERMS_MAX_DAYS,
+  PAYMENT_TERMS_MIN_DAYS,
+  resolveQuotePaymentTermsDays,
+} from "@/lib/payment-terms";
 import {
   deleteOrphanedQuoteItemImages,
   formatSupabaseStorageError,
@@ -99,6 +104,7 @@ type QuoteBuilderFormProps = {
   selectedVersionNumber?: number;
   currentVersionNumber?: number;
   canEdit?: boolean;
+  fallbackQuotePaymentTermsDays?: number;
 };
 
 function formatSupabaseError(error: unknown) {
@@ -327,6 +333,7 @@ export function QuoteBuilderForm({
   selectedVersionNumber,
   currentVersionNumber,
   canEdit = true,
+  fallbackQuotePaymentTermsDays = 14,
 }: QuoteBuilderFormProps) {
   const router = useRouter();
   const supabase = createClient();
@@ -382,7 +389,12 @@ export function QuoteBuilderForm({
 
     const company = companies.find((entry) => entry.id === nextCompanyId);
     setPaymentTermsDays(
-      String(resolvePaymentTermsDays(company?.payment_terms_days))
+      String(
+        resolveQuotePaymentTermsDays(
+          company?.payment_terms_days,
+          fallbackQuotePaymentTermsDays
+        )
+      )
     );
   }
 
@@ -579,10 +591,12 @@ export function QuoteBuilderForm({
       return;
     }
 
-    const parsedPaymentTerms = Number.parseInt(paymentTermsDays, 10);
+    const parsedPaymentTerms = parsePaymentTermsDays(paymentTermsDays);
 
-    if (!Number.isFinite(parsedPaymentTerms) || parsedPaymentTerms < 0) {
-      setError("Payment terms must be a valid number of days.");
+    if (parsedPaymentTerms === null) {
+      setError(
+        `Payment terms must be a whole number between ${PAYMENT_TERMS_MIN_DAYS} and ${PAYMENT_TERMS_MAX_DAYS} days.`
+      );
       return;
     }
 
@@ -989,7 +1003,9 @@ export function QuoteBuilderForm({
               <Input
                 id="payment-terms"
                 type="number"
-                min={0}
+                min={PAYMENT_TERMS_MIN_DAYS}
+                max={PAYMENT_TERMS_MAX_DAYS}
+                step={1}
                 value={paymentTermsDays}
                 onChange={(event) => setPaymentTermsDays(event.target.value)}
                 disabled={isBusy || isReadOnly}

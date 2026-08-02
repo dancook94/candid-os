@@ -1,13 +1,39 @@
 const DEFAULT_PAYMENT_TERMS_DAYS = 14;
 
+export function resolveQuotePaymentTermsDays(
+  companyPaymentTermsDays: number | null | undefined,
+  settingsFallbackDays?: number | null
+) {
+  if (companyPaymentTermsDays !== null && companyPaymentTermsDays !== undefined) {
+    return companyPaymentTermsDays;
+  }
+
+  if (settingsFallbackDays !== null && settingsFallbackDays !== undefined) {
+    return settingsFallbackDays;
+  }
+
+  return DEFAULT_PAYMENT_TERMS_DAYS;
+}
+
 export function resolvePaymentTermsDays(
   paymentTermsDays: number | null | undefined
 ) {
-  if (paymentTermsDays === null || paymentTermsDays === undefined) {
-    return DEFAULT_PAYMENT_TERMS_DAYS;
+  return resolveQuotePaymentTermsDays(paymentTermsDays);
+}
+
+export function parsePaymentTermsDays(value: string | number) {
+  const parsed =
+    typeof value === "string" ? Number.parseInt(value.trim(), 10) : value;
+
+  if (!Number.isInteger(parsed) || parsed < PAYMENT_TERMS_MIN_DAYS) {
+    return null;
   }
 
-  return paymentTermsDays;
+  if (parsed > PAYMENT_TERMS_MAX_DAYS) {
+    return null;
+  }
+
+  return parsed;
 }
 
 export function formatPaymentTermsLabel(
@@ -16,7 +42,7 @@ export function formatPaymentTermsLabel(
   const resolvedDays = resolvePaymentTermsDays(paymentTermsDays);
 
   if (resolvedDays === 0) {
-    return "Payment due immediately";
+    return "Due immediately";
   }
 
   return `${resolvedDays} days`;

@@ -13,6 +13,7 @@ import {
   formatQuoteProjectName,
   getFormalQuoteStatusLabel,
 } from "@/lib/customer-quote-request";
+import { formatPaymentTermsLabel } from "@/lib/payment-terms";
 
 const CANDID_YELLOW = "#fbd12c";
 const PAGE_WIDTH = 595.28;
@@ -530,7 +531,11 @@ export async function generateCustomerQuotePdf(quote: CustomerFormalQuotePdfInpu
   }
 
   if (quote.paymentTermsDays !== null) {
-    quoteDetailLines.push("", "Payment terms", `${quote.paymentTermsDays} days`);
+    quoteDetailLines.push(
+      "",
+      "Payment terms",
+      formatPaymentTermsLabel(quote.paymentTermsDays)
+    );
   }
 
   if (quote.expiryDate) {

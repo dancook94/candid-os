@@ -14,6 +14,11 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
+import {
+  parsePaymentTermsDays,
+  PAYMENT_TERMS_MAX_DAYS,
+  PAYMENT_TERMS_MIN_DAYS,
+} from "@/lib/payment-terms";
 
 type CreateCompanyDialogProps = {
   defaultPaymentTermsDays?: number;
@@ -71,10 +76,12 @@ export function CreateCompanyDialog({
       return;
     }
 
-    const parsedPaymentTerms = Number.parseInt(paymentTermsDays, 10);
+    const parsedPaymentTerms = parsePaymentTermsDays(paymentTermsDays);
 
-    if (!Number.isFinite(parsedPaymentTerms) || parsedPaymentTerms < 0) {
-      setError("Payment terms must be a valid number of days.");
+    if (parsedPaymentTerms === null) {
+      setError(
+        `Payment terms must be a whole number between ${PAYMENT_TERMS_MIN_DAYS} and ${PAYMENT_TERMS_MAX_DAYS} days.`
+      );
       return;
     }
 
@@ -195,7 +202,9 @@ export function CreateCompanyDialog({
                   <Input
                     id="payment-terms"
                     type="number"
-                    min={0}
+                    min={PAYMENT_TERMS_MIN_DAYS}
+                    max={PAYMENT_TERMS_MAX_DAYS}
+                    step={1}
                     value={paymentTermsDays}
                     onChange={(event) => setPaymentTermsDays(event.target.value)}
                     disabled={isSubmitting}

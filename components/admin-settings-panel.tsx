@@ -17,6 +17,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { AppSettings, EmailConfigStatus } from "@/lib/app-settings";
 import { formatRoleLabel } from "@/lib/staff-roles";
+import {
+  parsePaymentTermsDays,
+  PAYMENT_TERMS_MAX_DAYS,
+  PAYMENT_TERMS_MIN_DAYS,
+} from "@/lib/payment-terms";
 import { cn } from "@/lib/utils";
 
 type SettingsTab =
@@ -168,10 +173,24 @@ export function AdminSettingsPanel({
 
   async function handleQuoteSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    const defaultPaymentTermsDays = parsePaymentTermsDays(
+      quoteForm.defaultPaymentTermsDays
+    );
+
+    if (defaultPaymentTermsDays === null) {
+      setQuoteState({
+        loading: false,
+        error: `Fallback payment terms must be a whole number between ${PAYMENT_TERMS_MIN_DAYS} and ${PAYMENT_TERMS_MAX_DAYS} days.`,
+        success: "",
+      });
+      return;
+    }
+
     await saveSection(
       "/api/admin/settings/quotes",
       {
-        defaultPaymentTermsDays: Number.parseInt(quoteForm.defaultPaymentTermsDays, 10),
+        defaultPaymentTermsDays,
         defaultQuoteExpiryDays: Number.parseInt(quoteForm.defaultQuoteExpiryDays, 10),
         defaultVatRate: Number.parseFloat(quoteForm.defaultVatRate),
         defaultIntroduction: quoteForm.defaultIntroduction,
@@ -185,13 +204,24 @@ export function AdminSettingsPanel({
 
   async function handleCustomerSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+
+    const defaultCompanyPaymentTermsDays = parsePaymentTermsDays(
+      customerForm.defaultCompanyPaymentTermsDays
+    );
+
+    if (defaultCompanyPaymentTermsDays === null) {
+      setCustomerState({
+        loading: false,
+        error: `New customer payment terms must be a whole number between ${PAYMENT_TERMS_MIN_DAYS} and ${PAYMENT_TERMS_MAX_DAYS} days.`,
+        success: "",
+      });
+      return;
+    }
+
     await saveSection(
       "/api/admin/settings/customer-defaults",
       {
-        defaultCompanyPaymentTermsDays: Number.parseInt(
-          customerForm.defaultCompanyPaymentTermsDays,
-          10
-        ),
+        defaultCompanyPaymentTermsDays,
         defaultRegistrationAccountStatus:
           customerForm.defaultRegistrationAccountStatus,
         defaultDeadlineStatus: customerForm.defaultDeadlineStatus,
@@ -455,12 +485,15 @@ export function AdminSettingsPanel({
             <form className="space-y-4" onSubmit={handleQuoteSubmit}>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="default-payment-terms">Default payment terms (days)</Label>
+                  <Label htmlFor="default-payment-terms">
+                    Fallback payment terms (days)
+                  </Label>
                   <Input
                     id="default-payment-terms"
                     type="number"
                     min={0}
                     max={365}
+                    step={1}
                     value={quoteForm.defaultPaymentTermsDays}
                     onChange={(event) =>
                       setQuoteForm((current) => ({
@@ -471,6 +504,9 @@ export function AdminSettingsPanel({
                     disabled={!canEdit || quoteState.loading}
                     required
                   />
+                  <p className="text-sm text-muted-foreground">
+                    Used only when the selected customer has no payment terms set.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="default-expiry-days">Default quote expiry (days)</Label>
@@ -687,15 +723,16 @@ export function AdminSettingsPanel({
           <CardContent className="pt-6">
             <form className="space-y-4" onSubmit={handleCustomerSubmit}>
               <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
+                <div className="space-y-2 md:col-span-2">
                   <Label htmlFor="default-company-payment-terms">
-                    Default company payment terms (days)
+                    New customer payment terms (days)
                   </Label>
                   <Input
                     id="default-company-payment-terms"
                     type="number"
                     min={0}
                     max={365}
+                    step={1}
                     value={customerForm.defaultCompanyPaymentTermsDays}
                     onChange={(event) =>
                       setCustomerForm((current) => ({
@@ -706,6 +743,9 @@ export function AdminSettingsPanel({
                     disabled={!canEdit || customerState.loading}
                     required
                   />
+                  <p className="text-sm text-muted-foreground">
+                    Applied when a new customer company is created.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="default-registration-status">
