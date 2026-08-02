@@ -8,7 +8,10 @@ import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
-import { loadCustomerCompanyBranding } from "@/lib/customer-company-branding";
+import {
+  buildCustomerAppShellProps,
+  loadCustomerPortalProfile,
+} from "@/lib/customer-shell-props";
 import {
   getCustomerQuoteActionLabel,
   getFormalQuoteStatusLabel,
@@ -120,29 +123,8 @@ export default async function QuotesPage() {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, company_id")
-    .eq("id", user.id)
-    .single();
-
-  const fullName =
-    profile?.full_name ||
-    user.user_metadata?.full_name ||
-    user.email ||
-    "Customer";
-
-  const fallbackCompanyName =
-    user.user_metadata?.company_name || "Company awaiting approval";
-
-  const companyBranding = await loadCustomerCompanyBranding(
-    supabase,
-    profile?.company_id,
-    fallbackCompanyName
-  );
-
-  const companyName = companyBranding.companyName;
-  const companyLogoUrl = companyBranding.companyLogoUrl;
+  const profile = await loadCustomerPortalProfile(supabase, user.id);
+  const shellProps = await buildCustomerAppShellProps(supabase, user, profile);
 
   const { data, error } = await supabase
     .from("quote_requests")
@@ -189,12 +171,7 @@ export default async function QuotesPage() {
   );
 
   return (
-    <AppShell
-      userRole="customer"
-      userName={fullName}
-      companyName={companyName}
-      companyLogoUrl={companyLogoUrl}
-    >
+    <AppShell {...shellProps}>
       <div className="mx-auto max-w-6xl">
         <PageHeader
           title="Quotes"

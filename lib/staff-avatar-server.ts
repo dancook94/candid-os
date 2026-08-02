@@ -12,14 +12,13 @@ import {
 import { isStaffRole } from "@/lib/staff-roles";
 import { createAdminClient } from "@/lib/supabase/admin";
 
-export async function loadStaffAvatarSignedUrl(
+export async function loadProfileAvatarSignedUrl(
   supabase: SupabaseClient,
   profile: {
-    user_role: string;
     avatar_storage_path?: string | null;
   }
 ) {
-  if (!isStaffRole(profile.user_role) || !profile.avatar_storage_path) {
+  if (!profile.avatar_storage_path) {
     return null;
   }
 
@@ -35,11 +34,25 @@ export async function loadStaffAvatarSignedUrl(
     }
   } catch (error) {
     if (process.env.NODE_ENV === "development") {
-      console.error("[staff-avatar] admin signed URL failed:", error);
+      console.error("[profile-avatar] admin signed URL failed:", error);
     }
   }
 
   return createStaffAvatarSignedUrl(supabase, profile.avatar_storage_path);
+}
+
+export async function loadStaffAvatarSignedUrl(
+  supabase: SupabaseClient,
+  profile: {
+    user_role: string;
+    avatar_storage_path?: string | null;
+  }
+) {
+  if (!isStaffRole(profile.user_role) || !profile.avatar_storage_path) {
+    return null;
+  }
+
+  return loadProfileAvatarSignedUrl(supabase, profile);
 }
 
 export async function replaceStaffAvatar(

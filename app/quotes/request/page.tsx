@@ -13,7 +13,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
-import { loadCustomerCompanyBranding } from "@/lib/customer-company-branding";
+import {
+  buildCustomerAppShellProps,
+  loadCustomerPortalProfile,
+} from "@/lib/customer-shell-props";
 import { loadAppSettings } from "@/lib/app-settings-server";
 
 export default async function QuoteRequestPage() {
@@ -27,43 +30,18 @@ export default async function QuoteRequestPage() {
     redirect("/login");
   }
 
-  const [{ data: profile }, appSettingsResult] = await Promise.all([
-    supabase
-      .from("profiles")
-      .select("full_name, company_id, account_status")
-      .eq("id", user.id)
-      .single(),
+  const [profile, appSettingsResult] = await Promise.all([
+    loadCustomerPortalProfile(supabase, user.id),
     loadAppSettings(supabase),
   ]);
 
-  const fullName =
-    profile?.full_name ||
-    user.user_metadata?.full_name ||
-    user.email ||
-    "Customer";
-
-  const fallbackCompanyName =
-    user.user_metadata?.company_name || "Company awaiting approval";
-
-  const companyBranding = await loadCustomerCompanyBranding(
-    supabase,
-    profile?.company_id,
-    fallbackCompanyName
-  );
-
-  const companyName = companyBranding.companyName;
-  const companyLogoUrl = companyBranding.companyLogoUrl;
+  const shellProps = await buildCustomerAppShellProps(supabase, user, profile);
 
   const canSubmit =
     profile?.account_status === "approved" && Boolean(profile.company_id);
 
   return (
-    <AppShell
-      userRole="customer"
-      userName={fullName}
-      companyName={companyName}
-      companyLogoUrl={companyLogoUrl}
-    >
+    <AppShell {...shellProps}>
       <div className="mx-auto max-w-3xl">
         <PageHeader
           title="Request a quote"

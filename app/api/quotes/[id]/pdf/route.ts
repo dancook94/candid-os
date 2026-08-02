@@ -9,6 +9,8 @@ import {
   isCustomerQuotePdfDownloadable,
 } from "@/lib/customer-quote-request";
 import { generateCustomerQuotePdf } from "@/lib/generate-customer-quote-pdf";
+import { loadCustomerCompanyBranding } from "@/lib/customer-company-branding";
+import { loadCustomerPortalProfile } from "@/lib/customer-shell-props";
 import { createClient } from "@/lib/supabase/server";
 
 type RouteContext = {
@@ -27,11 +29,7 @@ export async function GET(_request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name")
-    .eq("id", user.id)
-    .single();
+  const profile = await loadCustomerPortalProfile(supabase, user.id);
 
   const fullName =
     profile?.full_name ||
@@ -39,13 +37,16 @@ export async function GET(_request: Request, context: RouteContext) {
     user.email ||
     "Customer";
 
-  const companyName =
-    user.user_metadata?.company_name || "Company awaiting approval";
+  const companyBranding = await loadCustomerCompanyBranding(
+    supabase,
+    profile?.company_id,
+    (user.user_metadata?.company_name as string | undefined) || "Your company"
+  );
 
   const quote = await fetchCustomerFormalQuote(supabase, id, {
     customerContactName: fullName,
     customerEmail: user.email ?? null,
-    fallbackCompanyName: companyName,
+    fallbackCompanyName: companyBranding.companyName,
   });
 
   if (!quote) {

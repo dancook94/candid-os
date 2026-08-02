@@ -19,13 +19,13 @@ import {
   Users,
 } from "lucide-react";
 
-import { CompanyLogoDisplay } from "@/components/company-logo-display";
 import {
   GlobalSearch,
   GlobalSearchTrigger,
   useGlobalSearchShortcut,
 } from "@/components/global-search";
 import { StaffAvatarDisplay } from "@/components/staff-avatar-display";
+import { getCustomerPortalStatusSubtitle } from "@/lib/customer-portal-status";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -38,6 +38,7 @@ type AppShellProps = {
   userName?: string;
   companyName?: string;
   companyLogoUrl?: string | null;
+  accountStatusSubtitle?: string;
   userAvatarUrl?: string | null;
 };
 
@@ -116,20 +117,6 @@ const staffManagementLink = {
   icon: UserCog,
 };
 
-function getInitials(name: string) {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-
-  if (parts.length === 0) {
-    return "CO";
-  }
-
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2).toUpperCase();
-  }
-
-  return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase();
-}
-
 const staffLinks = [
   {
     href: "/staff",
@@ -146,7 +133,7 @@ export function AppShell({
   showGlobalSearch,
   userName,
   companyName,
-  companyLogoUrl = null,
+  accountStatusSubtitle,
   userAvatarUrl = null,
 }: AppShellProps) {
   const pathname = usePathname();
@@ -180,8 +167,12 @@ export function AppShell({
         : "Customer portal";
   const displayName = userName || "Candid OS user";
   const displayCompany = companyName || "Candid Creative";
-  const showStaffAvatar = userRole === "admin" || userRole === "staff";
-  const profileHref = showStaffAvatar ? "/staff/profile" : null;
+  const displaySubtitle =
+    userRole === "customer"
+      ? accountStatusSubtitle || getCustomerPortalStatusSubtitle(null)
+      : displayCompany;
+  const profileHref =
+    userRole === "admin" || userRole === "staff" ? "/staff/profile" : null;
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -251,29 +242,20 @@ export function AppShell({
 
         <div className="border-t border-border p-4">
           <div className="mb-3 flex items-center gap-3 rounded-xl bg-muted/50 px-3 py-3">
-            {showStaffAvatar ? (
-              profileHref ? (
-                <Link href={profileHref} className="shrink-0">
-                  <StaffAvatarDisplay
-                    fullName={displayName}
-                    avatarUrl={userAvatarUrl}
-                    size="md"
-                  />
-                </Link>
-              ) : (
+            {profileHref ? (
+              <Link href={profileHref} className="shrink-0">
                 <StaffAvatarDisplay
                   fullName={displayName}
                   avatarUrl={userAvatarUrl}
                   size="md"
                 />
-              )
+              </Link>
             ) : (
-              <div
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background"
-                aria-hidden
-              >
-                {getInitials(displayName)}
-              </div>
+              <StaffAvatarDisplay
+                fullName={displayName}
+                avatarUrl={userAvatarUrl}
+                size="md"
+              />
             )}
 
             <div className="min-w-0 flex-1">
@@ -286,19 +268,9 @@ export function AppShell({
                   displayName
                 )}
               </p>
-              <div className="mt-0.5 flex items-center gap-2">
-                {userRole === "customer" && companyLogoUrl ? (
-                  <CompanyLogoDisplay
-                    companyName={displayCompany}
-                    logoUrl={companyLogoUrl}
-                    size="sm"
-                    className="rounded-lg"
-                  />
-                ) : null}
-                <p className="truncate text-xs text-muted-foreground">
-                  {displayCompany}
-                </p>
-              </div>
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                {displaySubtitle}
+              </p>
             </div>
           </div>
 

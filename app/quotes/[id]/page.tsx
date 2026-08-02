@@ -23,7 +23,10 @@ import {
   loadLinkedQuoteRequestDeadline,
 } from "@/lib/customer-formal-quote-data";
 import { createClient } from "@/lib/supabase/server";
-import { loadCustomerCompanyBranding } from "@/lib/customer-company-branding";
+import {
+  buildCustomerAppShellProps,
+  loadCustomerPortalProfile,
+} from "@/lib/customer-shell-props";
 import {
   getCustomerQuoteActionLabel,
   getFormalQuoteStatusLabel,
@@ -190,29 +193,9 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, company_id")
-    .eq("id", user.id)
-    .single();
-
-  const fullName =
-    profile?.full_name ||
-    user.user_metadata?.full_name ||
-    user.email ||
-    "Customer";
-
-  const fallbackCompanyName =
-    user.user_metadata?.company_name || "Company awaiting approval";
-
-  const companyBranding = await loadCustomerCompanyBranding(
-    supabase,
-    profile?.company_id,
-    fallbackCompanyName
-  );
-
-  const companyName = companyBranding.companyName;
-  const companyLogoUrl = companyBranding.companyLogoUrl;
+  const profile = await loadCustomerPortalProfile(supabase, user.id);
+  const shellProps = await buildCustomerAppShellProps(supabase, user, profile);
+  const fullName = shellProps.userName;
 
   const { data: formalQuoteExists } = await supabase
     .from("quotes")
@@ -237,7 +220,7 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
     const formalQuote = await fetchCustomerFormalQuote(supabase, id, {
       customerContactName: fullName,
       customerEmail: user.email ?? null,
-      fallbackCompanyName: companyName,
+      fallbackCompanyName: shellProps.companyName,
     });
 
     if (!formalQuote) {
@@ -257,12 +240,7 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
     }
 
     return (
-      <AppShell
-        userRole="customer"
-        userName={fullName}
-        companyName={companyName}
-        companyLogoUrl={companyLogoUrl}
-      >
+      <AppShell {...shellProps}>
         <CustomerFormalQuoteView
           quoteId={formalQuote.quoteId}
           showPdfDownload={isCustomerQuotePdfDownloadable(
@@ -344,12 +322,7 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
   const isDelivery = quoteRequest.fulfilment_method === "delivery";
 
   return (
-    <AppShell
-      userRole="customer"
-      userName={fullName}
-      companyName={companyName}
-      companyLogoUrl={companyLogoUrl}
-    >
+    <AppShell {...shellProps}>
       <div className="mx-auto max-w-3xl">
         <PageHeader
           title={quoteRequest.project_name}

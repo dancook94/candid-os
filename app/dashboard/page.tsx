@@ -3,8 +3,8 @@ import { unstable_noStore as noStore } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
-import { CompanyLogoDisplay } from "@/components/company-logo-display";
 import { PageHeader } from "@/components/page-header";
+import { StaffAvatarDisplay } from "@/components/staff-avatar-display";
 import { StatCard } from "@/components/stat-card";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -16,7 +16,16 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { getDashboardRoleRedirect } from "@/lib/auth-redirect";
-import { loadCustomerCompanyBranding } from "@/lib/customer-company-branding";
+import {
+  buildCustomerAppShellProps,
+  loadCustomerPortalProfile,
+  resolveCustomerDisplayName,
+} from "@/lib/customer-shell-props";
+import {
+  getCustomerAccountStatusBadge,
+  getCustomerAccountStatusDescription,
+  getCustomerPortalStatusSubtitle,
+} from "@/lib/customer-portal-status";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -28,42 +37,6 @@ const FORMAL_QUOTE_STATUSES = [
   "expired",
   "superseded",
 ] as const;
-
-type AccountBadgeStatus = "pending" | "approved" | "disabled";
-
-function formatAccountStatusLabel(accountStatus: string) {
-  return accountStatus.charAt(0).toUpperCase() + accountStatus.slice(1);
-}
-
-function mapAccountStatusToBadge(
-  accountStatus: string
-): { status: AccountBadgeStatus; label: string } {
-  if (accountStatus === "approved") {
-    return { status: "approved", label: "Approved" };
-  }
-
-  if (accountStatus === "pending") {
-    return { status: "pending", label: "Pending" };
-  }
-
-  if (accountStatus === "disabled") {
-    return { status: "disabled", label: "Disabled" };
-  }
-
-  return { status: "pending", label: formatAccountStatusLabel(accountStatus) };
-}
-
-function accountStatusDescription(accountStatus: string) {
-  if (accountStatus === "approved") {
-    return "Your company access is active.";
-  }
-
-  if (accountStatus === "disabled") {
-    return "Your account access is currently disabled.";
-  }
-
-  return "Candid will confirm your company access.";
-}
 
 export default async function DashboardPage() {
   noStore();
@@ -79,17 +52,9 @@ export default async function DashboardPage() {
     redirect("/login");
   }
 
-  const { data: profile, error: profileError } = await supabase
-    .from("profiles")
-    .select("full_name, company_id, account_status, user_role")
-    .eq("id", user.id)
-    .single();
+  const profile = await loadCustomerPortalProfile(supabase, user.id);
 
-  if (profileError) {
-    if (isDevelopment) {
-      console.error("[dashboard] profile load failed:", profileError.message);
-    }
-  } else {
+  if (profile) {
     const roleRedirect = getDashboardRoleRedirect(profile);
 
     if (roleRedirect) {
@@ -97,13 +62,17 @@ export default async function DashboardPage() {
     }
   }
 
-  const fallbackCompanyName =
-    user.user_metadata?.company_name || "Company awaiting approval";
+  const shellProps = await buildCustomerAppShellProps(supabase, user, profile);
+  const fullName = resolveCustomerDisplayName(profile, user);
+  const accountStatus = profile?.account_status ?? null;
+  const accountBadge = accountStatus
+    ? getCustomerAccountStatusBadge(accountStatus)
+    : null;
+  const statusSubtitle = getCustomerPortalStatusSubtitle(accountStatus);
 
   const [
     { count: formalQuotesCount, error: quotesError },
     { count: quoteRequestsCount, error: quoteRequestsError },
-    companyBranding,
   ] = await Promise.all([
     supabase
       .from("quotes")
@@ -112,34 +81,9 @@ export default async function DashboardPage() {
     supabase
       .from("quote_requests")
       .select("*", { count: "exact", head: true }),
-    profile?.company_id
-      ? loadCustomerCompanyBranding(
-          supabase,
-          profile.company_id,
-          fallbackCompanyName
-        )
-      : Promise.resolve({
-          companyName: fallbackCompanyName,
-          companyLogoUrl: null,
-        }),
   ]);
 
-  const fullName =
-    profile?.full_name ||
-    user.user_metadata?.full_name ||
-    user.email ||
-    "Customer";
-
-  const companyName = companyBranding.companyName;
-  const companyLogoUrl = companyBranding.companyLogoUrl;
-
-  const accountStatus = profile?.account_status ?? null;
-  const accountBadge = accountStatus
-    ? mapAccountStatusToBadge(accountStatus)
-    : null;
-
   const queryErrors = [
-    profileError ? `Profile: ${profileError.message}` : null,
     quotesError ? `Quotes count: ${quotesError.message}` : null,
     quoteRequestsError
       ? `Quote requests count: ${quoteRequestsError.message}`
@@ -157,23 +101,18 @@ export default async function DashboardPage() {
       : String(quoteRequestsCount ?? 0);
 
   return (
-    <AppShell
-      userRole="customer"
-      userName={fullName}
-      companyName={companyName}
-      companyLogoUrl={companyLogoUrl}
-    >
+    <AppShell {...shellProps}>
       <div className="mx-auto max-w-5xl">
         <div className="mb-8 flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
           <PageHeader
             eyebrow="Candid OS"
             title={`Welcome, ${fullName}`}
-            description={companyName}
+            description={statusSubtitle}
           />
 
-          <CompanyLogoDisplay
-            companyName={companyName}
-            logoUrl={companyLogoUrl}
+          <StaffAvatarDisplay
+            fullName={fullName}
+            avatarUrl={shellProps.userAvatarUrl}
             size="lg"
           />
         </div>
@@ -220,10 +159,8 @@ export default async function DashboardPage() {
             }
             description={
               accountStatus
-                ? accountStatusDescription(accountStatus)
-                : profileError
-                  ? "Unable to load account status."
-                  : "Profile not found."
+                ? getCustomerAccountStatusDescription(accountStatus)
+                : "Unable to load account status."
             }
           />
         </div>
