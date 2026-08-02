@@ -1,5 +1,10 @@
 import { unstable_noStore as noStore } from "next/cache";
 
+import {
+  AdminDashboardCrmMetrics,
+  AdminDashboardCrmPanels,
+  AdminDashboardCrmQuickActions,
+} from "@/components/admin/admin-dashboard-crm";
 import { AppShell } from "@/components/app-shell";
 import { ApproveCustomer } from "@/components/approve-customer";
 import { EmptyState } from "@/components/empty-state";
@@ -14,6 +19,8 @@ import {
 import { fetchAdminQuoteMetrics } from "@/lib/admin-quote-metrics";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
+import { fetchAdminDashboardCrm } from "@/lib/crm/admin-dashboard";
+import { isCrmRole } from "@/lib/staff-roles";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -24,10 +31,19 @@ export default async function AdminPage() {
   const supabase = await createClient();
   const isDevelopment = process.env.NODE_ENV === "development";
   const profile = await requireAdminPageAccess(supabase, "/admin");
+  const showCrmOverview = isCrmRole(profile.user_role);
 
-  const [quoteMetrics, { data: pendingUsers }, { data: companies }] =
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  const currentUserId = user?.id ?? "";
+
+  const [quoteMetrics, crmDashboard, { data: pendingUsers }, { data: companies }] =
     await Promise.all([
       fetchAdminQuoteMetrics(supabase),
+      showCrmOverview && currentUserId
+        ? fetchAdminDashboardCrm(supabase, currentUserId)
+        : Promise.resolve(null),
       supabase
         .from("profiles")
         .select(
@@ -43,6 +59,10 @@ export default async function AdminPage() {
     ]);
 
   const shellProps = await buildAdminAppShellProps(supabase, profile);
+  const dashboardErrors = [
+    ...quoteMetrics.errors,
+    ...(crmDashboard?.errors ?? []),
+  ];
 
   return (
     <AppShell {...shellProps}>
@@ -50,17 +70,17 @@ export default async function AdminPage() {
         <PageHeader
           eyebrow="Administration"
           title="Admin dashboard"
-          description="Manage customer registrations and portal access."
+          description="Manage customers, quotes, and CRM activity."
         />
 
-        {isDevelopment && quoteMetrics.errors.length > 0 ? (
+        {isDevelopment && dashboardErrors.length > 0 ? (
           <Card className="portal-surface mb-6 border-red-200 bg-red-50">
             <CardContent className="pt-6">
               <p className="text-sm font-medium text-red-800">
-                Dashboard quote metrics query errors
+                Dashboard query errors
               </p>
               <ul className="mt-2 space-y-1 text-sm text-red-700">
-                {quoteMetrics.errors.map((message) => (
+                {dashboardErrors.map((message) => (
                   <li key={message}>{message}</li>
                 ))}
               </ul>
@@ -92,6 +112,14 @@ export default async function AdminPage() {
             accentClassName="bg-red-400/45"
           />
         </div>
+
+        {showCrmOverview && crmDashboard ? (
+          <>
+            <AdminDashboardCrmQuickActions />
+            <AdminDashboardCrmMetrics data={crmDashboard} />
+            <AdminDashboardCrmPanels data={crmDashboard} />
+          </>
+        ) : null}
 
         <Card className="portal-surface overflow-hidden">
           <CardHeader className="border-b border-border">
