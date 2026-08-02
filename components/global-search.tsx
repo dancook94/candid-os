@@ -44,6 +44,7 @@ const GROUP_LABELS: Record<GlobalSearchResultType, string> = {
   opportunity: "Opportunities",
   quote: "Quotes",
   task: "Tasks",
+  note: "Notes",
 };
 
 const TYPE_ICONS: Record<
@@ -55,6 +56,7 @@ const TYPE_ICONS: Record<
   opportunity: Target,
   quote: FileText,
   task: CheckSquare,
+  note: FileText,
 };
 
 function useShortcutLabel() {
@@ -79,6 +81,7 @@ function flattenResults(results: GlobalSearchGroupedResults) {
     ...results.opportunities,
     ...results.quotes,
     ...results.tasks,
+    ...results.notes,
   ];
 }
 
@@ -253,6 +256,7 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
         ["opportunity", results.opportunities],
         ["quote", results.quotes],
         ["task", results.tasks],
+        ["note", results.notes],
       ] as const
     )
       .filter(([, items]) => items.length > 0)
@@ -292,7 +296,7 @@ export function GlobalSearch({ open, onOpenChange }: GlobalSearchProps) {
             ref={inputRef}
             value={query}
             onValueChange={setQuery}
-            placeholder="Search companies, contacts, opportunities, quotes, tasks…"
+            placeholder="Search companies, contacts, opportunities, quotes, tasks, notes…"
             className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             aria-label="Search query"
           />

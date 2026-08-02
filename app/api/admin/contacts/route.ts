@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { verifyApprovedAdmin } from "@/lib/admin-auth";
+import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
+import { createCrmActivity } from "@/lib/crm/create-crm-activity";
 import {
   findDuplicateContactEmail,
   normalizeContactEmail,
@@ -101,6 +103,26 @@ export async function POST(request: Request) {
       { error: insertError?.message ?? "Unable to create contact." },
       { status: 400 }
     );
+  }
+
+  await createCrmActivity(supabase, {
+    companyId,
+    contactId: created.id,
+    activityType: CRM_ACTIVITY_TYPES.contactCreated,
+    description: `${fullName} was added as a contact.`,
+    metadata: { contact_id: created.id },
+    actorProfileId: authResult.userId,
+  });
+
+  if (body.isPrimary) {
+    await createCrmActivity(supabase, {
+      companyId,
+      contactId: created.id,
+      activityType: CRM_ACTIVITY_TYPES.contactSetPrimary,
+      description: `${fullName} was set as the primary contact.`,
+      metadata: { contact_id: created.id },
+      actorProfileId: authResult.userId,
+    });
   }
 
   return NextResponse.json({

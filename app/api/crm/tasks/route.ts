@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { verifyApprovedCrmStaff } from "@/lib/crm-auth";
-import { OPPORTUNITY_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
+import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
 import { logOpportunityActivity } from "@/lib/crm/opportunity-stage-sync";
 import { createTaskAssignees } from "@/lib/crm/task-assignees";
 import {
@@ -121,7 +121,19 @@ export async function POST(request: Request) {
   if (created.opportunity_id) {
     await logOpportunityActivity(supabase, {
       opportunityId: created.opportunity_id,
-      activityType: OPPORTUNITY_ACTIVITY_TYPES.taskCreated,
+      companyId: body.companyId || null,
+      quoteId: body.quoteId || null,
+      taskId: created.id,
+      activityType: CRM_ACTIVITY_TYPES.taskCreated,
+      description: `Task "${title}" created.`,
+      metadata: { task_id: created.id },
+      createdBy: auth.userId,
+    });
+  } else {
+    await logOpportunityActivity(supabase, {
+      companyId: body.companyId || null,
+      taskId: created.id,
+      activityType: CRM_ACTIVITY_TYPES.taskCreated,
       description: `Task "${title}" created.`,
       metadata: { task_id: created.id },
       createdBy: auth.userId,

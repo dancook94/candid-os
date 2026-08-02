@@ -8,49 +8,19 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { OPPORTUNITY_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
 import { getOpportunityStageOptions } from "@/lib/crm/opportunity-stages";
 import type { OpportunityStage } from "@/lib/crm/types";
-import { createClient } from "@/lib/supabase/client";
 
 type OpportunityStageChangeProps = {
   opportunityId: string;
   currentStage: OpportunityStage;
-  currentUserId: string;
 };
-
-function buildStageTimestamps(stage: OpportunityStage) {
-  const now = new Date().toISOString();
-
-  if (stage === "won") {
-    return {
-      won_at: now,
-      lost_at: null,
-      lost_reason: null,
-    };
-  }
-
-  if (stage === "lost") {
-    return {
-      won_at: null,
-      lost_at: now,
-    };
-  }
-
-  return {
-    won_at: null,
-    lost_at: null,
-    lost_reason: null,
-  };
-}
 
 export function OpportunityStageChange({
   opportunityId,
   currentStage,
-  currentUserId,
 }: OpportunityStageChangeProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [stage, setStage] = useState<OpportunityStage>(currentStage);
   const [lostReason, setLostReason] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -68,35 +38,40 @@ export function OpportunityStageChange({
       return;
     }
 
+    const isTerminalMove =
+      stage === "won" ||
+      stage === "lost" ||
+      currentStage === "won" ||
+      currentStage === "lost";
+
+    if (
+      isTerminalMove &&
+      !window.confirm("Confirm this stage change?")
+    ) {
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
-      const timestamps = buildStageTimestamps(stage);
-      const { error: updateError } = await supabase
-        .from("opportunities")
-        .update({
-          stage,
-          lost_reason: stage === "lost" ? lostReason.trim() : null,
-          ...timestamps,
-        })
-        .eq("id", opportunityId);
+      const response = await fetch(
+        `/api/crm/opportunities/${opportunityId}/stage`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            stage,
+            previousStage: currentStage,
+            lostReason: stage === "lost" ? lostReason.trim() : null,
+            confirmed: isTerminalMove,
+          }),
+        }
+      );
 
-      if (updateError) {
-        throw new Error(updateError.message);
-      }
+      const payload = (await response.json()) as { error?: string };
 
-      const { error: activityError } = await supabase
-        .from("opportunity_activity")
-        .insert({
-          opportunity_id: opportunityId,
-          activity_type: OPPORTUNITY_ACTIVITY_TYPES.stageChanged,
-          description: `Stage changed from ${currentStage.replaceAll("_", " ")} to ${stage.replaceAll("_", " ")}.`,
-          metadata: { from: currentStage, to: stage },
-          created_by: currentUserId,
-        });
-
-      if (activityError) {
-        throw new Error(activityError.message);
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to change stage.");
       }
 
       router.refresh();

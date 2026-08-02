@@ -1,10 +1,15 @@
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
+import { ActivityTimeline } from "@/components/crm/activity-timeline";
+import { NoteComposer } from "@/components/crm/note-composer";
+import { NotesList } from "@/components/crm/notes-list";
 import { TaskForm } from "@/components/crm/task-form";
 import { PageHeader } from "@/components/page-header";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { buildCrmAppShellProps } from "@/lib/admin-shell-props";
 import { requireCrmPageAccess } from "@/lib/crm-page-access";
+import { getCrmNotes, getCrmTimeline } from "@/lib/crm/get-crm-timeline";
 import { loadCrmStaffProfiles } from "@/lib/crm/crm-staff";
 import { buildTaskFormInitialValues } from "@/lib/crm/task-form-values";
 import { loadTaskAssigneeIds } from "@/lib/crm/task-assignees";
@@ -67,6 +72,25 @@ export default async function EditTaskPage({ params }: EditTaskPageProps) {
     ]);
 
   const initialValues = buildTaskFormInitialValues(task, assigneeProfileIds);
+  const isAdmin = ["super_admin", "admin"].includes(profile.user_role);
+  const taskScope = {
+    type: "task" as const,
+    taskId: id,
+    companyId: task.company_id,
+    opportunityId: task.opportunity_id,
+    quoteId: task.quote_id,
+  };
+  const [taskNotes, { items: taskActivity }] = await Promise.all([
+    getCrmNotes(supabase, {
+      scope: taskScope,
+      currentUserId,
+      isAdmin,
+    }),
+    getCrmTimeline(supabase, {
+      scope: taskScope,
+      limit: 50,
+    }),
+  ]);
 
   return (
     <AppShell {...shellProps}>
@@ -88,6 +112,34 @@ export default async function EditTaskPage({ params }: EditTaskPageProps) {
           initialValues={initialValues}
           cancelHref="/admin/tasks"
         />
+
+        <div className="mt-8 space-y-6">
+          <Card className="portal-surface">
+            <CardHeader>
+              <CardTitle>Task notes</CardTitle>
+              <CardDescription>
+                Internal notes linked to this task.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <NoteComposer
+                context={{
+                  companyId: task.company_id,
+                  opportunityId: task.opportunity_id,
+                  quoteId: task.quote_id,
+                  taskId: id,
+                }}
+              />
+              <NotesList notes={taskNotes} />
+            </CardContent>
+          </Card>
+
+          <ActivityTimeline
+            items={taskActivity}
+            title="Task activity"
+            description="Activity linked to this task."
+          />
+        </div>
       </div>
     </AppShell>
   );

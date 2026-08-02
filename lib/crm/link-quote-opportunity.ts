@@ -82,6 +82,8 @@ export async function linkQuoteToOpportunity(
 
   await logOpportunityActivity(supabase, {
     opportunityId,
+    companyId: quote.company_id,
+    quoteId: quote.id,
     activityType: OPPORTUNITY_ACTIVITY_TYPES.quoteLinked,
     description: `Quote Q-${quote.quote_number} linked to this opportunity.`,
     metadata: {

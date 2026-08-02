@@ -2,6 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
+import { ActivityTimeline } from "@/components/crm/activity-timeline";
+import { NoteComposer } from "@/components/crm/note-composer";
+import { NotesList } from "@/components/crm/notes-list";
 import { ContactPortalStatusBadge } from "@/components/crm/contact-portal-status-badge";
 import { ContactDetailActions } from "@/components/crm/contact-detail-actions";
 import { PageHeader } from "@/components/page-header";
@@ -14,6 +17,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { fetchContactById } from "@/lib/crm/contacts";
+import { getCrmNotes, getCrmTimeline } from "@/lib/crm/get-crm-timeline";
 import { formatCrmDateTime } from "@/lib/crm/format-datetime";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
@@ -42,6 +46,34 @@ export default async function ContactDetailPage({
       .select("id, company_name")
       .order("company_name"),
   ]);
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const isAdmin = ["super_admin", "admin"].includes(profile.user_role);
+  const notesAndActivity =
+    contact && user ?
+      await Promise.all([
+        getCrmNotes(supabase, {
+          scope: {
+            type: "contact",
+            contactId: contact.id,
+            companyId: contact.company_id,
+          },
+          currentUserId: user.id,
+          isAdmin,
+        }),
+        getCrmTimeline(supabase, {
+          scope: {
+            type: "contact",
+            contactId: contact.id,
+            companyId: contact.company_id,
+          },
+          limit: 50,
+        }),
+      ])
+    : null;
 
   const shellProps = await buildAdminAppShellProps(supabase, profile);
   const isDevelopment = process.env.NODE_ENV === "development";
@@ -206,6 +238,36 @@ export default async function ContactDetailPage({
                 </dl>
               </CardContent>
             </Card>
+          ) : null}
+
+          {notesAndActivity ? (
+            <>
+              <Card className="portal-surface overflow-hidden">
+                <CardHeader className="border-b border-border">
+                  <CardTitle className="text-lg font-semibold">
+                    CRM notes
+                  </CardTitle>
+                  <CardDescription>
+                    Internal staff notes for this contact.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6 pt-6">
+                  <NoteComposer
+                    context={{
+                      companyId: contact.company_id,
+                      contactId: contact.id,
+                    }}
+                  />
+                  <NotesList notes={notesAndActivity[0]} />
+                </CardContent>
+              </Card>
+
+              <ActivityTimeline
+                items={notesAndActivity[1].items}
+                title="Contact activity"
+                description="Activity linked to this contact and related records."
+              />
+            </>
           ) : null}
         </div>
       </div>

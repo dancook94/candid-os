@@ -148,15 +148,13 @@ export function OpportunityForm({
     description: string,
     metadata: Record<string, unknown> = {}
   ) {
-    const { error: activityError } = await supabase
-      .from("opportunity_activity")
-      .insert({
-        opportunity_id: targetOpportunityId,
-        activity_type: activityType,
-        description,
-        metadata,
-        created_by: currentUserId,
-      });
+    const { error: activityError } = await supabase.from("crm_activity").insert({
+      opportunity_id: targetOpportunityId,
+      activity_type: activityType,
+      description,
+      metadata,
+      actor_profile_id: currentUserId,
+    });
 
     if (activityError) {
       throw new Error(activityError.message);

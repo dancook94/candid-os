@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { verifyApprovedCrmStaff } from "@/lib/crm-auth";
-import { OPPORTUNITY_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
+import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
 import { logOpportunityActivity } from "@/lib/crm/opportunity-stage-sync";
 import { canAccessTask } from "@/lib/crm/task-access";
 import { loadTaskAssigneeIds } from "@/lib/crm/task-assignees";
@@ -73,7 +73,7 @@ export async function POST(
 
   const { data: existing, error: existingError } = await supabase
     .from("tasks")
-    .select("title, status, opportunity_id")
+    .select("title, status, opportunity_id, company_id, quote_id")
     .eq("id", taskId)
     .maybeSingle();
 
@@ -100,24 +100,25 @@ export async function POST(
     return NextResponse.json({ error: updateError.message }, { status: 400 });
   }
 
-  if (existing.opportunity_id) {
-    const activityType =
-      nextStatus === "completed"
-        ? OPPORTUNITY_ACTIVITY_TYPES.taskCompleted
-        : OPPORTUNITY_ACTIVITY_TYPES.taskReopened;
-    const description =
-      nextStatus === "completed"
-        ? `Task "${existing.title}" completed.`
-        : `Task "${existing.title}" reopened.`;
+  const activityType =
+    nextStatus === "completed"
+      ? CRM_ACTIVITY_TYPES.taskCompleted
+      : CRM_ACTIVITY_TYPES.taskReopened;
+  const description =
+    nextStatus === "completed"
+      ? `Task "${existing.title}" completed.`
+      : `Task "${existing.title}" reopened.`;
 
-    await logOpportunityActivity(supabase, {
-      opportunityId: existing.opportunity_id,
-      activityType,
-      description,
-      metadata: { task_id: taskId },
-      createdBy: auth.userId,
-    });
-  }
+  await logOpportunityActivity(supabase, {
+    opportunityId: existing.opportunity_id,
+    companyId: existing.company_id,
+    quoteId: existing.quote_id,
+    taskId,
+    activityType,
+    description,
+    metadata: { task_id: taskId },
+    createdBy: auth.userId,
+  });
 
   revalidatePath("/admin/tasks");
   revalidatePath(`/admin/tasks/${taskId}/edit`);

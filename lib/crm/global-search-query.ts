@@ -16,7 +16,8 @@ export type GlobalSearchResultType =
   | "contact"
   | "opportunity"
   | "quote"
-  | "task";
+  | "task"
+  | "note";
 
 export type GlobalSearchResult = {
   id: string;
@@ -32,6 +33,7 @@ export type GlobalSearchGroupedResults = {
   opportunities: GlobalSearchResult[];
   quotes: GlobalSearchResult[];
   tasks: GlobalSearchResult[];
+  notes: GlobalSearchResult[];
 };
 
 function emptyResults(): GlobalSearchGroupedResults {
@@ -41,7 +43,75 @@ function emptyResults(): GlobalSearchGroupedResults {
     opportunities: [],
     quotes: [],
     tasks: [],
+    notes: [],
   };
+}
+
+function buildNoteHref(note: {
+  company_id: string | null;
+  contact_id: string | null;
+  opportunity_id: string | null;
+  quote_id: string | null;
+  task_id: string | null;
+}) {
+  if (note.opportunity_id) {
+    return `/admin/opportunities/${note.opportunity_id}`;
+  }
+
+  if (note.quote_id) {
+    return `/admin/quotes/${note.quote_id}`;
+  }
+
+  if (note.task_id) {
+    return `/admin/tasks/${note.task_id}/edit`;
+  }
+
+  if (note.contact_id) {
+    return `/admin/customers/${note.contact_id}`;
+  }
+
+  if (note.company_id) {
+    return `/admin/companies/${note.company_id}`;
+  }
+
+  return "/admin";
+}
+
+function truncateExcerpt(body: string, maxLength = 100) {
+  const trimmed = body.trim();
+
+  if (trimmed.length <= maxLength) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, maxLength).trim()}…`;
+}
+
+async function searchNotes(
+  supabase: SupabaseClient,
+  ilikePattern: string
+): Promise<GlobalSearchResult[]> {
+  const { data, error } = await supabase
+    .from("crm_notes")
+    .select(
+      "id, body, company_id, contact_id, opportunity_id, quote_id, task_id"
+    )
+    .is("deleted_at", null)
+    .ilike("body", ilikePattern)
+    .order("created_at", { ascending: false })
+    .limit(GLOBAL_SEARCH_LIMIT_PER_CATEGORY);
+
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return (data ?? []).map((note) => ({
+    id: note.id,
+    type: "note" as const,
+    title: truncateExcerpt(note.body),
+    subtitle: "CRM note",
+    href: buildNoteHref(note),
+  }));
 }
 
 async function searchCompanies(
@@ -559,7 +629,7 @@ export async function runGlobalSearch(
 
   const matchingAssigneeIds = (matchingAssignees ?? []).map((row) => row.id);
 
-  const [opportunities, quotes, tasks] = await Promise.all([
+  const [opportunities, quotes, tasks, notes] = await Promise.all([
     searchOpportunities(
       supabase,
       ilikePattern,
@@ -581,6 +651,9 @@ export async function runGlobalSearch(
       matchingOpportunityIds,
       matchingAssigneeIds
     ),
+    sanitizedTerm.length >= 3
+      ? searchNotes(supabase, ilikePattern)
+      : Promise.resolve([]),
   ]);
 
   return {
@@ -589,5 +662,6 @@ export async function runGlobalSearch(
     opportunities,
     quotes,
     tasks,
+    notes,
   };
 }

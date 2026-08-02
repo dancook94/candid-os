@@ -2,6 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { User } from "@supabase/supabase-js";
 
 import { normalizeContactEmail } from "@/lib/crm/contacts";
+import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
+import { createCrmActivity } from "@/lib/crm/create-crm-activity";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type InviteContactResult =
@@ -33,6 +35,10 @@ export async function inviteContactToPortal(
   contactId: string,
   requestOrigin: string
 ): Promise<InviteContactResult> {
+  const {
+    data: { user: actor },
+  } = await supabase.auth.getUser();
+
   let adminClient: AdminClient;
 
   try {
@@ -144,6 +150,17 @@ export async function inviteContactToPortal(
         .from("contacts")
         .update({ invited_at: now, updated_at: now })
         .eq("id", contact.id);
+
+      if (actor) {
+        await createCrmActivity(supabase, {
+          companyId: contact.company_id,
+          contactId: contact.id,
+          activityType: CRM_ACTIVITY_TYPES.portalInvitationResent,
+          description: `${contact.full_name} was re-invited to the portal.`,
+          metadata: { contact_id: contact.id },
+          actorProfileId: actor.id,
+        });
+      }
 
       return {
         ok: true,
@@ -277,6 +294,17 @@ export async function inviteContactToPortal(
       status: 400,
       message: contactUpdateError.message,
     };
+  }
+
+  if (actor) {
+    await createCrmActivity(supabase, {
+      companyId: contact.company_id,
+      contactId: contact.id,
+      activityType: CRM_ACTIVITY_TYPES.portalInvitationSent,
+      description: `${contact.full_name} was invited to the portal.`,
+      metadata: { contact_id: contact.id },
+      actorProfileId: actor.id,
+    });
   }
 
   return {

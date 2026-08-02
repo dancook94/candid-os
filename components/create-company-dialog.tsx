@@ -87,7 +87,13 @@ export function CreateCompanyDialog({
 
     setIsSubmitting(true);
 
-    const { error: insertError } = await supabase.from("companies").insert({
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    const { data: created, error: insertError } = await supabase
+      .from("companies")
+      .insert({
       company_name: trimmedCompanyName,
       trading_name: tradingName.trim() || null,
       accounts_email: accountsEmail.trim() || null,
@@ -95,7 +101,19 @@ export function CreateCompanyDialog({
       vat_number: vatNumber.trim() || null,
       payment_terms_days: parsedPaymentTerms,
       is_active: true,
-    });
+    })
+      .select("id")
+      .single();
+
+    if (!insertError && created && user) {
+      await supabase.from("crm_activity").insert({
+        company_id: created.id,
+        activity_type: "company_created",
+        description: `${trimmedCompanyName} was created.`,
+        metadata: {},
+        actor_profile_id: user.id,
+      });
+    }
 
     setIsSubmitting(false);
 

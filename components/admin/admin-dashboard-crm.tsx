@@ -95,6 +95,44 @@ export function AdminDashboardCrmMetrics({ data }: AdminDashboardCrmProps) {
   );
 }
 
+export function AdminDashboardRecentActivityPanel({ data }: AdminDashboardCrmProps) {
+  const { recentActivity } = data;
+
+  if (recentActivity.length === 0) {
+    return null;
+  }
+
+  return (
+    <Card className="portal-surface mb-8 overflow-hidden">
+      <CardHeader className="border-b border-border">
+        <CardTitle className="text-lg font-semibold">
+          Recent CRM activity
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="p-0">
+        <div className="divide-y divide-border">
+          {recentActivity.map((item) => (
+            <Link
+              key={item.id}
+              href={item.href}
+              className="block px-6 py-4 transition-colors hover:bg-muted/30"
+            >
+              <p className="text-sm font-medium text-foreground">
+                {item.description}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                {item.actor_name ? <span>{item.actor_name}</span> : null}
+                <span>{formatCrmDateTime(item.created_at)}</span>
+                {item.context_label ? <span>{item.context_label}</span> : null}
+              </div>
+            </Link>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function AdminDashboardCrmPanels({ data }: AdminDashboardCrmProps) {
   const { recentOpportunities, attentionTasks, metrics } = data;
 

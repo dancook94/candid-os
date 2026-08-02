@@ -4,6 +4,7 @@ import {
   AdminDashboardCrmMetrics,
   AdminDashboardCrmPanels,
   AdminDashboardCrmQuickActions,
+  AdminDashboardRecentActivityPanel,
 } from "@/components/admin/admin-dashboard-crm";
 import { AppShell } from "@/components/app-shell";
 import { ApproveCustomer } from "@/components/approve-customer";
@@ -119,6 +120,7 @@ export default async function AdminPage() {
           <>
             <AdminDashboardCrmQuickActions />
             <AdminDashboardCrmMetrics data={crmDashboard} />
+            <AdminDashboardRecentActivityPanel data={crmDashboard} />
             <AdminDashboardCrmPanels data={crmDashboard} />
           </>
         ) : null}

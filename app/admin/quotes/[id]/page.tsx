@@ -3,6 +3,9 @@ import { notFound } from "next/navigation";
 
 import { AdminQuoteManagementActions } from "@/components/admin-quote-management-actions";
 import { CreateQuoteVersionButton } from "@/components/create-quote-version-button";
+import { ActivityTimeline } from "@/components/crm/activity-timeline";
+import { NoteComposer } from "@/components/crm/note-composer";
+import { NotesList } from "@/components/crm/notes-list";
 import { QuoteContactSummary } from "@/components/crm/quote-contact-summary";
 import {
   loadLinkableOpportunitiesForCompany,
@@ -20,9 +23,10 @@ import {
   type QuoteVersionOption,
 } from "@/components/quote-version-selector";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
+import { getCrmNotes, getCrmTimeline } from "@/lib/crm/get-crm-timeline";
 import { loadQuoteContactDisplay } from "@/lib/crm/quote-contact-display";
 import { createClient } from "@/lib/supabase/server";
 import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
@@ -184,6 +188,27 @@ export default async function QuoteDetailPage({
   }));
 
   const shellProps = await buildAdminAppShellProps(supabase, profile);
+  const isAdmin = ["super_admin", "admin"].includes(profile.user_role);
+  const quoteScope = {
+    type: "quote" as const,
+    quoteId: quote.id,
+    companyId: quote.company_id,
+    opportunityId: quote.opportunity_id,
+    contactId: quote.contact_id,
+  };
+  const [quoteNotes, { items: quoteActivity }] = user ?
+    await Promise.all([
+      getCrmNotes(supabase, {
+        scope: quoteScope,
+        currentUserId: user.id,
+        isAdmin,
+      }),
+      getCrmTimeline(supabase, {
+        scope: quoteScope,
+        limit: 50,
+      }),
+    ])
+  : [[], { items: [] }];
 
   return (
     <AppShell {...shellProps}>
@@ -277,6 +302,33 @@ export default async function QuoteDetailPage({
           currentVersionNumber={quote.current_version}
           canEdit={canEdit}
           lockContact={Boolean(quote.opportunity_id && quote.contact_id)}
+        />
+
+        <Card className="portal-surface mb-6">
+          <CardHeader>
+            <CardTitle>Internal CRM notes</CardTitle>
+            <CardDescription>
+              Staff-only notes linked to this quote. Not visible to customers,
+              PDFs, or quote emails.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <NoteComposer
+              context={{
+                companyId: quote.company_id,
+                contactId: quote.contact_id,
+                opportunityId: quote.opportunity_id,
+                quoteId: quote.id,
+              }}
+            />
+            <NotesList notes={quoteNotes} />
+          </CardContent>
+        </Card>
+
+        <ActivityTimeline
+          items={quoteActivity}
+          title="Quote activity"
+          description="Activity linked to this quote and related records."
         />
       </div>
     </AppShell>

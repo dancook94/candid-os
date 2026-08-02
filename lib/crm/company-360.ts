@@ -3,7 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { AdminQuoteListRow } from "@/lib/admin-quotes-list";
 import { fetchAdminQuotesList } from "@/lib/admin-quotes-list";
 import { formatGbp, formatQuoteCount } from "@/lib/format-currency";
-import { getStaffDisplayName } from "@/lib/crm/crm-staff";
+import type { CrmNoteListItem, CrmTimelineItem } from "@/lib/crm/get-crm-timeline";
+import { getCrmNotes, getCrmTimeline } from "@/lib/crm/get-crm-timeline";
 import { getLondonDayBounds } from "@/lib/crm/day-bounds";
 import {
   fetchOpportunitiesList,
@@ -54,25 +55,7 @@ export type Company360Summary = {
 
 export type Company360Contact = ContactListRow;
 
-export type Company360ActivityCategory =
-  | "opportunities"
-  | "quotes"
-  | "tasks"
-  | "notes";
-
-export type Company360ActivityItem = {
-  id: string;
-  source: "activity" | "note";
-  category: Company360ActivityCategory;
-  activity_type: string;
-  description: string;
-  author_name: string | null;
-  created_at: string;
-  opportunity_id: string;
-  opportunity_title: string | null;
-  quote_id: string | null;
-  quote_label: string | null;
-};
+export type Company360ActivityItem = CrmTimelineItem;
 
 export type Company360Task = {
   id: string;
@@ -94,6 +77,7 @@ export type Company360Data = {
   tasks: Company360Task[];
   contacts: Company360Contact[];
   activity: Company360ActivityItem[];
+  notes: CrmNoteListItem[];
   errors: string[];
 };
 
@@ -277,27 +261,35 @@ function getTaskAttentionSortKey(
   return [3, dueMs] as const;
 }
 
-function categorizeActivityType(
-  activityType: string
-): Company360ActivityCategory {
-  if (activityType === "note_added") {
-    return "notes";
+async function fetchCompanyCrmFeed(
+  supabase: SupabaseClient,
+  companyId: string,
+  errors: string[],
+  options?: { currentUserId?: string; isAdmin?: boolean }
+) {
+  try {
+    const [{ items: activity }, notes] = await Promise.all([
+      getCrmTimeline(supabase, {
+        scope: { type: "company", companyId },
+        limit: 50,
+      }),
+      getCrmNotes(supabase, {
+        scope: { type: "company", companyId },
+        currentUserId: options?.currentUserId,
+        isAdmin: options?.isAdmin,
+      }),
+    ]);
+
+    return { activity, notes };
+  } catch (error) {
+    errors.push(
+      `Company CRM feed: ${
+        error instanceof Error ? error.message : "Unable to load CRM feed."
+      }`
+    );
+
+    return { activity: [], notes: [] };
   }
-
-  if (activityType.startsWith("task_")) {
-    return "tasks";
-  }
-
-  if (activityType.startsWith("quote_")) {
-    return "quotes";
-  }
-
-  return "opportunities";
-}
-
-function extractQuoteId(metadata: Record<string, unknown> | null | undefined) {
-  const quoteId = metadata?.quote_id;
-  return typeof quoteId === "string" ? quoteId : null;
 }
 
 async function loadCompanyContacts(
@@ -406,111 +398,10 @@ async function fetchCompanyTasks(
   return tasks;
 }
 
-async function fetchCompanyActivity(
-  supabase: SupabaseClient,
-  opportunityIds: string[],
-  opportunityTitleById: Map<string, string>,
-  quoteLabelById: Map<string, string>,
-  errors: string[]
-): Promise<Company360ActivityItem[]> {
-  if (opportunityIds.length === 0) {
-    return [];
-  }
-
-  const [{ data: activityRows, error: activityError }, { data: noteRows, error: notesError }] =
-    await Promise.all([
-      supabase
-        .from("opportunity_activity")
-        .select("*")
-        .in("opportunity_id", opportunityIds)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("opportunity_notes")
-        .select("*")
-        .in("opportunity_id", opportunityIds)
-        .order("created_at", { ascending: false }),
-    ]);
-
-  if (activityError) {
-    errors.push(`Company activity: ${activityError.message}`);
-  }
-
-  if (notesError) {
-    errors.push(`Company notes: ${notesError.message}`);
-  }
-
-  const authorIds = [
-    ...new Set([
-      ...(activityRows ?? [])
-        .map((entry) => entry.created_by)
-        .filter((value): value is string => Boolean(value)),
-      ...(noteRows ?? []).map((note) => note.created_by),
-    ]),
-  ];
-
-  let authorNameById = new Map<string, string>();
-
-  if (authorIds.length > 0) {
-    const { data: authorProfiles } = await supabase
-      .from("profiles")
-      .select("id, full_name")
-      .in("id", authorIds);
-
-    authorNameById = new Map(
-      (authorProfiles ?? []).map((profile) => [
-        profile.id,
-        getStaffDisplayName(profile),
-      ])
-    );
-  }
-
-  const activityItems: Company360ActivityItem[] = (activityRows ?? []).map(
-    (entry) => {
-      const metadata = (entry.metadata ?? {}) as Record<string, unknown>;
-      const quoteId = extractQuoteId(metadata);
-
-      return {
-        id: `activity:${entry.id}`,
-        source: "activity",
-        category: categorizeActivityType(entry.activity_type),
-        activity_type: entry.activity_type,
-        description: entry.description,
-        author_name: entry.created_by
-          ? authorNameById.get(entry.created_by) ?? null
-          : null,
-        created_at: entry.created_at,
-        opportunity_id: entry.opportunity_id,
-        opportunity_title:
-          opportunityTitleById.get(entry.opportunity_id) ?? null,
-        quote_id: quoteId,
-        quote_label: quoteId ? quoteLabelById.get(quoteId) ?? null : null,
-      };
-    }
-  );
-
-  const noteItems: Company360ActivityItem[] = (noteRows ?? []).map((note) => ({
-    id: `note:${note.id}`,
-    source: "note",
-    category: "notes",
-    activity_type: "note",
-    description: note.body,
-    author_name: authorNameById.get(note.created_by) ?? null,
-    created_at: note.created_at,
-    opportunity_id: note.opportunity_id,
-    opportunity_title: opportunityTitleById.get(note.opportunity_id) ?? null,
-    quote_id: null,
-    quote_label: null,
-  }));
-
-  return [...activityItems, ...noteItems].sort(
-    (left, right) =>
-      new Date(right.created_at).getTime() - new Date(left.created_at).getTime()
-  );
-}
-
 export async function fetchCompany360(
   supabase: SupabaseClient,
-  companyId: string
+  companyId: string,
+  options?: { currentUserId?: string; isAdmin?: boolean }
 ): Promise<Company360Data> {
   const errors: string[] = [];
 
@@ -601,7 +492,7 @@ export async function fetchCompany360(
   );
   const quoteIds = [...quoteLabelById.keys()];
 
-  const [contacts, tasks, activity] = await Promise.all([
+  const [contacts, tasks, crmFeed] = await Promise.all([
     loadCompanyContacts(supabase, companyId, errors),
     fetchCompanyTasks(
       supabase,
@@ -611,13 +502,7 @@ export async function fetchCompany360(
       opportunityTitleById,
       errors
     ),
-    fetchCompanyActivity(
-      supabase,
-      opportunityIds,
-      opportunityTitleById,
-      quoteLabelById,
-      errors
-    ),
+    fetchCompanyCrmFeed(supabase, companyId, errors, options),
   ]);
 
   const opportunities = opportunitiesResult.opportunities.filter(
@@ -639,7 +524,8 @@ export async function fetchCompany360(
     quotes: quotesResult.quotes,
     tasks,
     contacts,
-    activity,
+    activity: crmFeed.activity,
+    notes: crmFeed.notes,
     errors,
   };
 }

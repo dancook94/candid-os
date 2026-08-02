@@ -99,6 +99,10 @@ export default async function CompanyDetailPage({
 
   const companyRecord = company as CompanyRecord;
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   const [logoPreviewUrl, crmData] = await Promise.all([
     companyRecord.logo_storage_path
       ? createCompanyLogoSignedUrl(
@@ -106,7 +110,10 @@ export default async function CompanyDetailPage({
           companyRecord.logo_storage_path
         )
       : Promise.resolve(null),
-    fetchCompany360(supabase, companyRecord.id),
+    fetchCompany360(supabase, companyRecord.id, {
+      currentUserId: user?.id,
+      isAdmin: ["super_admin", "admin"].includes(profile.user_role),
+    }),
   ]);
 
   return (

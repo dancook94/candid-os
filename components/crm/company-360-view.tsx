@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { CompanyLogoDisplay } from "@/components/company-logo-display";
 import { CompanyLogoForm } from "@/components/company-logo-form";
@@ -23,13 +23,11 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ActivityTimeline } from "@/components/crm/activity-timeline";
+import { NoteComposer } from "@/components/crm/note-composer";
+import { NotesList } from "@/components/crm/notes-list";
 import { formatAdminQuoteStatusLabel } from "@/lib/admin-quote-status";
-import { formatActivityTypeLabel } from "@/lib/crm/activity-types";
-import type {
-  Company360ActivityCategory,
-  Company360ActivityItem,
-  Company360Data,
-} from "@/lib/crm/company-360";
+import type { Company360Data } from "@/lib/crm/company-360";
 import { formatCrmDate, formatCrmDateTime } from "@/lib/crm/format-datetime";
 import type { OpportunityListRow } from "@/lib/crm/opportunities-list";
 import { formatGbp } from "@/lib/format-currency";
@@ -75,17 +73,6 @@ const tabs: { id: Company360Tab; label: string }[] = [
   { id: "tasks", label: "Tasks" },
   { id: "contacts", label: "Contacts" },
   { id: "activity", label: "Activity" },
-];
-
-const activityFilters: {
-  id: Company360ActivityCategory | "all";
-  label: string;
-}[] = [
-  { id: "all", label: "All" },
-  { id: "opportunities", label: "Opportunities" },
-  { id: "quotes", label: "Quotes" },
-  { id: "tasks", label: "Tasks" },
-  { id: "notes", label: "Notes" },
 ];
 
 function formatStatusLabel(value: string) {
@@ -532,97 +519,6 @@ function CompanyContactsSection({
   );
 }
 
-function ActivityTimeline({ activity }: { activity: Company360ActivityItem[] }) {
-  const [filter, setFilter] = useState<
-    Company360ActivityCategory | "all"
-  >("all");
-
-  const filteredActivity = useMemo(() => {
-    if (filter === "all") {
-      return activity;
-    }
-
-    return activity.filter((item) => item.category === filter);
-  }, [activity, filter]);
-
-  return (
-    <Card className="portal-surface overflow-hidden">
-      <CardHeader className="border-b border-border">
-        <CardTitle className="text-lg font-semibold">Activity timeline</CardTitle>
-        <CardDescription>
-          Combined activity from opportunities, quotes, tasks, and notes stored
-          for this account.
-        </CardDescription>
-        <div className="flex flex-wrap gap-2 pt-2">
-          {activityFilters.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              onClick={() => setFilter(option.id)}
-              className={cn(
-                "rounded-xl px-3 py-1.5 text-sm font-medium transition-colors",
-                filter === option.id
-                  ? "bg-muted text-foreground ring-1 ring-border"
-                  : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        {filteredActivity.length === 0 ? (
-          <div className="px-6 py-8 text-sm text-muted-foreground">
-            No activity recorded for this filter yet.
-          </div>
-        ) : (
-          <div className="divide-y divide-border">
-            {filteredActivity.map((item) => (
-              <div key={item.id} className="px-6 py-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-foreground">
-                      {item.source === "note"
-                        ? "Note"
-                        : formatActivityTypeLabel(item.activity_type)}
-                    </p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
-                      {item.description}
-                    </p>
-                  </div>
-                  <p className="shrink-0 text-sm text-muted-foreground">
-                    {formatCrmDateTime(item.created_at)}
-                  </p>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
-                  {item.author_name ? <span>{item.author_name}</span> : null}
-                  {item.opportunity_id ? (
-                    <Link
-                      href={`/admin/opportunities/${item.opportunity_id}`}
-                      className="text-foreground hover:underline"
-                    >
-                      {item.opportunity_title ?? "Opportunity"}
-                    </Link>
-                  ) : null}
-                  {item.quote_id ? (
-                    <Link
-                      href={`/admin/quotes/${item.quote_id}`}
-                      className="text-foreground hover:underline"
-                    >
-                      {item.quote_label ?? "Quote"}
-                    </Link>
-                  ) : null}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
 function CompanyDetailsSection({ company }: { company: Company360Company }) {
   return (
     <div className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
@@ -845,7 +741,34 @@ export function Company360View({ company, data }: Company360ViewProps) {
       ) : null}
 
       {activeTab === "activity" ? (
-        <ActivityTimeline activity={data.activity} />
+        <div className="space-y-6">
+          <Card className="portal-surface">
+            <CardHeader>
+              <CardTitle>Add note</CardTitle>
+              <CardDescription>
+                Internal notes for this company and related CRM records.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <NoteComposer context={{ companyId: company.id }} />
+            </CardContent>
+          </Card>
+
+          <Card className="portal-surface">
+            <CardHeader>
+              <CardTitle>Notes</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <NotesList notes={data.notes} />
+            </CardContent>
+          </Card>
+
+          <ActivityTimeline
+            items={data.activity}
+            title="Activity timeline"
+            description="Combined activity from contacts, opportunities, quotes, tasks, notes, and portal events."
+          />
+        </div>
       ) : null}
     </div>
   );

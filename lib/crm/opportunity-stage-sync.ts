@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { OPPORTUNITY_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
+import { createCrmActivity } from "@/lib/crm/create-crm-activity";
+import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
 import { LOST_REASON_QUOTE_DECLINED } from "@/lib/crm/lost-reasons";
 import {
   formatOpportunityStageLabel,
@@ -76,29 +77,51 @@ export async function logOpportunityActivity(
   supabase: SupabaseClient,
   {
     opportunityId,
+    companyId,
+    contactId,
+    quoteId,
+    taskId,
     activityType,
     description,
     metadata,
     createdBy,
   }: {
-    opportunityId: string;
+    opportunityId?: string | null;
+    companyId?: string | null;
+    contactId?: string | null;
+    quoteId?: string | null;
+    taskId?: string | null;
     activityType: string;
     description: string;
     metadata?: Record<string, unknown>;
     createdBy: string | null;
   }
 ) {
-  const { error } = await supabase.from("opportunity_activity").insert({
-    opportunity_id: opportunityId,
-    activity_type: activityType,
-    description,
-    metadata: metadata ?? {},
-    created_by: createdBy,
-  });
+  let resolvedCompanyId = companyId ?? null;
+  let resolvedContactId = contactId ?? null;
 
-  if (error) {
-    throw new Error(error.message);
+  if (opportunityId && (!resolvedCompanyId || !resolvedContactId)) {
+    const { data: opportunity } = await supabase
+      .from("opportunities")
+      .select("company_id, contact_id")
+      .eq("id", opportunityId)
+      .maybeSingle();
+
+    resolvedCompanyId = resolvedCompanyId ?? opportunity?.company_id ?? null;
+    resolvedContactId = resolvedContactId ?? opportunity?.contact_id ?? null;
   }
+
+  await createCrmActivity(supabase, {
+    companyId: resolvedCompanyId,
+    contactId: resolvedContactId,
+    opportunityId: opportunityId ?? null,
+    quoteId: quoteId ?? null,
+    taskId: taskId ?? null,
+    activityType,
+    description,
+    metadata,
+    actorProfileId: createdBy,
+  });
 }
 
 export async function applyManualOpportunityStageChange(
@@ -135,9 +158,16 @@ export async function applyManualOpportunityStageChange(
     return { ok: false, message: "Opportunity not found or access denied." };
   }
 
+  const activityType =
+    input.newStage === "won"
+      ? CRM_ACTIVITY_TYPES.opportunityWon
+      : input.newStage === "lost"
+        ? CRM_ACTIVITY_TYPES.opportunityLost
+        : CRM_ACTIVITY_TYPES.stageChanged;
+
   await logOpportunityActivity(supabase, {
     opportunityId: input.opportunityId,
-    activityType: OPPORTUNITY_ACTIVITY_TYPES.stageChanged,
+    activityType,
     description: `Stage changed from ${formatOpportunityStageLabel(input.previousStage)} to ${formatOpportunityStageLabel(input.newStage)}.`,
     metadata: {
       previous_stage: input.previousStage,
@@ -272,16 +302,30 @@ export async function syncOpportunityFromQuoteEvent(
 
   const activityType =
     event === "quote_draft_created"
-      ? "quote_created"
-      : OPPORTUNITY_ACTIVITY_TYPES.stageChanged;
+      ? CRM_ACTIVITY_TYPES.quoteCreated
+      : event === "quote_sent"
+        ? CRM_ACTIVITY_TYPES.quoteSent
+        : event === "quote_accepted"
+          ? CRM_ACTIVITY_TYPES.quoteAccepted
+          : event === "quote_declined"
+            ? CRM_ACTIVITY_TYPES.quoteDeclined
+            : CRM_ACTIVITY_TYPES.stageChanged;
 
   const description =
     event === "quote_draft_created"
       ? `Quote Q-${quote.quote_number} draft linked.`
-      : `Stage changed from ${formatOpportunityStageLabel(previousStage)} to ${formatOpportunityStageLabel(targetStage)} via quote ${event.replaceAll("_", " ")}.`;
+      : event === "quote_sent"
+        ? `Quote Q-${quote.quote_number} was sent.`
+        : event === "quote_accepted"
+          ? `Quote Q-${quote.quote_number} was accepted.`
+          : event === "quote_declined"
+            ? `Quote Q-${quote.quote_number} was declined.`
+            : `Stage changed from ${formatOpportunityStageLabel(previousStage)} to ${formatOpportunityStageLabel(targetStage)}.`;
 
   await logOpportunityActivity(supabase, {
     opportunityId: opportunity.id,
+    companyId: quote.company_id,
+    quoteId: quote.id,
     activityType,
     description,
     metadata: {
@@ -406,7 +450,10 @@ export async function ensureQuoteFollowUpTask(
 
   await logOpportunityActivity(supabase, {
     opportunityId,
-    activityType: OPPORTUNITY_ACTIVITY_TYPES.taskCreated,
+    companyId,
+    quoteId,
+    taskId: createdTask.id,
+    activityType: CRM_ACTIVITY_TYPES.taskCreated,
     description: `Follow-up task created: ${title}`,
     metadata: { quote_id: quoteId, automated: true },
     createdBy: createdBy,

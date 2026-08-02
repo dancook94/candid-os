@@ -51,10 +51,26 @@ export function CompanyPaymentTermsForm({
 
     setIsSubmitting(true);
 
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
     const { error: updateError } = await supabase
       .from("companies")
       .update({ payment_terms_days: parsedPaymentTerms })
       .eq("id", companyId);
+
+    if (!updateError && user) {
+      await supabase.from("crm_activity").insert({
+        company_id: companyId,
+        activity_type: "payment_terms_changed",
+        description: `Payment terms changed to ${parsedPaymentTerms} days.`,
+        metadata: {
+          payment_terms_days: parsedPaymentTerms,
+        },
+        actor_profile_id: user.id,
+      });
+    }
 
     setIsSubmitting(false);
 

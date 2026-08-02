@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { verifyApprovedCrmStaff } from "@/lib/crm-auth";
-import { OPPORTUNITY_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
+import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
 import { logOpportunityActivity } from "@/lib/crm/opportunity-stage-sync";
 import { syncTaskAssignees } from "@/lib/crm/task-assignees";
 import { canAccessTask } from "@/lib/crm/task-access";
@@ -83,7 +83,7 @@ export async function PATCH(
 
   const { data: existing, error: existingError } = await supabase
     .from("tasks")
-    .select("status, opportunity_id")
+    .select("title, status, opportunity_id, company_id, quote_id")
     .eq("id", taskId)
     .maybeSingle();
 
@@ -131,26 +131,52 @@ export async function PATCH(
     return NextResponse.json({ error: assigneeResult.message }, { status: 400 });
   }
 
-  if (targetOpportunityId) {
-    if (existing.status !== "completed" && status === "completed") {
-      await logOpportunityActivity(supabase, {
-        opportunityId: targetOpportunityId,
-        activityType: OPPORTUNITY_ACTIVITY_TYPES.taskCompleted,
-        description: `Task "${title}" completed.`,
-        metadata: { task_id: taskId },
-        createdBy: auth.userId,
-      });
-    }
+  const statusChanged = existing.status !== status;
 
-    if (existing.status === "completed" && status !== "completed") {
-      await logOpportunityActivity(supabase, {
-        opportunityId: targetOpportunityId,
-        activityType: OPPORTUNITY_ACTIVITY_TYPES.taskReopened,
-        description: `Task "${title}" reopened.`,
-        metadata: { task_id: taskId },
-        createdBy: auth.userId,
-      });
-    }
+  if (statusChanged && status === "completed") {
+    await logOpportunityActivity(supabase, {
+      opportunityId: targetOpportunityId,
+      companyId: body.companyId ?? existing.company_id ?? null,
+      quoteId: body.quoteId ?? existing.quote_id ?? null,
+      taskId,
+      activityType: CRM_ACTIVITY_TYPES.taskCompleted,
+      description: `Task "${title}" completed.`,
+      metadata: { task_id: taskId },
+      createdBy: auth.userId,
+    });
+  } else if (statusChanged && status === "cancelled") {
+    await logOpportunityActivity(supabase, {
+      opportunityId: targetOpportunityId,
+      companyId: body.companyId ?? existing.company_id ?? null,
+      quoteId: body.quoteId ?? existing.quote_id ?? null,
+      taskId,
+      activityType: CRM_ACTIVITY_TYPES.taskCancelled,
+      description: `Task "${title}" cancelled.`,
+      metadata: { task_id: taskId },
+      createdBy: auth.userId,
+    });
+  } else if (statusChanged && existing.status === "completed") {
+    await logOpportunityActivity(supabase, {
+      opportunityId: targetOpportunityId,
+      companyId: body.companyId ?? existing.company_id ?? null,
+      quoteId: body.quoteId ?? existing.quote_id ?? null,
+      taskId,
+      activityType: CRM_ACTIVITY_TYPES.taskReopened,
+      description: `Task "${title}" reopened.`,
+      metadata: { task_id: taskId },
+      createdBy: auth.userId,
+    });
+  } else if (!statusChanged) {
+    await logOpportunityActivity(supabase, {
+      opportunityId: targetOpportunityId,
+      companyId: body.companyId ?? existing.company_id ?? null,
+      quoteId: body.quoteId ?? existing.quote_id ?? null,
+      taskId,
+      activityType: CRM_ACTIVITY_TYPES.taskUpdated,
+      description: `Task "${title}" updated.`,
+      metadata: { task_id: taskId },
+      createdBy: auth.userId,
+    });
   }
 
   revalidatePath("/admin/tasks");

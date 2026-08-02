@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { getCrmTimeline, type CrmTimelineItem } from "@/lib/crm/get-crm-timeline";
 import { getStaffDisplayName } from "@/lib/crm/crm-staff";
 import { getLondonDayBounds } from "@/lib/crm/day-bounds";
 import {
@@ -44,10 +45,20 @@ export type AdminDashboardAttentionTask = {
   isDueToday: boolean;
 };
 
+export type AdminDashboardRecentActivity = {
+  id: string;
+  description: string;
+  actor_name: string | null;
+  created_at: string;
+  href: string;
+  context_label: string | null;
+};
+
 export type AdminDashboardCrmData = {
   metrics: AdminDashboardCrmMetrics;
   recentOpportunities: AdminDashboardRecentOpportunity[];
   attentionTasks: AdminDashboardAttentionTask[];
+  recentActivity: AdminDashboardRecentActivity[];
   errors: string[];
 };
 
@@ -141,6 +152,19 @@ async function countMyOpenTasks(
   });
 
   return matchingIds.size;
+}
+
+function mapTimelineToDashboardActivity(
+  items: CrmTimelineItem[]
+): AdminDashboardRecentActivity[] {
+  return items.slice(0, 10).map((item) => ({
+    id: item.id,
+    description: item.description,
+    actor_name: item.actor_name,
+    created_at: item.created_at,
+    href: item.linked_record_href ?? "/admin",
+    context_label: item.linked_record_label,
+  }));
 }
 
 export async function fetchAdminDashboardCrm(
@@ -341,6 +365,21 @@ export async function fetchAdminDashboardCrm(
     ),
   ];
 
+  let recentActivityItems: CrmTimelineItem[] = [];
+
+  try {
+    const recentActivity = await getCrmTimeline(supabase, {
+      scope: { type: "recent", limit: 10 },
+    });
+    recentActivityItems = recentActivity.items;
+  } catch (error) {
+    errors.push(
+      `Recent CRM activity: ${
+        error instanceof Error ? error.message : "Unable to load recent activity."
+      }`
+    );
+  }
+
   const [assigneesByTaskId, { data: attentionOpportunities }] =
     await Promise.all([
       loadTaskAssigneesByTaskIds(supabase, attentionTaskIds),
@@ -392,6 +431,7 @@ export async function fetchAdminDashboardCrm(
     },
     recentOpportunities,
     attentionTasks,
+    recentActivity: mapTimelineToDashboardActivity(recentActivityItems),
     errors,
   };
 }

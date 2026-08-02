@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { verifyApprovedAdmin } from "@/lib/admin-auth";
+import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
+import { createCrmActivity } from "@/lib/crm/create-crm-activity";
 import {
   findDuplicateContactEmail,
   normalizeContactEmail,
@@ -44,7 +46,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
   const { data: existing, error: existingError } = await supabase
     .from("contacts")
-    .select("id, company_id, profile_id")
+    .select("id, company_id, profile_id, full_name, is_primary, is_active")
     .eq("id", id)
     .maybeSingle();
 
@@ -138,6 +140,53 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
   if (updateError) {
     return NextResponse.json({ error: updateError.message }, { status: 400 });
+  }
+
+  const contactName =
+    typeof updates.full_name === "string"
+      ? updates.full_name
+      : existing.full_name;
+
+  await createCrmActivity(supabase, {
+    companyId: existing.company_id,
+    contactId: id,
+    activityType: CRM_ACTIVITY_TYPES.contactUpdated,
+    description: `${contactName} was updated.`,
+    metadata: { contact_id: id },
+    actorProfileId: authResult.userId,
+  });
+
+  if (body.isPrimary === true && !existing.is_primary) {
+    await createCrmActivity(supabase, {
+      companyId: existing.company_id,
+      contactId: id,
+      activityType: CRM_ACTIVITY_TYPES.contactSetPrimary,
+      description: `${contactName} was set as the primary contact.`,
+      metadata: { contact_id: id },
+      actorProfileId: authResult.userId,
+    });
+  }
+
+  if (body.isActive === false && existing.is_active) {
+    await createCrmActivity(supabase, {
+      companyId: existing.company_id,
+      contactId: id,
+      activityType: CRM_ACTIVITY_TYPES.contactDeactivated,
+      description: `${contactName} was deactivated.`,
+      metadata: { contact_id: id },
+      actorProfileId: authResult.userId,
+    });
+  }
+
+  if (body.isActive === true && !existing.is_active) {
+    await createCrmActivity(supabase, {
+      companyId: existing.company_id,
+      contactId: id,
+      activityType: CRM_ACTIVITY_TYPES.contactReactivated,
+      description: `${contactName} was reactivated.`,
+      metadata: { contact_id: id },
+      actorProfileId: authResult.userId,
+    });
   }
 
   return NextResponse.json({

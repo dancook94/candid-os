@@ -2,10 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
+import { ActivityTimeline } from "@/components/crm/activity-timeline";
+import { NoteComposer } from "@/components/crm/note-composer";
+import { NotesList } from "@/components/crm/notes-list";
 import { CreateQuoteButton } from "@/components/crm/create-quote-button";
 import { OpportunityAssignmentEditor } from "@/components/crm/opportunity-assignment-editor";
 import { OpportunityContactEditor } from "@/components/crm/opportunity-contact-editor";
-import { OpportunityNoteForm } from "@/components/crm/opportunity-note-form";
 import { OpportunityQuickActions } from "@/components/crm/opportunity-quick-actions";
 import { OpportunityStageBadge } from "@/components/crm/opportunity-stage-badge";
 import { OpportunityStageChange } from "@/components/crm/opportunity-stage-change";
@@ -19,7 +21,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buildCrmAppShellProps } from "@/lib/admin-shell-props";
 import { requireCrmPageAccess } from "@/lib/crm-page-access";
-import { formatActivityTypeLabel } from "@/lib/crm/activity-types";
+import { getCrmNotes, getCrmTimeline } from "@/lib/crm/get-crm-timeline";
 import { getStaffDisplayName, loadCrmStaffProfiles } from "@/lib/crm/crm-staff";
 import {
   formatCrmDate,
@@ -64,6 +66,25 @@ export default async function OpportunityDetailPage({
   if (!detail) {
     notFound();
   }
+
+  const isAdmin = ["super_admin", "admin"].includes(profile.user_role);
+  const crmScope = {
+    type: "opportunity" as const,
+    opportunityId: id,
+    companyId: detail.opportunity.company_id,
+    contactId: detail.opportunity.contact_id,
+  };
+  const [notes, { items: activity }] = await Promise.all([
+    getCrmNotes(supabase, {
+      scope: crmScope,
+      currentUserId,
+      isAdmin,
+    }),
+    getCrmTimeline(supabase, {
+      scope: crmScope,
+      limit: 50,
+    }),
+  ]);
 
   const [activeQuotes, crmStaff, collaboratorIds, contact, { data: companies }] =
     await Promise.all([
@@ -334,7 +355,6 @@ export default async function OpportunityDetailPage({
               <OpportunityStageChange
                 opportunityId={id}
                 currentStage={opportunity.stage}
-                currentUserId={currentUserId}
               />
             </CardContent>
           </Card>
@@ -411,33 +431,14 @@ export default async function OpportunityDetailPage({
               <CardTitle>Notes</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
-              <OpportunityNoteForm
-                opportunityId={id}
-                currentUserId={currentUserId}
+              <NoteComposer
+                context={{
+                  companyId: opportunity.company_id,
+                  contactId: opportunity.contact_id,
+                  opportunityId: id,
+                }}
               />
-
-              {detail.notes.length === 0 ? (
-                <EmptyState
-                  title="No notes yet"
-                  description="Internal notes will appear here."
-                />
-              ) : (
-                <div className="space-y-3">
-                  {detail.notes.map((note) => (
-                    <div
-                      key={note.id}
-                      className="rounded-xl border border-border p-4"
-                    >
-                      <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                        {note.body}
-                      </p>
-                      <p className="mt-3 text-xs text-muted-foreground">
-                        {note.author_name} · {formatCrmDateTime(note.created_at)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <NotesList notes={notes} />
             </CardContent>
           </Card>
 
@@ -446,34 +447,11 @@ export default async function OpportunityDetailPage({
               <CardTitle>Activity</CardTitle>
             </CardHeader>
             <CardContent>
-              {detail.activity.length === 0 ? (
-                <EmptyState
-                  title="No activity yet"
-                  description="Changes and updates will be logged here."
-                />
-              ) : (
-                <div className="space-y-3">
-                  {detail.activity.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className="flex flex-wrap items-start justify-between gap-3 rounded-xl border border-border p-4"
-                    >
-                      <div>
-                        <p className="font-medium">
-                          {formatActivityTypeLabel(entry.activity_type)}
-                        </p>
-                        <p className="mt-1 text-sm text-muted-foreground">
-                          {entry.description}
-                        </p>
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {entry.author_name ? `${entry.author_name} · ` : ""}
-                        {formatCrmDateTime(entry.created_at)}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <ActivityTimeline
+                items={activity}
+                showFilters={false}
+                compact
+              />
             </CardContent>
           </Card>
 
