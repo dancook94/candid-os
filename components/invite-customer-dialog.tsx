@@ -21,15 +21,23 @@ type CompanyOption = {
 
 type InviteCustomerDialogProps = {
   companies: CompanyOption[];
+  defaultCompanyId?: string;
+  lockCompany?: boolean;
+  triggerLabel?: string;
 };
 
-export function InviteCustomerDialog({ companies }: InviteCustomerDialogProps) {
+export function InviteCustomerDialog({
+  companies,
+  defaultCompanyId = "",
+  lockCompany = false,
+  triggerLabel = "Invite user",
+}: InviteCustomerDialogProps) {
   const router = useRouter();
 
   const [open, setOpen] = useState(false);
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
-  const [companyId, setCompanyId] = useState("");
+  const [companyId, setCompanyId] = useState(defaultCompanyId);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -37,7 +45,7 @@ export function InviteCustomerDialog({ companies }: InviteCustomerDialogProps) {
   function resetForm() {
     setFullName("");
     setEmail("");
-    setCompanyId("");
+    setCompanyId(defaultCompanyId);
     setError("");
     setSuccess("");
   }
@@ -113,10 +121,15 @@ export function InviteCustomerDialog({ companies }: InviteCustomerDialogProps) {
     }
   }
 
+  function handleOpen() {
+    setCompanyId(defaultCompanyId);
+    setOpen(true);
+  }
+
   return (
     <>
-      <Button type="button" onClick={() => setOpen(true)}>
-        Invite user
+      <Button type="button" onClick={handleOpen}>
+        {triggerLabel}
       </Button>
 
       {open && (
@@ -166,24 +179,34 @@ export function InviteCustomerDialog({ companies }: InviteCustomerDialogProps) {
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="invite-company">Company</Label>
-                  <select
-                    id="invite-company"
-                    value={companyId}
-                    onChange={(event) => setCompanyId(event.target.value)}
-                    disabled={isSubmitting || companies.length === 0}
-                    className="h-8 w-full rounded-lg border border-neutral-300 bg-white px-2.5 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
-                    required
-                  >
-                    <option value="">Select company</option>
-                    {companies.map((company) => (
-                      <option key={company.id} value={company.id}>
-                        {company.company_name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {lockCompany ? (
+                  <div className="space-y-2">
+                    <Label>Company</Label>
+                    <p className="text-sm text-neutral-700">
+                      {companies.find((company) => company.id === companyId)
+                        ?.company_name ?? "Selected company"}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <Label htmlFor="invite-company">Company</Label>
+                    <select
+                      id="invite-company"
+                      value={companyId}
+                      onChange={(event) => setCompanyId(event.target.value)}
+                      disabled={isSubmitting || companies.length === 0}
+                      className="h-8 w-full rounded-lg border border-neutral-300 bg-white px-2.5 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
+                      required
+                    >
+                      <option value="">Select company</option>
+                      {companies.map((company) => (
+                        <option key={company.id} value={company.id}>
+                          {company.company_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {companies.length === 0 && (
                   <p className="text-sm text-neutral-500">
