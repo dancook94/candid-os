@@ -20,8 +20,26 @@ import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { createClient } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+
 type CompanyDetailPageProps = {
   params: Promise<{ id: string }>;
+};
+
+type CompanyRecord = {
+  id: string;
+  company_name: string;
+  trading_name: string | null;
+  accounts_email: string | null;
+  phone: string | null;
+  vat_number: string | null;
+  payment_terms_days: number | null;
+  is_active: boolean;
+  created_at: string;
+  logo_storage_path?: string | null;
+  logo_file_name?: string | null;
+  logo_file_type?: string | null;
+  logo_file_size?: number | null;
 };
 
 function formatDate(dateString: string) {
@@ -51,37 +69,75 @@ export default async function CompanyDetailPage({
 
   const { data: company, error: companyError } = await supabase
     .from("companies")
-    .select(
-      "id, company_name, trading_name, accounts_email, phone, vat_number, payment_terms_days, is_active, created_at, logo_storage_path, logo_file_name, logo_file_type, logo_file_size"
-    )
+    .select("*")
     .eq("id", id)
     .maybeSingle();
 
-  if (companyError || !company) {
+  const isDevelopment = process.env.NODE_ENV === "development";
+  const shellProps = await buildAdminAppShellProps(supabase, profile);
+
+  if (companyError) {
+    if (isDevelopment) {
+      console.error("[admin/companies/[id]] company load failed:", companyError.message);
+    }
+
+    return (
+      <AppShell {...shellProps}>
+        <div className="mx-auto max-w-5xl">
+          <PageHeader
+            eyebrow="Administration"
+            title="Unable to load company"
+            description="The company record could not be loaded."
+            actions={
+              <Link href="/admin/companies">
+                <Button variant="outline">Back to companies</Button>
+              </Link>
+            }
+          />
+
+          {isDevelopment ? (
+            <Card className="portal-surface border-red-200 bg-red-50">
+              <CardContent className="pt-6">
+                <p className="text-sm font-medium text-red-800">
+                  Company query error
+                </p>
+                <p className="mt-2 text-sm text-red-700">{companyError.message}</p>
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (!company) {
     notFound();
   }
+
+  const companyRecord = company as CompanyRecord;
 
   const { data: linkedCustomers, error: customersError } = await supabase
     .from("profiles")
     .select("id, full_name, account_status, user_role, created_at")
-    .eq("company_id", company.id)
+    .eq("company_id", companyRecord.id)
     .order("full_name", { ascending: true });
 
-  const isDevelopment = process.env.NODE_ENV === "development";
-  const logoPreviewUrl = company.logo_storage_path
-    ? await createCompanyLogoSignedUrl(supabase, company.logo_storage_path)
+  const logoPreviewUrl = companyRecord.logo_storage_path
+    ? await createCompanyLogoSignedUrl(
+        supabase,
+        companyRecord.logo_storage_path
+      )
     : null;
-  const shellProps = await buildAdminAppShellProps(supabase, profile);
 
   return (
     <AppShell {...shellProps}>
       <div className="mx-auto max-w-5xl">
         <PageHeader
           eyebrow="Administration"
-          title={company.company_name}
+          title={companyRecord.company_name}
           description={
-            company.trading_name
-              ? `Trading as ${company.trading_name}`
+            companyRecord.trading_name
+              ? `Trading as ${companyRecord.trading_name}`
               : "Company details and commercial settings"
           }
           actions={
@@ -110,7 +166,7 @@ export default async function CompanyDetailPage({
               </CardTitle>
               <CardDescription>
                 Current payment terms:{" "}
-                {formatPaymentTermsLabel(company.payment_terms_days)}
+                {formatPaymentTermsLabel(companyRecord.payment_terms_days)}
               </CardDescription>
             </CardHeader>
 
@@ -118,39 +174,39 @@ export default async function CompanyDetailPage({
               <dl className="grid gap-5 text-sm sm:grid-cols-2">
                 <div>
                   <dt className="portal-field-label">Legal name</dt>
-                  <dd className="portal-detail-value">{company.company_name}</dd>
+                  <dd className="portal-detail-value">{companyRecord.company_name}</dd>
                 </div>
 
                 <div>
                   <dt className="portal-field-label">Trading name</dt>
                   <dd className="portal-detail-value">
-                    {company.trading_name || "—"}
+                    {companyRecord.trading_name || "—"}
                   </dd>
                 </div>
 
                 <div>
                   <dt className="portal-field-label">Accounts email</dt>
                   <dd className="portal-detail-value">
-                    {company.accounts_email || "—"}
+                    {companyRecord.accounts_email || "—"}
                   </dd>
                 </div>
 
                 <div>
                   <dt className="portal-field-label">Phone</dt>
-                  <dd className="portal-detail-value">{company.phone || "—"}</dd>
+                  <dd className="portal-detail-value">{companyRecord.phone || "—"}</dd>
                 </div>
 
                 <div>
                   <dt className="portal-field-label">VAT number</dt>
                   <dd className="portal-detail-value">
-                    {company.vat_number || "—"}
+                    {companyRecord.vat_number || "—"}
                   </dd>
                 </div>
 
                 <div>
                   <dt className="portal-field-label">Status</dt>
                   <dd className="portal-detail-value">
-                    {company.is_active ? "Active" : "Inactive"}
+                    {companyRecord.is_active ? "Active" : "Inactive"}
                   </dd>
                 </div>
               </dl>
@@ -169,8 +225,8 @@ export default async function CompanyDetailPage({
 
             <CardContent className="pt-6">
               <CompanyPaymentTermsForm
-                companyId={company.id}
-                initialPaymentTermsDays={company.payment_terms_days}
+                companyId={companyRecord.id}
+                initialPaymentTermsDays={companyRecord.payment_terms_days}
               />
             </CardContent>
           </Card>
@@ -189,13 +245,13 @@ export default async function CompanyDetailPage({
 
           <CardContent className="pt-6">
             <CompanyLogoForm
-              companyId={company.id}
-              companyName={company.company_name}
+              companyId={companyRecord.id}
+              companyName={companyRecord.company_name}
               initialLogo={{
-                logo_storage_path: company.logo_storage_path,
-                logo_file_name: company.logo_file_name,
-                logo_file_type: company.logo_file_type,
-                logo_file_size: company.logo_file_size,
+                logo_storage_path: companyRecord.logo_storage_path ?? null,
+                logo_file_name: companyRecord.logo_file_name ?? null,
+                logo_file_type: companyRecord.logo_file_type ?? null,
+                logo_file_size: companyRecord.logo_file_size ?? null,
               }}
               initialPreviewUrl={logoPreviewUrl}
             />
