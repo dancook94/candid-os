@@ -4,6 +4,7 @@ import {
   ensureJobForAcceptedQuote,
   reconcileJobForAcceptedQuote,
 } from "@/lib/jobs/create-from-quote";
+import { completeQuoteFollowUpTasksAfterAcceptance } from "@/lib/crm/quote-acceptance-follow-up";
 import {
   applyQuoteStatusResponse,
   getQuoteDecisionState,
@@ -158,6 +159,12 @@ export async function respondToCustomerQuote(
         );
       }
 
+      await completeQuoteFollowUpTasksAfterAcceptance({
+        quoteId,
+        actorProfileId: userId,
+        jobId: jobResult.job?.id ?? null,
+      });
+
       return {
         ok: true,
         job: mapJobResult(jobResult),
@@ -202,6 +209,12 @@ export async function respondToCustomerQuote(
           job: mapJobResult(jobResult),
         };
       }
+
+      await completeQuoteFollowUpTasksAfterAcceptance({
+        quoteId,
+        actorProfileId: userId,
+        jobId: jobResult.job?.id ?? null,
+      });
 
       return {
         ok: true,

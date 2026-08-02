@@ -33,11 +33,13 @@ export function revalidateQuoteWorkflowRoutes(input: {
   quoteRequestId?: string | null;
   jobId?: string | null;
   opportunityId?: string | null;
+  taskIds?: string[];
 }) {
   revalidatePath("/admin");
   revalidatePath("/admin/quotes");
   revalidatePath("/admin/quote-requests");
   revalidatePath("/admin/opportunities");
+  revalidatePath("/admin/tasks");
   revalidatePath("/dashboard");
   revalidatePath("/quotes");
   revalidatePath("/jobs");
@@ -50,6 +52,10 @@ export function revalidateQuoteWorkflowRoutes(input: {
   if (input.quoteRequestId) {
     revalidatePath(`/admin/quote-requests/${input.quoteRequestId}`);
     revalidatePath(`/quotes/${input.quoteRequestId}`);
+  }
+
+  for (const taskId of input.taskIds ?? []) {
+    revalidatePath(`/admin/tasks/${taskId}/edit`);
   }
 
   revalidateJobWorkflowRoutes(input);

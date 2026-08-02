@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { verifyApprovedAdmin } from "@/lib/admin-auth";
+import { reconcileQuoteFollowUpTasks } from "@/lib/crm/reconcile-quote-follow-up-tasks";
 import { reconcileJobForAcceptedQuote } from "@/lib/jobs/create-from-quote";
 import { revalidateQuoteWorkflowRoutes } from "@/lib/quote-route-revalidation";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -46,6 +47,11 @@ export async function POST(_request: Request, context: RouteContext) {
     );
   }
 
+  const taskResult = await reconcileQuoteFollowUpTasks({
+    quoteId: id,
+    actorProfileId: authResult.userId,
+  });
+
   const adminClient = createAdminClient();
   const { data: quoteLink } = await adminClient
     .from("quotes")
@@ -58,6 +64,7 @@ export async function POST(_request: Request, context: RouteContext) {
     quoteRequestId: quoteLink?.quote_request_id ?? null,
     jobId: result.job.id,
     opportunityId: quoteLink?.opportunity_id ?? null,
+    taskIds: taskResult.completedTaskIds,
   });
 
   return NextResponse.json({
@@ -67,5 +74,6 @@ export async function POST(_request: Request, context: RouteContext) {
     created: result.created,
     jobWarning: result.warning,
     schemaMissing: false,
+    completedFollowUpTaskIds: taskResult.completedTaskIds,
   });
 }

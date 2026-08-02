@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { ensureJobForAcceptedQuote } from "@/lib/jobs/create-from-quote";
+import { completeQuoteFollowUpTasksAfterAcceptance } from "@/lib/crm/quote-acceptance-follow-up";
 import {
   applyQuoteStatusResponse,
   isQuoteAwaitingDecision,
@@ -138,6 +139,12 @@ export async function respondToQuoteAsAdmin(
             "Quote was accepted, but the production job could not be created.",
         };
       }
+
+      await completeQuoteFollowUpTasksAfterAcceptance({
+        quoteId,
+        actorProfileId: changedBy,
+        jobId: jobResult.job?.id ?? null,
+      });
 
       return {
         ok: true,

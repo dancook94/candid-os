@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { ensureLinkedJobForAcceptedQuote } from "@/lib/customer-quote-response";
+import { reconcileQuoteFollowUpTasks } from "@/lib/crm/reconcile-quote-follow-up-tasks";
 import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
 import { resolveCustomerQuoteStatus } from "@/lib/quote-customer-status";
 import {
@@ -175,6 +176,8 @@ export async function fetchCustomerFormalQuote(
 
     linkedJobId = jobResult.job?.id ?? null;
     linkedJobReference = jobResult.job?.job_reference ?? null;
+
+    await reconcileQuoteFollowUpTasks({ quoteId: formalQuote.id });
   }
 
   return {

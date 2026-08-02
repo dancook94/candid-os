@@ -1,0 +1,18 @@
+-- Optional future enhancement: structured quote follow-up task classification.
+-- Not required for current auto-complete logic, which matches:
+--   tasks.quote_id = accepted quote id
+--   AND title prefix "Follow up Q-{quote_number} — "
+--
+-- If manual quote-linked tasks become common, consider:
+--
+-- ALTER TABLE public.tasks
+--   ADD COLUMN IF NOT EXISTS automation_key text;
+--
+-- CREATE INDEX IF NOT EXISTS tasks_automation_key_idx
+--   ON public.tasks (automation_key)
+--   WHERE automation_key IS NOT NULL;
+--
+-- Set automation_key = 'quote_follow_up' in ensureQuoteFollowUpTask().
+-- Match on automation_key = 'quote_follow_up' during auto-complete.
+--
+-- Do not auto-run from the app.

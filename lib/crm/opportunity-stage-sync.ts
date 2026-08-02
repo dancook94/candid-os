@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createCrmActivity } from "@/lib/crm/create-crm-activity";
 import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
 import { LOST_REASON_QUOTE_DECLINED } from "@/lib/crm/lost-reasons";
+import { buildQuoteFollowUpTaskTitle } from "@/lib/crm/complete-quote-follow-up-tasks";
 import {
   formatOpportunityStageLabel,
   isOpportunityStage,
@@ -415,7 +416,7 @@ export async function ensureQuoteFollowUpTask(
     return;
   }
 
-  const title = `Follow up Q-${quoteNumber} — ${projectName}`;
+  const title = buildQuoteFollowUpTaskTitle(quoteNumber, projectName);
 
   const { data: createdTask, error: taskError } = await supabase
     .from("tasks")

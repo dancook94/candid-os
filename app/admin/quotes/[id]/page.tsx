@@ -27,6 +27,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { loadLinkedJobForQuote } from "@/lib/admin-job-metrics";
+import { reconcileQuoteFollowUpTasks } from "@/lib/crm/reconcile-quote-follow-up-tasks";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { logDevQuery } from "@/lib/dev-query-log";
@@ -312,6 +313,10 @@ export default async function QuoteDetailPage({
   const missingVersions = versions.length === 0;
 
   const linkedJob = await loadLinkedJobForQuote(quote.id, quote.status);
+
+  if (quote.status === "accepted") {
+    await reconcileQuoteFollowUpTasks({ quoteId: quote.id });
+  }
 
   return (
     <AppShell {...shellProps}>

@@ -35,6 +35,7 @@ export const CRM_ACTIVITY_TYPES = {
   taskAssigneeAdded: "task_assignee_added",
   taskAssigneeRemoved: "task_assignee_removed",
   taskCompleted: "task_completed",
+  quoteFollowUpTaskAutoCompleted: "quote_follow_up_task_auto_completed",
   taskReopened: "task_reopened",
   taskCancelled: "task_cancelled",
   taskDeleted: "task_deleted",
