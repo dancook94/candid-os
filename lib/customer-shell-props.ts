@@ -1,5 +1,6 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 
+import { getDashboardRoleRedirect } from "@/lib/auth-redirect";
 import { loadCustomerCompanyBranding } from "@/lib/customer-company-branding";
 import { getCustomerPortalStatusSubtitle } from "@/lib/customer-portal-status";
 import { loadProfileAvatarSignedUrl } from "@/lib/staff-avatar-server";
@@ -33,6 +34,30 @@ export async function loadCustomerPortalProfile(
     .select("full_name, company_id, account_status, user_role, avatar_storage_path")
     .eq("id", userId)
     .single();
+
+  return profile;
+}
+
+export async function requireCustomerPortalUser(
+  supabase: SupabaseClient,
+  user: User,
+  redirectFn: (path: string) => never
+) {
+  const profile = await loadCustomerPortalProfile(supabase, user.id);
+
+  if (!profile) {
+    redirectFn("/login");
+  }
+
+  const roleRedirect = getDashboardRoleRedirect(profile);
+
+  if (roleRedirect) {
+    redirectFn(roleRedirect);
+  }
+
+  if (profile.user_role !== "customer") {
+    redirectFn("/login");
+  }
 
   return profile;
 }
