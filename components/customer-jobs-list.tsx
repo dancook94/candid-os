@@ -71,8 +71,19 @@ export function CustomerJobsList({ jobs }: CustomerJobsListProps) {
         <tbody>
           {jobs.map((job) => (
             <tr key={job.id} className="hover:bg-muted/35">
-              <td className="p-4 font-medium text-foreground">{job.reference}</td>
-              <td className="p-4 text-muted-foreground">{job.projectTitle}</td>
+              <td className="p-4 font-medium text-foreground">
+                <Link
+                  href={`/jobs/${job.id}`}
+                  className="underline-offset-4 hover:underline"
+                >
+                  {job.reference}
+                </Link>
+              </td>
+              <td className="p-4 text-muted-foreground">
+                <Link href={`/jobs/${job.id}`} className="block">
+                  {job.projectTitle}
+                </Link>
+              </td>
               <td className="p-4">
                 <StatusBadge
                   status={mapJobStatusToBadge(job.status)}

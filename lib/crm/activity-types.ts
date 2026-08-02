@@ -49,6 +49,12 @@ export const CRM_ACTIVITY_TYPES = {
   companyAddressDeactivated: "company_address_deactivated",
   notificationPreferencesUpdated: "notification_preferences_updated",
   quoteRequestCreated: "quote_request_created",
+  customerArtworkUploaded: "customer_artwork_uploaded",
+  customerArtworkReplaced: "customer_artwork_replaced",
+  artworkReviewStarted: "artwork_review_started",
+  artworkChangesRequested: "artwork_changes_requested",
+  artworkApproved: "artwork_approved",
+  artworkUploadFailed: "artwork_upload_failed",
 } as const;
 
 /** @deprecated Use CRM_ACTIVITY_TYPES */

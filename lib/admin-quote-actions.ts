@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { ensureJobForAcceptedQuote } from "@/lib/jobs/create-from-quote";
 import {
   applyQuoteStatusResponse,
   isQuoteAwaitingDecision,
@@ -121,6 +122,22 @@ export async function respondToQuoteAsAdmin(
     event: syncEvent,
     changedBy,
   });
+
+  if (action === "accept") {
+    try {
+      await ensureJobForAcceptedQuote({
+        quoteId,
+        actorProfileId: changedBy,
+      });
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") {
+        console.error("[jobs] failed to create job from admin accepted quote", {
+          quoteId,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
 
   return result;
 }
