@@ -3,6 +3,7 @@ import { unstable_noStore as noStore } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
+import { CompanyLogoDisplay } from "@/components/company-logo-display";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
 import { StatusBadge } from "@/components/status-badge";
@@ -14,6 +15,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { loadCustomerCompanyBranding } from "@/lib/customer-company-branding";
 import { createClient } from "@/lib/supabase/server";
 import {
   isCandidAdminRole,
@@ -94,10 +96,13 @@ export default async function DashboardPage() {
     redirect("/staff");
   }
 
+  const fallbackCompanyName =
+    user.user_metadata?.company_name || "Company awaiting approval";
+
   const [
     { count: formalQuotesCount, error: quotesError },
     { count: quoteRequestsCount, error: quoteRequestsError },
-    { data: company, error: companyError },
+    companyBranding,
   ] = await Promise.all([
     supabase
       .from("quotes")
@@ -106,13 +111,11 @@ export default async function DashboardPage() {
     supabase
       .from("quote_requests")
       .select("*", { count: "exact", head: true }),
-    profile?.company_id
-      ? supabase
-          .from("companies")
-          .select("company_name")
-          .eq("id", profile.company_id)
-          .maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
+    loadCustomerCompanyBranding(
+      supabase,
+      profile?.company_id,
+      fallbackCompanyName
+    ),
   ]);
 
   const fullName =
@@ -121,10 +124,8 @@ export default async function DashboardPage() {
     user.email ||
     "Customer";
 
-  const companyName =
-    company?.company_name ||
-    user.user_metadata?.company_name ||
-    "Company awaiting approval";
+  const companyName = companyBranding.companyName;
+  const companyLogoUrl = companyBranding.companyLogoUrl;
 
   const accountStatus = profile?.account_status ?? null;
   const accountBadge = accountStatus
@@ -137,7 +138,6 @@ export default async function DashboardPage() {
     quoteRequestsError
       ? `Quote requests count: ${quoteRequestsError.message}`
       : null,
-    companyError ? `Company: ${companyError.message}` : null,
   ].filter(Boolean) as string[];
 
   const quotesValue =
@@ -151,13 +151,26 @@ export default async function DashboardPage() {
       : String(quoteRequestsCount ?? 0);
 
   return (
-    <AppShell userRole="customer" userName={fullName} companyName={companyName}>
+    <AppShell
+      userRole="customer"
+      userName={fullName}
+      companyName={companyName}
+      companyLogoUrl={companyLogoUrl}
+    >
       <div className="mx-auto max-w-5xl">
-        <PageHeader
-          eyebrow="Candid OS"
-          title={`Welcome, ${fullName}`}
-          description={companyName}
-        />
+        <div className="mb-8 flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+          <PageHeader
+            eyebrow="Candid OS"
+            title={`Welcome, ${fullName}`}
+            description={companyName}
+          />
+
+          <CompanyLogoDisplay
+            companyName={companyName}
+            logoUrl={companyLogoUrl}
+            size="lg"
+          />
+        </div>
 
         {isDevelopment && queryErrors.length > 0 ? (
           <Card className="portal-surface mb-6 border-red-200 bg-red-50">

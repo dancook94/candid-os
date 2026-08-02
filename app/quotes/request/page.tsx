@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import { loadCustomerCompanyBranding } from "@/lib/customer-company-branding";
 import { loadAppSettings } from "@/lib/app-settings-server";
 
 export default async function QuoteRequestPage() {
@@ -41,14 +42,28 @@ export default async function QuoteRequestPage() {
     user.email ||
     "Customer";
 
-  const companyName =
+  const fallbackCompanyName =
     user.user_metadata?.company_name || "Company awaiting approval";
+
+  const companyBranding = await loadCustomerCompanyBranding(
+    supabase,
+    profile?.company_id,
+    fallbackCompanyName
+  );
+
+  const companyName = companyBranding.companyName;
+  const companyLogoUrl = companyBranding.companyLogoUrl;
 
   const canSubmit =
     profile?.account_status === "approved" && Boolean(profile.company_id);
 
   return (
-    <AppShell userRole="customer" userName={fullName} companyName={companyName}>
+    <AppShell
+      userRole="customer"
+      userName={fullName}
+      companyName={companyName}
+      companyLogoUrl={companyLogoUrl}
+    >
       <div className="mx-auto max-w-3xl">
         <PageHeader
           title="Request a quote"

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
+import { CompanyLogoForm } from "@/components/company-logo-form";
 import { CompanyPaymentTermsForm } from "@/components/company-payment-terms-form";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
@@ -13,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { createCompanyLogoSignedUrl } from "@/lib/company-logos";
 import { formatPaymentTermsLabel } from "@/lib/payment-terms";
 import { createClient } from "@/lib/supabase/server";
 import { buildLoginUrl } from "@/lib/auth-redirect";
@@ -68,7 +70,7 @@ export default async function CompanyDetailPage({
   const { data: company, error: companyError } = await supabase
     .from("companies")
     .select(
-      "id, company_name, trading_name, accounts_email, phone, vat_number, payment_terms_days, is_active, created_at"
+      "id, company_name, trading_name, accounts_email, phone, vat_number, payment_terms_days, is_active, created_at, logo_storage_path, logo_file_name, logo_file_type, logo_file_size"
     )
     .eq("id", id)
     .maybeSingle();
@@ -84,6 +86,9 @@ export default async function CompanyDetailPage({
     .order("full_name", { ascending: true });
 
   const isDevelopment = process.env.NODE_ENV === "development";
+  const logoPreviewUrl = company.logo_storage_path
+    ? await createCompanyLogoSignedUrl(supabase, company.logo_storage_path)
+    : null;
 
   return (
     <AppShell
@@ -192,6 +197,32 @@ export default async function CompanyDetailPage({
             </CardContent>
           </Card>
         </div>
+
+        <Card className="portal-surface mt-6 overflow-hidden">
+          <CardHeader className="border-b border-border">
+            <CardTitle className="text-lg font-semibold">
+              Portal branding
+            </CardTitle>
+            <CardDescription>
+              This logo appears in the customer&apos;s portal. Candid branding
+              remains on quotations and emails.
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent className="pt-6">
+            <CompanyLogoForm
+              companyId={company.id}
+              companyName={company.company_name}
+              initialLogo={{
+                logo_storage_path: company.logo_storage_path,
+                logo_file_name: company.logo_file_name,
+                logo_file_type: company.logo_file_type,
+                logo_file_size: company.logo_file_size,
+              }}
+              initialPreviewUrl={logoPreviewUrl}
+            />
+          </CardContent>
+        </Card>
 
         <Card className="portal-surface mt-6 overflow-hidden">
           <CardHeader className="border-b border-border">

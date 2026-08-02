@@ -23,6 +23,7 @@ import {
   loadLinkedQuoteRequestDeadline,
 } from "@/lib/customer-formal-quote-data";
 import { createClient } from "@/lib/supabase/server";
+import { loadCustomerCompanyBranding } from "@/lib/customer-company-branding";
 import {
   getCustomerQuoteActionLabel,
   getFormalQuoteStatusLabel,
@@ -191,7 +192,7 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name")
+    .select("full_name, company_id")
     .eq("id", user.id)
     .single();
 
@@ -201,8 +202,17 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
     user.email ||
     "Customer";
 
-  const companyName =
+  const fallbackCompanyName =
     user.user_metadata?.company_name || "Company awaiting approval";
+
+  const companyBranding = await loadCustomerCompanyBranding(
+    supabase,
+    profile?.company_id,
+    fallbackCompanyName
+  );
+
+  const companyName = companyBranding.companyName;
+  const companyLogoUrl = companyBranding.companyLogoUrl;
 
   const { data: formalQuoteExists } = await supabase
     .from("quotes")
@@ -247,7 +257,12 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
     }
 
     return (
-      <AppShell userRole="customer" userName={fullName} companyName={companyName}>
+      <AppShell
+        userRole="customer"
+        userName={fullName}
+        companyName={companyName}
+        companyLogoUrl={companyLogoUrl}
+      >
         <CustomerFormalQuoteView
           quoteId={formalQuote.quoteId}
           showPdfDownload={isCustomerQuotePdfDownloadable(
@@ -329,7 +344,12 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
   const isDelivery = quoteRequest.fulfilment_method === "delivery";
 
   return (
-    <AppShell userRole="customer" userName={fullName} companyName={companyName}>
+    <AppShell
+      userRole="customer"
+      userName={fullName}
+      companyName={companyName}
+      companyLogoUrl={companyLogoUrl}
+    >
       <div className="mx-auto max-w-3xl">
         <PageHeader
           title={quoteRequest.project_name}

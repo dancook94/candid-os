@@ -15,6 +15,7 @@ import {
   Users,
 } from "lucide-react";
 
+import { CompanyLogoDisplay } from "@/components/company-logo-display";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -24,6 +25,7 @@ type AppShellProps = {
   showStaffNav?: boolean;
   userName?: string;
   companyName?: string;
+  companyLogoUrl?: string | null;
 };
 
 const customerLinks = [
@@ -111,6 +113,7 @@ export function AppShell({
   showStaffNav = false,
   userName,
   companyName,
+  companyLogoUrl = null,
 }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -204,13 +207,23 @@ export function AppShell({
               {getInitials(displayName)}
             </div>
 
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-foreground">
                 {displayName}
               </p>
-              <p className="truncate text-xs text-muted-foreground">
-                {displayCompany}
-              </p>
+              <div className="mt-0.5 flex items-center gap-2">
+                {userRole === "customer" && companyLogoUrl ? (
+                  <CompanyLogoDisplay
+                    companyName={displayCompany}
+                    logoUrl={companyLogoUrl}
+                    size="sm"
+                    className="rounded-lg"
+                  />
+                ) : null}
+                <p className="truncate text-xs text-muted-foreground">
+                  {displayCompany}
+                </p>
+              </div>
             </div>
           </div>
 
