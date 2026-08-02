@@ -23,6 +23,7 @@ type AdminQuoteManagementActionsProps = {
   companyName: string;
   total: number;
   canRespondOnBehalf: boolean;
+  hidePermanentDelete?: boolean;
 };
 
 type ConfirmAction = "accept" | "decline" | "delete" | null;
@@ -35,6 +36,7 @@ export function AdminQuoteManagementActions({
   companyName,
   total,
   canRespondOnBehalf,
+  hidePermanentDelete = false,
 }: AdminQuoteManagementActionsProps) {
   const router = useRouter();
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
@@ -161,6 +163,7 @@ export function AdminQuoteManagementActions({
         </Card>
       ) : null}
 
+      {hidePermanentDelete ? null : (
       <Card className="portal-surface mb-6 border-red-200">
         <CardHeader className="border-b border-red-200/70">
           <CardTitle className="text-lg font-semibold text-red-900">
@@ -206,6 +209,7 @@ export function AdminQuoteManagementActions({
           </Button>
         </CardContent>
       </Card>
+      )}
 
       {error ? (
         <div className="mb-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">

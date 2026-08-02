@@ -1,7 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
-import { createCrmActivity } from "@/lib/crm/create-crm-activity";
 import {
   applyQuoteStatusResponse,
   isQuoteAwaitingDecision,
@@ -127,6 +125,71 @@ export type PermanentDeleteQuoteResult =
   | { ok: true; storageWarnings: string[] }
   | { ok: false; status: number; message: string; storageWarnings?: string[] };
 
+export type DeleteBrokenQuoteResult =
+  | { ok: true }
+  | { ok: false; status: number; message: string };
+
+async function collectQuoteItemImagePaths(
+  supabase: SupabaseClient,
+  quoteId: string
+): Promise<
+  | { ok: true; imagePaths: string[] }
+  | { ok: false; status: number; message: string }
+> {
+  const { data: versions, error: versionsError } = await supabase
+    .from("quote_versions")
+    .select("id")
+    .eq("quote_id", quoteId);
+
+  if (versionsError) {
+    return { ok: false, status: 500, message: versionsError.message };
+  }
+
+  const versionIds = (versions ?? []).map((version) => version.id);
+
+  if (versionIds.length === 0) {
+    return { ok: true, imagePaths: [] };
+  }
+
+  const { data: items, error: itemsError } = await supabase
+    .from("quote_items")
+    .select("image_storage_path")
+    .in("quote_version_id", versionIds);
+
+  if (itemsError) {
+    return { ok: false, status: 500, message: itemsError.message };
+  }
+
+  const imagePaths = [
+    ...new Set(
+      (items ?? [])
+        .map((item) => item.image_storage_path)
+        .filter((path): path is string => Boolean(path))
+    ),
+  ];
+
+  return { ok: true, imagePaths };
+}
+
+async function deleteQuoteItemImagesAfterCommit(
+  supabase: SupabaseClient,
+  imagePaths: string[]
+) {
+  const storageWarnings: string[] = [];
+
+  for (const storagePath of imagePaths) {
+    try {
+      await deleteQuoteItemImageObject(supabase, storagePath);
+    } catch (error) {
+      storageWarnings.push(
+        `${storagePath}: ${formatSupabaseStorageError(error)}`
+      );
+    }
+  }
+
+  return storageWarnings;
+}
+
 export async function permanentlyDeleteQuoteAsAdmin(
   supabase: SupabaseClient,
   {
@@ -174,120 +237,78 @@ export async function permanentlyDeleteQuoteAsAdmin(
     };
   }
 
-  const { data: versions, error: versionsError } = await supabase
-    .from("quote_versions")
-    .select("id")
-    .eq("quote_id", quote.id);
+  const imagePathsResult = await collectQuoteItemImagePaths(supabase, quote.id);
 
-  if (versionsError) {
-    return { ok: false, status: 500, message: versionsError.message };
+  if (!imagePathsResult.ok) {
+    return imagePathsResult;
   }
 
-  const versionIds = (versions ?? []).map((version) => version.id);
-  const storageWarnings: string[] = [];
+  const { error: deleteError } = await supabase.rpc("permanently_delete_quote", {
+    p_quote_id: quote.id,
+    p_deleted_by: deletedBy,
+    p_description: `Quote Q-${quote.quote_number} permanently deleted.`,
+    p_metadata: {
+      quote_number: quote.quote_number,
+      project_name: quote.project_name,
+    },
+  });
 
-  if (versionIds.length > 0) {
-    const { data: items, error: itemsError } = await supabase
-      .from("quote_items")
-      .select("id, image_storage_path")
-      .in("quote_version_id", versionIds);
-
-    if (itemsError) {
-      return { ok: false, status: 500, message: itemsError.message };
-    }
-
-    const imagePaths = [
-      ...new Set(
-        (items ?? [])
-          .map((item) => item.image_storage_path)
-          .filter((path): path is string => Boolean(path))
-      ),
-    ];
-
-    for (const storagePath of imagePaths) {
-      try {
-        await deleteQuoteItemImageObject(supabase, storagePath);
-      } catch (error) {
-        storageWarnings.push(
-          `${storagePath}: ${formatSupabaseStorageError(error)}`
-        );
-      }
-    }
-
-    if (storageWarnings.length > 0) {
-      return {
-        ok: false,
-        status: 500,
-        message:
-          "Unable to delete all quote item images. The quote was not removed.",
-        storageWarnings,
-      };
-    }
-
-    const { error: deleteItemsError } = await supabase
-      .from("quote_items")
-      .delete()
-      .in("quote_version_id", versionIds);
-
-    if (deleteItemsError) {
-      return { ok: false, status: 500, message: deleteItemsError.message };
-    }
-
-    const { error: deleteVersionsError } = await supabase
-      .from("quote_versions")
-      .delete()
-      .eq("quote_id", quote.id);
-
-    if (deleteVersionsError) {
-      return { ok: false, status: 500, message: deleteVersionsError.message };
-    }
+  if (deleteError) {
+    return { ok: false, status: 500, message: deleteError.message };
   }
 
-  try {
-    await createCrmActivity(supabase, {
-      companyId: quote.company_id,
-      contactId: quote.contact_id,
-      opportunityId: quote.opportunity_id,
-      quoteId: quote.id,
-      activityType: CRM_ACTIVITY_TYPES.quoteDeleted,
-      description: `Quote Q-${quote.quote_number} permanently deleted.`,
-      metadata: {
-        quote_number: quote.quote_number,
-        project_name: quote.project_name,
-      },
-      actorProfileId: deletedBy,
-    });
-  } catch (activityError) {
-    return {
-      ok: false,
-      status: 500,
-      message:
-        activityError instanceof Error
-          ? activityError.message
-          : "Unable to record quote deletion activity.",
-    };
-  }
-
-  const { data: deletedQuote, error: deleteQuoteError } = await supabase
-    .from("quotes")
-    .delete()
-    .eq("id", quote.id)
-    .select("id")
-    .maybeSingle();
-
-  if (deleteQuoteError) {
-    return { ok: false, status: 500, message: deleteQuoteError.message };
-  }
-
-  if (!deletedQuote) {
-    return {
-      ok: false,
-      status: 500,
-      message: "Unable to delete the quote record.",
-    };
-  }
+  const storageWarnings = await deleteQuoteItemImagesAfterCommit(
+    supabase,
+    imagePathsResult.imagePaths
+  );
 
   return { ok: true, storageWarnings };
+}
+
+export async function deleteBrokenQuoteAsAdmin(
+  supabase: SupabaseClient,
+  { quoteId }: { quoteId: string }
+): Promise<DeleteBrokenQuoteResult> {
+  const { data: quote, error: quoteError } = await supabase
+    .from("quotes")
+    .select("id")
+    .eq("id", quoteId)
+    .maybeSingle();
+
+  if (quoteError) {
+    return { ok: false, status: 500, message: quoteError.message };
+  }
+
+  if (!quote) {
+    return { ok: false, status: 404, message: "Quote not found." };
+  }
+
+  const { count, error: versionCountError } = await supabase
+    .from("quote_versions")
+    .select("id", { count: "exact", head: true })
+    .eq("quote_id", quoteId);
+
+  if (versionCountError) {
+    return { ok: false, status: 500, message: versionCountError.message };
+  }
+
+  if ((count ?? 0) > 0) {
+    return {
+      ok: false,
+      status: 409,
+      message: "Quote has versions. Use permanent delete instead.",
+    };
+  }
+
+  const { error: deleteError } = await supabase.rpc("delete_broken_quote", {
+    p_quote_id: quoteId,
+  });
+
+  if (deleteError) {
+    return { ok: false, status: 500, message: deleteError.message };
+  }
+
+  return { ok: true };
 }
 
 export function buildPermanentDeleteConfirmationHint(quoteNumber: number, quoteStatus: string) {

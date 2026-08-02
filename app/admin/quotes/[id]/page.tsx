@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { AdminQuoteManagementActions } from "@/components/admin-quote-management-actions";
 import { CreateQuoteVersionButton } from "@/components/create-quote-version-button";
+import { DeleteBrokenQuoteButton } from "@/components/delete-broken-quote-button";
 import { ActivityTimeline } from "@/components/crm/activity-timeline";
 import { NoteComposer } from "@/components/crm/note-composer";
 import { NotesList } from "@/components/crm/notes-list";
@@ -324,9 +325,16 @@ export default async function QuoteDetailPage({
 
         {missingVersions && (
           <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
-            This quote record exists but has no versions. Quote content cannot
-            be edited until a version is restored or recreated. Permanent delete
-            may have partially completed — check server logs and CRM activity.
+            <p>
+              This quote record exists but has no versions. Quote content cannot
+              be edited until a version is restored or recreated.
+            </p>
+            <div className="mt-4">
+              <DeleteBrokenQuoteButton
+                quoteId={quote.id}
+                quoteNumber={quote.quote_number}
+              />
+            </div>
           </div>
         )}
 
@@ -382,6 +390,7 @@ export default async function QuoteDetailPage({
           companyName={companyName}
           total={Number(quoteVersion?.total ?? 0)}
           canRespondOnBehalf={canRespondOnBehalf}
+          hidePermanentDelete={missingVersions}
         />
 
         <QuoteLinkedOpportunitySection
