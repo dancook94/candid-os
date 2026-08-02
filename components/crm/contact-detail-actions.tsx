@@ -56,7 +56,8 @@ export function ContactDetailActions({ contact }: ContactDetailActionsProps) {
         </Button>
       ) : null}
 
-      {contact.portal_status === "pending" ? (
+      {contact.portal_status === "invitation_sent" ||
+      contact.portal_status === "pending" ? (
         <Button
           type="button"
           variant="outline"

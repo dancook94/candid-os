@@ -44,12 +44,41 @@ export default async function ContactDetailPage({
   ]);
 
   const shellProps = await buildAdminAppShellProps(supabase, profile);
-
-  if (queryError && !contact) {
-    notFound();
-  }
+  const isDevelopment = process.env.NODE_ENV === "development";
 
   if (!contact) {
+    if (queryError && queryError !== "Contact not found.") {
+      return (
+        <AppShell {...shellProps}>
+          <div className="mx-auto max-w-4xl">
+            <PageHeader
+              eyebrow="CRM"
+              title="Unable to load contact"
+              description="The contact record could not be loaded."
+              actions={
+                <Link href="/admin/customers">
+                  <Button variant="outline">Back to contacts</Button>
+                </Link>
+              }
+            />
+            <Card className="portal-surface border-red-200 bg-red-50">
+              <CardContent className="pt-6">
+                <p className="text-sm font-medium text-red-800">
+                  Contact query error
+                </p>
+                <p className="mt-2 text-sm text-red-700">{queryError}</p>
+                {!isDevelopment ? (
+                  <p className="mt-2 text-sm text-red-700">
+                    Contact details could not be loaded.
+                  </p>
+                ) : null}
+              </CardContent>
+            </Card>
+          </div>
+        </AppShell>
+      );
+    }
+
     notFound();
   }
 

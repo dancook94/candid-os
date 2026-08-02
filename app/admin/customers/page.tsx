@@ -44,18 +44,24 @@ export default async function AdminContactsPage() {
           }
         />
 
-        {isDevelopment && queryError ? (
+        {queryError ? (
           <Card className="portal-surface mb-6 border-red-200 bg-red-50">
             <CardContent className="pt-6">
               <p className="text-sm font-medium text-red-800">
                 Contacts query error
               </p>
               <p className="mt-2 text-sm text-red-700">{queryError}</p>
+              {!isDevelopment ? (
+                <p className="mt-2 text-sm text-red-700">
+                  Contact list could not be loaded. Details are shown above when
+                  available.
+                </p>
+              ) : null}
             </CardContent>
           </Card>
         ) : null}
 
-        {contacts.length === 0 ? (
+        {!queryError && contacts.length === 0 ? (
           <EmptyState
             title="No contacts yet"
             description="Add a contact to start building CRM records before inviting anyone to the portal."
@@ -63,13 +69,15 @@ export default async function AdminContactsPage() {
               <NewContactButton companies={companyOptions} label="New contact" />
             }
           />
-        ) : (
+        ) : null}
+
+        {!queryError && contacts.length > 0 ? (
           <Card className="portal-surface overflow-hidden">
             <CardContent className="p-0">
               <ContactsTable contacts={contacts} companies={companyOptions} />
             </CardContent>
           </Card>
-        )}
+        ) : null}
 
         <p className="mt-6 text-sm text-muted-foreground">
           Portal invitations are sent from individual contacts.{" "}

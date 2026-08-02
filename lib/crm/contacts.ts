@@ -5,6 +5,12 @@ import {
   type ContactPortalStatus,
 } from "@/lib/crm/contact-portal-status";
 
+/** FK: contacts.profile_id -> profiles.id */
+export const CONTACTS_PROFILE_ID_FKEY = "contacts_profile_id_fkey";
+
+/** FK: contacts.created_by -> profiles.id */
+export const CONTACTS_CREATED_BY_FKEY = "contacts_created_by_fkey";
+
 export type ContactRecord = {
   id: string;
   company_id: string;
@@ -46,9 +52,20 @@ export function normalizeContactEmail(email: string | null | undefined) {
   return trimmed || null;
 }
 
+type ContactPortalProfile = {
+  id: string;
+  full_name: string | null;
+  account_status: string;
+  user_role: string;
+  company_id: string | null;
+};
+
 type ContactQueryRow = ContactRecord & {
   companies: { company_name: string } | { company_name: string }[] | null;
-  profiles: { account_status: string } | { account_status: string }[] | null;
+  portal_profile:
+    | ContactPortalProfile
+    | ContactPortalProfile[]
+    | null;
 };
 
 function unwrapRelation<T>(value: T | T[] | null | undefined): T | null {
@@ -61,7 +78,7 @@ function unwrapRelation<T>(value: T | T[] | null | undefined): T | null {
 
 function mapContactRow(row: ContactQueryRow): ContactListRow {
   const company = unwrapRelation(row.companies);
-  const profile = unwrapRelation(row.profiles);
+  const profile = unwrapRelation(row.portal_profile);
   const profileAccountStatus = profile?.account_status ?? null;
 
   return {
@@ -79,7 +96,8 @@ function mapContactRow(row: ContactQueryRow): ContactListRow {
     invited_at: row.invited_at,
     portal_status: resolveContactPortalStatus(
       row.profile_id,
-      profileAccountStatus
+      profileAccountStatus,
+      row.invited_at
     ),
     profile_account_status: profileAccountStatus,
     created_at: row.created_at,
@@ -87,7 +105,7 @@ function mapContactRow(row: ContactQueryRow): ContactListRow {
   };
 }
 
-const CONTACT_LIST_SELECT = `
+export const CONTACT_LIST_SELECT = `
   id,
   company_id,
   full_name,
@@ -102,7 +120,13 @@ const CONTACT_LIST_SELECT = `
   created_at,
   updated_at,
   companies ( company_name ),
-  profiles ( account_status )
+  portal_profile:profiles!${CONTACTS_PROFILE_ID_FKEY} (
+    id,
+    full_name,
+    account_status,
+    user_role,
+    company_id
+  )
 `;
 
 export async function fetchContactsList(
@@ -120,9 +144,16 @@ export async function fetchContactsList(
 
   const { data, error } = await query;
 
+  if (error) {
+    return {
+      contacts: [] as ContactListRow[],
+      queryError: error.message,
+    };
+  }
+
   return {
     contacts: ((data ?? []) as ContactQueryRow[]).map(mapContactRow),
-    queryError: error?.message ?? null,
+    queryError: null as string | null,
   };
 }
 
@@ -136,16 +167,23 @@ export async function fetchContactById(
     .eq("id", contactId)
     .maybeSingle();
 
-  if (error || !data) {
+  if (error) {
     return {
       contact: null as ContactListRow | null,
-      queryError: error?.message ?? "Contact not found.",
+      queryError: error.message,
+    };
+  }
+
+  if (!data) {
+    return {
+      contact: null as ContactListRow | null,
+      queryError: "Contact not found.",
     };
   }
 
   return {
     contact: mapContactRow(data as ContactQueryRow),
-    queryError: null,
+    queryError: null as string | null,
   };
 }
 

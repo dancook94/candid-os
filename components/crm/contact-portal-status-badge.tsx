@@ -10,7 +10,7 @@ type ContactPortalStatusBadgeProps = {
 
 function mapPortalStatusToBadge(
   status: ContactPortalStatus
-): "pending" | "approved" | "disabled" | "draft" {
+): "pending" | "approved" | "disabled" | "draft" | "sent" {
   switch (status) {
     case "approved":
       return "approved";
@@ -18,6 +18,8 @@ function mapPortalStatusToBadge(
       return "pending";
     case "disabled":
       return "disabled";
+    case "invitation_sent":
+      return "sent";
     default:
       return "draft";
   }
