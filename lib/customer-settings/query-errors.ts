@@ -33,11 +33,40 @@ export function isMissingRelationError(error: SupabaseQueryError) {
 export function isMissingColumnError(error: SupabaseQueryError) {
   return (
     error.code === "PGRST204" ||
+    error.code === "42703" ||
     Boolean(
       error.message?.includes("column") &&
         error.message.includes("does not exist")
     )
   );
+}
+
+export function isPostgrestSchemaCacheError(error: SupabaseQueryError) {
+  return error.code === "PGRST204";
+}
+
+export function normalizeSupabaseQueryError(error: unknown): SupabaseQueryError {
+  if (error && typeof error === "object") {
+    const record = error as Record<string, unknown>;
+
+    return {
+      code: typeof record.code === "string" ? record.code : undefined,
+      message:
+        typeof record.message === "string" ? record.message : String(error),
+      details:
+        record.details === null || typeof record.details === "string"
+          ? (record.details as string | null)
+          : undefined,
+      hint:
+        record.hint === null || typeof record.hint === "string"
+          ? (record.hint as string | null)
+          : undefined,
+    };
+  }
+
+  return {
+    message: String(error),
+  };
 }
 
 export function isSchemaMismatchError(error: SupabaseQueryError) {

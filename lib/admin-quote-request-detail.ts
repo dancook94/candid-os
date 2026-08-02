@@ -3,14 +3,28 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   isMissingColumnError,
   isMissingRelationError,
+  isPostgrestSchemaCacheError,
+  normalizeSupabaseQueryError,
 } from "@/lib/customer-settings/query-errors";
 import type { QuoteRequestAttachmentRecord } from "@/lib/quote-request-attachments";
 
+/**
+ * Core quote_requests columns confirmed on live schema (service-role probe).
+ * Snapshot delivery fields live here; optional metadata columns are loaded separately.
+ */
 export const QUOTE_REQUEST_CORE_SELECT =
   "id, company_id, requested_by, project_name, description, fulfilment_method, requested_date, requested_time, delivery_address_line_1, delivery_address_line_2, delivery_city, delivery_county, delivery_postcode, delivery_contact_name, delivery_contact_phone, purchase_order_number, notes, deadline_status, request_status, created_at";
 
-const QUOTE_REQUEST_ADDRESS_METADATA_SELECT =
-  "delivery_country, delivery_instructions, delivery_address_label, selected_company_address_id, delivery_address_source";
+const QUOTE_REQUEST_OPTIONAL_METADATA_COLUMNS = [
+  "delivery_country",
+  "delivery_instructions",
+  "delivery_address_label",
+  "selected_company_address_id",
+  "delivery_address_source",
+] as const;
+
+type OptionalMetadataColumn =
+  (typeof QUOTE_REQUEST_OPTIONAL_METADATA_COLUMNS)[number];
 
 export type AdminQuoteRequestDetail = {
   id: string;
@@ -63,13 +77,6 @@ export type LoadAdminQuoteRequestDetailResult =
   | { kind: "not_found" }
   | { kind: "core_error"; message: string; devMessage: string | null };
 
-type SupabaseQueryError = {
-  code?: string;
-  message?: string;
-  details?: string | null;
-  hint?: string | null;
-};
-
 function logAdminQuoteRequestQueryError(
   query:
     | "core request"
@@ -80,24 +87,102 @@ function logAdminQuoteRequestQueryError(
     | "attachments"
     | "linked quote"
     | "saved address",
-  error: SupabaseQueryError
+  error: unknown,
+  column?: string | null
 ) {
+  const normalized = normalizeSupabaseQueryError(error);
+
   console.error("[admin quote request] query failed", {
     query,
-    code: error.code,
-    message: error.message,
-    details: error.details,
-    hint: error.hint,
+    column: column ?? null,
+    code: normalized.code ?? null,
+    message: normalized.message ?? String(error),
+    details: normalized.details ?? null,
+    hint: normalized.hint ?? null,
   });
 }
 
-function emptyAddressMetadata() {
+function emptyAddressMetadata(): Pick<
+  AdminQuoteRequestDetail,
+  | "delivery_country"
+  | "delivery_instructions"
+  | "delivery_address_label"
+  | "selected_company_address_id"
+  | "delivery_address_source"
+> {
   return {
     delivery_country: null,
     delivery_instructions: null,
     delivery_address_label: null,
     selected_company_address_id: null,
     delivery_address_source: null,
+  };
+}
+
+async function loadOptionalMetadataColumn(
+  supabase: SupabaseClient,
+  routeId: string,
+  column: OptionalMetadataColumn
+): Promise<{
+  value: string | null;
+  missingColumn: boolean;
+  schemaCacheStale: boolean;
+  hardFailure: boolean;
+}> {
+  const { data, error } = await supabase
+    .from("quote_requests")
+    .select(column)
+    .eq("id", routeId)
+    .maybeSingle();
+
+  if (error) {
+    logAdminQuoteRequestQueryError("address metadata", error, column);
+    const normalized = normalizeSupabaseQueryError(error);
+
+    if (isPostgrestSchemaCacheError(normalized)) {
+      return {
+        value: null,
+        missingColumn: true,
+        schemaCacheStale: true,
+        hardFailure: false,
+      };
+    }
+
+    if (isMissingColumnError(normalized)) {
+      return {
+        value: null,
+        missingColumn: true,
+        schemaCacheStale: false,
+        hardFailure: false,
+      };
+    }
+
+    return {
+      value: null,
+      missingColumn: false,
+      schemaCacheStale: false,
+      hardFailure: true,
+    };
+  }
+
+  if (!data || typeof data !== "object") {
+    return {
+      value: null,
+      missingColumn: false,
+      schemaCacheStale: false,
+      hardFailure: false,
+    };
+  }
+
+  const rawValue = (data as Record<string, unknown>)[column];
+  const value =
+    typeof rawValue === "string" ? rawValue : rawValue == null ? null : String(rawValue);
+
+  return {
+    value,
+    missingColumn: false,
+    schemaCacheStale: false,
+    hardFailure: false,
   };
 }
 
@@ -108,41 +193,72 @@ async function loadAddressMetadata(
   metadata: ReturnType<typeof emptyAddressMetadata>;
   warning: string | null;
 }> {
-  const { data, error } = await supabase
-    .from("quote_requests")
-    .select(QUOTE_REQUEST_ADDRESS_METADATA_SELECT)
-    .eq("id", routeId)
-    .maybeSingle();
+  try {
+    const metadata = emptyAddressMetadata();
+    let loadedAny = false;
+    let missingAny = false;
+    let schemaCacheStale = false;
+    let hardFailure = false;
 
-  if (!error && data) {
-    return {
-      metadata: {
-        delivery_country: data.delivery_country ?? null,
-        delivery_instructions: data.delivery_instructions ?? null,
-        delivery_address_label: data.delivery_address_label ?? null,
-        selected_company_address_id: data.selected_company_address_id ?? null,
-        delivery_address_source: data.delivery_address_source ?? null,
-      },
-      warning: null,
-    };
-  }
+    for (const column of QUOTE_REQUEST_OPTIONAL_METADATA_COLUMNS) {
+      const result = await loadOptionalMetadataColumn(supabase, routeId, column);
 
-  if (error) {
-    logAdminQuoteRequestQueryError("address metadata", error);
+      if (result.hardFailure) {
+        hardFailure = true;
+        break;
+      }
 
-    if (isMissingColumnError(error)) {
+      if (result.missingColumn) {
+        missingAny = true;
+        if (result.schemaCacheStale) {
+          schemaCacheStale = true;
+        }
+        continue;
+      }
+
+      metadata[column] = result.value;
+      if (result.value !== null) {
+        loadedAny = true;
+      }
+    }
+
+    if (hardFailure) {
       return {
-        metadata: emptyAddressMetadata(),
-        warning:
-          "Extended delivery address metadata is unavailable. Apply docs/proposed-quote-request-address-migration.sql to enable saved-address traceability fields.",
+        metadata,
+        warning: "Extended delivery details could not be loaded.",
       };
     }
-  }
 
-  return {
-    metadata: emptyAddressMetadata(),
-    warning: "Extended delivery address metadata could not be loaded.",
-  };
+    const warningParts: string[] = [];
+
+    if (schemaCacheStale) {
+      warningParts.push(
+        "PostgREST schema cache may be stale. Run: notify pgrst, 'reload schema';"
+      );
+    }
+
+    if (missingAny && !loadedAny) {
+      warningParts.push(
+        "Extended delivery address metadata is unavailable. Apply docs/proposed-quote-request-address-migration.sql to enable saved-address traceability fields."
+      );
+    } else if (missingAny) {
+      warningParts.push(
+        "Some extended delivery metadata columns are unavailable on quote_requests."
+      );
+    }
+
+    return {
+      metadata,
+      warning: warningParts.length > 0 ? warningParts.join(" ") : null,
+    };
+  } catch (error) {
+    logAdminQuoteRequestQueryError("address metadata", error);
+
+    return {
+      metadata: emptyAddressMetadata(),
+      warning: "Extended delivery details could not be loaded.",
+    };
+  }
 }
 
 export async function loadAdminQuoteRequestDetail(
@@ -164,11 +280,15 @@ export async function loadAdminQuoteRequestDetail(
   if (coreError) {
     logAdminQuoteRequestQueryError("core request", coreError);
 
+    const normalized = normalizeSupabaseQueryError(coreError);
+
     return {
       kind: "core_error",
       message: "Quote request could not be loaded.",
       devMessage:
-        process.env.NODE_ENV === "development" ? coreError.message ?? null : null,
+        process.env.NODE_ENV === "development"
+          ? normalized.message ?? String(coreError)
+          : null,
     };
   }
 
@@ -239,7 +359,7 @@ export async function loadAdminQuoteRequestDetail(
   if (attachmentsError) {
     logAdminQuoteRequestQueryError("attachments", attachmentsError);
 
-    if (isMissingRelationError(attachmentsError)) {
+    if (isMissingRelationError(normalizeSupabaseQueryError(attachmentsError))) {
       related.attachmentsWarning =
         "Attachments could not be loaded because quote_request_attachments is unavailable.";
     } else {
@@ -265,24 +385,32 @@ export async function loadAdminQuoteRequestDetail(
   }
 
   if (quoteRequest.selected_company_address_id) {
-    const { data: linkedAddress, error: linkedAddressError } = await supabase
-      .from("company_addresses")
-      .select("id, label, is_active")
-      .eq("id", quoteRequest.selected_company_address_id)
-      .maybeSingle();
+    try {
+      const { data: linkedAddress, error: linkedAddressError } = await supabase
+        .from("company_addresses")
+        .select("id, label, is_active")
+        .eq("id", quoteRequest.selected_company_address_id)
+        .maybeSingle();
 
-    if (linkedAddressError) {
-      logAdminQuoteRequestQueryError("saved address", linkedAddressError);
+      if (linkedAddressError) {
+        logAdminQuoteRequestQueryError("saved address", linkedAddressError);
 
-      if (isMissingRelationError(linkedAddressError)) {
-        related.linkedAddressWarning =
-          "Saved address link is unavailable. Apply docs/proposed-customer-settings-migration.sql to enable company_addresses.";
-      } else {
-        related.linkedAddressWarning =
-          "Saved address link could not be loaded. The submitted address snapshot below remains authoritative.";
+        if (
+          isMissingRelationError(normalizeSupabaseQueryError(linkedAddressError))
+        ) {
+          related.linkedAddressWarning =
+            "Saved address link is unavailable. Apply docs/proposed-customer-settings-migration.sql to enable company_addresses.";
+        } else {
+          related.linkedAddressWarning =
+            "Saved address link could not be loaded. The submitted address snapshot below remains authoritative.";
+        }
+      } else if (linkedAddress) {
+        related.linkedAddress = linkedAddress;
       }
-    } else {
-      related.linkedAddress = linkedAddress;
+    } catch (error) {
+      logAdminQuoteRequestQueryError("saved address", error);
+      related.linkedAddressWarning =
+        "Saved address link could not be loaded. The submitted address snapshot below remains authoritative.";
     }
   }
 
