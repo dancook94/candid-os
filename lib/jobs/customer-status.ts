@@ -1,8 +1,8 @@
+import { isCustomerArtworkUploadEnabled } from "@/lib/jobs/artwork-source";
 import {
-  getCustomerArtworkSourceMessage,
-  isCustomerArtworkUploadEnabled,
-  resolveCustomerStatusLabelForArtworkSource,
-} from "@/lib/jobs/artwork-source";
+  getCustomerArtworkStatusMessage,
+  shouldShowArtworkRequiredBanner,
+} from "@/lib/jobs/job-status-workflow";
 import { JOB_STATUS_LABELS } from "@/lib/jobs/constants";
 import type { JobFileRecord, JobRecord } from "@/lib/jobs/types";
 import {
@@ -17,20 +17,15 @@ export type CustomerJobStatusView = JobStatusView;
 export { getCurrentArtworkFile, jobHasCompletedArtworkUpload, resolveJobStatusView };
 
 export function jobNeedsArtworkUpload(
-  job: Pick<JobRecord, "artwork_required" | "status" | "artwork_source">,
+  job: Pick<JobRecord, "artwork_required" | "status">,
   files: JobFileRecord[]
 ) {
   if (!job.artwork_required) {
     return false;
   }
 
-  if (job.artwork_source === "candid_creating" || job.artwork_source === "manual_receipt") {
+  if (!shouldShowArtworkRequiredBanner(job.status)) {
     return false;
-  }
-
-  if (job.status === "artwork_uploaded" || job.status === "in_production") {
-    const currentFile = getCurrentArtworkFile(files);
-    return currentFile?.artwork_status === "changes_required";
   }
 
   const currentFile = getCurrentArtworkFile(files);
@@ -46,32 +41,11 @@ export function resolveCustomerJobStatus(
   job: JobRecord,
   files: JobFileRecord[] = []
 ): CustomerJobStatusView {
-  const baseView = resolveJobStatusView(job, files);
-  const currentFile = getCurrentArtworkFile(files);
-
-  if (
-    currentFile &&
-    (currentFile.artwork_status === "under_review" ||
-      currentFile.artwork_status === "changes_required" ||
-      currentFile.artwork_status === "approved")
-  ) {
-    return baseView;
-  }
-
-  const sourceLabel = resolveCustomerStatusLabelForArtworkSource(job);
-
-  if (sourceLabel) {
-    return {
-      status: job.status,
-      statusLabel: sourceLabel,
-    };
-  }
-
-  return baseView;
+  return resolveJobStatusView(job, files);
 }
 
 export {
-  getCustomerArtworkSourceMessage,
+  getCustomerArtworkStatusMessage,
   isCustomerArtworkUploadEnabled,
 };
 

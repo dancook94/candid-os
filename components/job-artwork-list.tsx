@@ -55,8 +55,12 @@ export function JobArtworkList({
       ) : null}
 
       {customerArtworkMessage ? (
-        <div className="rounded-xl border border-border bg-muted/30 px-5 py-4">
-          <p className="text-sm text-neutral-900">{customerArtworkMessage}</p>
+        <div className="space-y-3 rounded-xl border border-border bg-muted/30 px-5 py-4">
+          {customerArtworkMessage.split("\n\n").map((paragraph) => (
+            <p key={paragraph} className="text-sm text-neutral-900">
+              {paragraph}
+            </p>
+          ))}
         </div>
       ) : null}
 

@@ -1,6 +1,7 @@
 export const JOB_STATUSES = [
   "awaiting_artwork",
-  "artwork_uploaded",
+  "artwork_in_preparation",
+  "artwork_received",
   "in_production",
   "ready",
   "completed",
@@ -128,7 +129,6 @@ export type CustomerJobDetail = {
   quoteId: string;
   quoteNumber: string | null;
   artworkRequired: boolean;
-  artworkSource: JobArtworkSource;
   customerArtworkMessage: string | null;
   uploadEnabled: boolean;
   needsArtworkUpload: boolean;

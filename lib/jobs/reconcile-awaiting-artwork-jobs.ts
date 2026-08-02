@@ -106,7 +106,7 @@ export async function reconcileAwaitingArtworkJobStatuses(
       const { data: updatedJob, error: updateError } = await adminClient
         .from("jobs")
         .update({
-          status: "artwork_uploaded",
+          status: "artwork_received",
           updated_at: now,
         })
         .eq("id", job.id)
@@ -139,7 +139,7 @@ export async function reconcileAwaitingArtworkJobStatuses(
             metadata: {
               job_id: job.id,
               previous_status: "awaiting_artwork",
-              new_status: "artwork_uploaded",
+              new_status: "artwork_received",
               trigger: input.trigger ?? "awaiting_artwork_reconciliation",
             },
           });

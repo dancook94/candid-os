@@ -51,7 +51,8 @@ export function getJobArtworkChunkBytes() {
 
 export const JOB_STATUS_LABELS: Record<string, string> = {
   awaiting_artwork: "Awaiting artwork",
-  artwork_uploaded: "Artwork uploaded",
+  artwork_in_preparation: "Artwork in preparation",
+  artwork_received: "Artwork received",
   in_production: "In production",
   ready: "Ready",
   completed: "Completed",
@@ -75,6 +76,7 @@ export const JOB_ACTIVITY_TYPES = {
   artworkApproved: "artwork_approved",
   artworkUploadFailed: "artwork_upload_failed",
   jobStatusReconciled: "job_status_reconciled",
+  jobStatusChanged: "job_status_changed",
   jobArtworkSourceChanged: "job_artwork_source_changed",
   artworkReceivedManually: "artwork_received_manually",
   candidArtworkCreationStarted: "candid_artwork_creation_started",

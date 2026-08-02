@@ -20,6 +20,10 @@ function mapJobStatusToBadge(status: string): BadgeStatus {
   switch (status) {
     case "awaiting_artwork":
       return "pending";
+    case "artwork_in_preparation":
+      return "pending";
+    case "artwork_received":
+      return "sent";
     case "artwork_uploaded":
       return "sent";
     case "in_production":

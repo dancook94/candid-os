@@ -1,15 +1,25 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { JOB_ACTIVITY_TYPES, logJobActivity } from "@/lib/jobs/activity";
 import { JobError } from "@/lib/jobs/errors";
-import type { JobArtworkStatus, JobRecord } from "@/lib/jobs/types";
+import { JOB_STATUS_LABELS } from "@/lib/jobs/constants";
+import { resolveJobStatusAfterPortalUpload } from "@/lib/jobs/job-status-workflow";
+import type { JobArtworkStatus, JobRecord, JobStatus } from "@/lib/jobs/types";
+
+const ARTWORK_RECEIVED_STATUSES: JobStatus[] = [
+  "awaiting_artwork",
+  "artwork_in_preparation",
+  "artwork_received",
+];
 
 export async function syncJobStatusAfterArtworkUpload(
   adminClient: SupabaseClient,
-  jobId: string
+  jobId: string,
+  options: { actorProfileId?: string | null } = {}
 ) {
   const { data: job, error: jobError } = await adminClient
     .from("jobs")
-    .select("id, status")
+    .select("id, status, company_id, quote_id, opportunity_id, contact_id, job_reference")
     .eq("id", jobId)
     .maybeSingle();
 
@@ -21,7 +31,9 @@ export async function syncJobStatusAfterArtworkUpload(
     throw new JobError("Job not found.", 404);
   }
 
-  if (job.status !== "awaiting_artwork") {
+  const nextStatus = resolveJobStatusAfterPortalUpload(job.status as JobStatus);
+
+  if (!nextStatus) {
     return { updated: false as const, status: job.status };
   }
 
@@ -44,11 +56,11 @@ export async function syncJobStatusAfterArtworkUpload(
   const { data: updatedJob, error: updateError } = await adminClient
     .from("jobs")
     .update({
-      status: "artwork_uploaded",
+      status: nextStatus,
       updated_at: now,
     })
     .eq("id", jobId)
-    .eq("status", "awaiting_artwork")
+    .eq("status", job.status)
     .select("id, status")
     .maybeSingle();
 
@@ -58,6 +70,26 @@ export async function syncJobStatusAfterArtworkUpload(
 
   if (!updatedJob) {
     return { updated: false as const, status: job.status };
+  }
+
+  try {
+    await logJobActivity(adminClient, {
+      activityType: JOB_ACTIVITY_TYPES.jobStatusChanged,
+      description: `Job ${job.job_reference} status changed to ${JOB_STATUS_LABELS[nextStatus] ?? nextStatus}.`,
+      companyId: job.company_id,
+      quoteId: job.quote_id,
+      opportunityId: job.opportunity_id,
+      contactId: job.contact_id,
+      actorProfileId: options.actorProfileId ?? null,
+      metadata: {
+        job_id: jobId,
+        previous_status: job.status,
+        new_status: nextStatus,
+        trigger: "portal_upload",
+      },
+    });
+  } catch {
+    // Non-critical.
   }
 
   return { updated: true as const, status: updatedJob.status };
@@ -73,7 +105,7 @@ export async function syncJobStatusAfterArtworkReview(
 
   if (
     artworkStatus === "approved" &&
-    (job.status === "awaiting_artwork" || job.status === "artwork_uploaded")
+    ARTWORK_RECEIVED_STATUSES.includes(job.status)
   ) {
     updates.status = "in_production";
   }

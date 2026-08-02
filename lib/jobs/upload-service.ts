@@ -24,8 +24,7 @@ import {
   validateArtworkUploadInput,
 } from "@/lib/jobs/file-validation";
 import type { JobFileRecord } from "@/lib/jobs/types";
-import { syncJobStatusAfterArtworkUpload } from "@/lib/jobs/job-status-sync";
-import { maybeSetPortalUploadArtworkSource } from "@/lib/jobs/update-artwork-source";
+import { syncJobAfterPortalUpload } from "@/lib/jobs/update-artwork-source";
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -573,13 +572,15 @@ export async function finishArtworkUpload(
   }
 
   try {
-    const jobStatusResult = await syncJobStatusAfterArtworkUpload(adminClient, jobId);
+    const jobStatusResult = await syncJobAfterPortalUpload(adminClient, jobId, {
+      actorProfileId: userId,
+    });
 
     logArtworkUploadStep("job_status_update", {
       jobId,
       uploadRecordId: file.id,
       updated: jobStatusResult.updated,
-      status: jobStatusResult.status,
+      status: jobStatusResult.status ?? null,
     });
   } catch (jobStatusError) {
     logArtworkUploadStep("job_status_update_failed", {
@@ -589,19 +590,6 @@ export async function finishArtworkUpload(
         jobStatusError instanceof Error
           ? jobStatusError.message
           : "Job status update failed.",
-    });
-  }
-
-  try {
-    await maybeSetPortalUploadArtworkSource(adminClient, jobId);
-  } catch (sourceUpdateError) {
-    logArtworkUploadStep("artwork_source_update_failed", {
-      jobId,
-      uploadRecordId: file.id,
-      message:
-        sourceUpdateError instanceof Error
-          ? sourceUpdateError.message
-          : "Artwork source update failed.",
     });
   }
 

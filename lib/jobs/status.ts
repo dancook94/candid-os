@@ -43,13 +43,44 @@ function resolveArtworkReviewLabel(
   }
 }
 
+function resolveReceivedArtworkLabel(
+  job: Pick<JobRecord, "status">,
+  files: JobFileRecord[]
+) {
+  const currentFile = getCurrentArtworkFile(files);
+
+  if (job.status === "artwork_received" || job.status === "awaiting_artwork") {
+    const reviewLabel = currentFile
+      ? resolveArtworkReviewLabel(job.status, currentFile.artwork_status)
+      : null;
+
+    if (reviewLabel) {
+      return reviewLabel;
+    }
+  }
+
+  if (job.status === "artwork_received") {
+    return {
+      status: job.status,
+      statusLabel: JOB_STATUS_LABELS.artwork_received ?? "Artwork received",
+    };
+  }
+
+  return null;
+}
+
 export function resolveJobStatusView(
   job: Pick<JobRecord, "status">,
   files: JobFileRecord[] = []
 ): JobStatusView {
-  const currentFile = getCurrentArtworkFile(files);
+  const receivedLabel = resolveReceivedArtworkLabel(job, files);
 
-  if (job.status === "artwork_uploaded") {
+  if (receivedLabel) {
+    return receivedLabel;
+  }
+
+  if (job.status === "awaiting_artwork") {
+    const currentFile = getCurrentArtworkFile(files);
     const reviewLabel = currentFile
       ? resolveArtworkReviewLabel(job.status, currentFile.artwork_status)
       : null;
@@ -60,33 +91,13 @@ export function resolveJobStatusView(
 
     return {
       status: job.status,
-      statusLabel: JOB_STATUS_LABELS.artwork_uploaded ?? "Artwork uploaded",
-    };
-  }
-
-  if (job.status !== "awaiting_artwork") {
-    return {
-      status: job.status,
-      statusLabel: JOB_STATUS_LABELS[job.status] ?? job.status,
-    };
-  }
-
-  if (!currentFile) {
-    return {
-      status: job.status,
       statusLabel: JOB_STATUS_LABELS.awaiting_artwork ?? "Awaiting artwork",
     };
   }
 
-  const reviewLabel = resolveArtworkReviewLabel(job.status, currentFile.artwork_status);
-
-  if (reviewLabel) {
-    return reviewLabel;
-  }
-
   return {
     status: job.status,
-    statusLabel: JOB_STATUS_LABELS.artwork_uploaded ?? "Artwork uploaded",
+    statusLabel: JOB_STATUS_LABELS[job.status] ?? job.status,
   };
 }
 

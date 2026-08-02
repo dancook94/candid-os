@@ -12,7 +12,7 @@ import {
   resolveArtworkUploadedAt,
 } from "@/lib/jobs/artwork-display";
 import {
-  getCustomerArtworkSourceMessage,
+  getCustomerArtworkStatusMessage,
   getCustomerChangesRequiredComment,
   isCustomerArtworkUploadEnabled,
   jobNeedsArtworkUpload,
@@ -96,7 +96,8 @@ export async function loadCustomerJobs(
     if (options.filter === "active") {
       query = query.in("status", [
         "awaiting_artwork",
-        "artwork_uploaded",
+        "artwork_in_preparation",
+        "artwork_received",
         "in_production",
         "ready",
       ]);
@@ -260,8 +261,7 @@ export async function loadCustomerJobDetail(
     quoteId: typedJob.quote_id,
     quoteNumber: quote?.quote_number ? `Q-${quote.quote_number}` : null,
     artworkRequired: typedJob.artwork_required,
-    artworkSource: typedJob.artwork_source,
-    customerArtworkMessage: getCustomerArtworkSourceMessage(typedJob.artwork_source),
+    customerArtworkMessage: getCustomerArtworkStatusMessage(typedJob.status),
     uploadEnabled: isCustomerArtworkUploadEnabled(typedJob),
     needsArtworkUpload: jobNeedsArtworkUpload(typedJob, typedFiles),
     changesRequiredComment: getCustomerChangesRequiredComment(typedFiles),

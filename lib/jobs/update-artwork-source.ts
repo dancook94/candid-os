@@ -4,12 +4,17 @@ import { JOB_ACTIVITY_TYPES, logJobActivity } from "@/lib/jobs/activity";
 import {
   getAdminArtworkSourceLabel,
   isJobArtworkSource,
-  resolveJobStatusForArtworkSourceChange,
+  shouldAutoSetPortalUploadSource,
 } from "@/lib/jobs/artwork-source";
 import { JobError } from "@/lib/jobs/errors";
+import {
+  resolveJobStatusForArtworkSourceChange,
+  resolveJobStatusAfterPortalUpload,
+} from "@/lib/jobs/job-status-workflow";
 import { JOB_LIST_COLUMNS } from "@/lib/jobs/job-select";
+import { JOB_STATUS_LABELS } from "@/lib/jobs/constants";
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
-import type { JobArtworkSource, JobRecord } from "@/lib/jobs/types";
+import type { JobArtworkSource, JobRecord, JobStatus } from "@/lib/jobs/types";
 
 type UpdateJobArtworkSourceInput = {
   jobId: string;
@@ -41,6 +46,37 @@ function resolveArtworkSourceActivityType(
   }
 
   return JOB_ACTIVITY_TYPES.jobArtworkSourceChanged;
+}
+
+async function logJobStatusChangedActivity(
+  adminClient: SupabaseClient,
+  job: JobRecord,
+  input: {
+    actorProfileId: string | null;
+    previousStatus: JobStatus;
+    newStatus: JobStatus;
+    trigger: string;
+  }
+) {
+  if (input.previousStatus === input.newStatus) {
+    return;
+  }
+
+  await logJobActivity(adminClient, {
+    activityType: JOB_ACTIVITY_TYPES.jobStatusChanged,
+    description: `Job ${job.job_reference} status changed to ${JOB_STATUS_LABELS[input.newStatus] ?? input.newStatus}.`,
+    companyId: job.company_id,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
+    contactId: job.contact_id,
+    actorProfileId: input.actorProfileId,
+    metadata: {
+      job_id: job.id,
+      previous_status: input.previousStatus,
+      new_status: input.newStatus,
+      trigger: input.trigger,
+    },
+  });
 }
 
 export async function updateJobArtworkSource(
@@ -88,7 +124,7 @@ export async function updateJobArtworkSource(
     updated_at: now,
   };
 
-  if (nextStatus) {
+  if (nextStatus && nextStatus !== typedJob.status) {
     updatePayload.status = nextStatus;
   }
 
@@ -103,13 +139,14 @@ export async function updateJobArtworkSource(
     throw new JobError(updateError?.message ?? "Unable to update artwork source.", 500);
   }
 
+  const updatedTypedJob = updatedJob as JobRecord;
   const activityType = resolveArtworkSourceActivityType(
     previousArtworkSource,
     input.artworkSource
   );
 
-  if (activityType) {
-    try {
+  try {
+    if (activityType) {
       await logJobActivity(adminClient, {
         activityType,
         description: `Artwork source for ${typedJob.job_reference} changed to ${getAdminArtworkSourceLabel(input.artworkSource)}.`,
@@ -123,12 +160,21 @@ export async function updateJobArtworkSource(
           previous_artwork_source: previousArtworkSource,
           new_artwork_source: input.artworkSource,
           previous_status: typedJob.status,
-          new_status: (updatedJob as JobRecord).status,
+          new_status: updatedTypedJob.status,
         },
       });
-    } catch {
-      // Activity failure must not revert the artwork source update.
     }
+
+    if (nextStatus && nextStatus !== typedJob.status) {
+      await logJobStatusChangedActivity(adminClient, typedJob, {
+        actorProfileId: input.actorProfileId,
+        previousStatus: typedJob.status,
+        newStatus: nextStatus,
+        trigger: "artwork_source_change",
+      });
+    }
+  } catch {
+    // Activity failure must not revert the artwork source update.
   }
 
   try {
@@ -143,39 +189,84 @@ export async function updateJobArtworkSource(
 
   return {
     updated: true,
-    job: updatedJob as JobRecord,
+    job: updatedTypedJob,
     previousArtworkSource,
     artworkSource: input.artworkSource,
   };
 }
 
+export async function syncJobAfterPortalUpload(
+  adminClient: SupabaseClient,
+  jobId: string,
+  options: { actorProfileId?: string | null } = {}
+) {
+  const { data: job, error } = await adminClient
+    .from("jobs")
+    .select(JOB_LIST_COLUMNS)
+    .eq("id", jobId)
+    .maybeSingle();
+
+  if (error || !job) {
+    return { updated: false as const };
+  }
+
+  const typedJob = job as JobRecord;
+  const now = new Date().toISOString();
+  const updatePayload: Record<string, unknown> = { updated_at: now };
+  let statusChanged = false;
+  let sourceChanged = false;
+
+  const nextStatus = resolveJobStatusAfterPortalUpload(typedJob.status);
+
+  if (nextStatus && nextStatus !== typedJob.status) {
+    updatePayload.status = nextStatus;
+    statusChanged = true;
+  }
+
+  if (shouldAutoSetPortalUploadSource(typedJob.artwork_source)) {
+    updatePayload.artwork_source = "portal_upload";
+    sourceChanged = true;
+  }
+
+  if (!statusChanged && !sourceChanged) {
+    return { updated: false as const };
+  }
+
+  const { data: updatedJob, error: updateError } = await adminClient
+    .from("jobs")
+    .update(updatePayload)
+    .eq("id", jobId)
+    .select(JOB_LIST_COLUMNS)
+    .maybeSingle();
+
+  if (updateError || !updatedJob) {
+    return { updated: false as const };
+  }
+
+  if (statusChanged && nextStatus) {
+    try {
+      await logJobStatusChangedActivity(adminClient, typedJob, {
+        actorProfileId: options.actorProfileId ?? null,
+        previousStatus: typedJob.status,
+        newStatus: nextStatus,
+        trigger: "portal_upload",
+      });
+    } catch {
+      // Non-critical.
+    }
+  }
+
+  return {
+    updated: true as const,
+    status: (updatedJob as JobRecord).status,
+    artworkSource: (updatedJob as JobRecord).artwork_source,
+  };
+}
+
+/** @deprecated Use syncJobAfterPortalUpload */
 export async function maybeSetPortalUploadArtworkSource(
   adminClient: SupabaseClient,
   jobId: string
 ) {
-  const { data: job, error } = await adminClient
-    .from("jobs")
-    .select("id, artwork_source")
-    .eq("id", jobId)
-    .maybeSingle();
-
-  if (error || !job || job.artwork_source !== "customer_pending") {
-    return { updated: false as const };
-  }
-
-  const now = new Date().toISOString();
-  const { error: updateError } = await adminClient
-    .from("jobs")
-    .update({
-      artwork_source: "portal_upload",
-      updated_at: now,
-    })
-    .eq("id", jobId)
-    .eq("artwork_source", "customer_pending");
-
-  if (updateError) {
-    return { updated: false as const };
-  }
-
-  return { updated: true as const };
+  return syncJobAfterPortalUpload(adminClient, jobId);
 }
