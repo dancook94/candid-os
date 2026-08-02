@@ -59,7 +59,7 @@ const adminLinks = [
   },
   {
     href: "/admin/customers",
-    label: "Customers",
+    label: "Contacts",
     icon: Users,
   },
   {

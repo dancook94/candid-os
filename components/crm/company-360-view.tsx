@@ -7,7 +7,8 @@ import { CompanyLogoDisplay } from "@/components/company-logo-display";
 import { CompanyLogoForm } from "@/components/company-logo-form";
 import { CompanyPaymentTermsForm } from "@/components/company-payment-terms-form";
 import { EmptyState } from "@/components/empty-state";
-import { InviteCustomerDialog } from "@/components/invite-customer-dialog";
+import { ContactsTable } from "@/components/crm/contacts-table";
+import { NewContactButton } from "@/components/crm/contact-form-dialog";
 import { OpportunityStageBadge } from "@/components/crm/opportunity-stage-badge";
 import { StaffAvatarStack } from "@/components/crm/staff-avatar-stack";
 import { TaskAssigneeDisplay } from "@/components/crm/task-assignee-display";
@@ -40,7 +41,7 @@ type Company360Tab =
   | "opportunities"
   | "quotes"
   | "tasks"
-  | "users"
+  | "contacts"
   | "activity";
 
 type Company360Company = {
@@ -72,7 +73,7 @@ const tabs: { id: Company360Tab; label: string }[] = [
   { id: "opportunities", label: "Opportunities" },
   { id: "quotes", label: "Quotes" },
   { id: "tasks", label: "Tasks" },
-  { id: "users", label: "Users" },
+  { id: "contacts", label: "Contacts" },
   { id: "activity", label: "Activity" },
 ];
 
@@ -475,89 +476,55 @@ function TasksTable({
   );
 }
 
-function PortalUsersTable({
-  portalUsers,
-  companies,
+function CompanyContactsSection({
+  contacts,
   companyId,
   companyName,
 }: {
-  portalUsers: Company360Data["portalUsers"];
-  companies: { id: string; company_name: string }[];
+  contacts: Company360Data["contacts"];
   companyId: string;
   companyName: string;
 }) {
+  const companyOptions = [{ id: companyId, company_name: companyName }];
+
   return (
     <Card className="portal-surface overflow-hidden">
       <CardHeader className="flex flex-row items-center justify-between gap-4 border-b border-border">
         <div>
-          <CardTitle className="text-lg font-semibold">Portal users</CardTitle>
+          <CardTitle className="text-lg font-semibold">Contacts</CardTitle>
           <CardDescription>
-            Approved and pending customer users linked to {companyName}.
+            CRM contacts at {companyName}. Portal access is optional.
           </CardDescription>
         </div>
-        <InviteCustomerDialog
-          companies={companies}
+        <NewContactButton
+          companies={companyOptions}
           defaultCompanyId={companyId}
           lockCompany
-          triggerLabel="Invite customer"
+          label="Add contact"
+          variant="outline"
+          size="sm"
         />
       </CardHeader>
       <CardContent className="p-0">
-        {portalUsers.length === 0 ? (
+        {contacts.length === 0 ? (
           <EmptyState
-            title="No portal users"
-            description="Invite a customer to give them access to the portal for this company."
+            title="No contacts yet"
+            description="Add a contact to record people at this company before inviting them to the portal."
             action={
-              <InviteCustomerDialog
-                companies={companies}
+              <NewContactButton
+                companies={companyOptions}
                 defaultCompanyId={companyId}
                 lockCompany
-                triggerLabel="Invite customer"
+                label="Add contact"
               />
             }
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="portal-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Account status</th>
-                  <th>Last sign-in</th>
-                </tr>
-              </thead>
-              <tbody>
-                {portalUsers.map((user) => (
-                  <tr key={user.id}>
-                    <td className="px-4 py-3.5 font-medium text-foreground">
-                      {user.full_name || "Unnamed user"}
-                    </td>
-                    <td className="px-4 py-3.5 text-muted-foreground">
-                      {user.email || "—"}
-                    </td>
-                    <td className="px-4 py-3.5">
-                      <StatusBadge
-                        status={
-                          user.account_status === "approved"
-                            ? "approved"
-                            : user.account_status === "disabled"
-                              ? "disabled"
-                              : "pending"
-                        }
-                        label={formatStatusLabel(user.account_status)}
-                      />
-                    </td>
-                    <td className="px-4 py-3.5 text-muted-foreground">
-                      {user.last_sign_in_at
-                        ? formatCrmDateTime(user.last_sign_in_at)
-                        : "—"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ContactsTable
+            contacts={contacts}
+            companies={companyOptions}
+            showCompanyColumn={false}
+          />
         )}
       </CardContent>
     </Card>
@@ -720,8 +687,6 @@ function CompanyDetailsSection({ company }: { company: Company360Company }) {
 export function Company360View({ company, data }: Company360ViewProps) {
   const [activeTab, setActiveTab] = useState<Company360Tab>("overview");
 
-  const inviteCompanies = [{ id: company.id, company_name: company.company_name }];
-
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-6 border-b border-border pb-6 lg:flex-row lg:items-start lg:justify-between">
@@ -754,9 +719,9 @@ export function Company360View({ company, data }: Company360ViewProps) {
                 </span>
               </span>
               <span>
-                Portal users:{" "}
+                Contacts:{" "}
                 <span className="font-medium text-foreground">
-                  {data.portalUsers.length}
+                  {data.contacts.length}
                 </span>
               </span>
             </div>
@@ -779,12 +744,6 @@ export function Company360View({ company, data }: Company360ViewProps) {
               New quote
             </Button>
           </Link>
-          <InviteCustomerDialog
-            companies={inviteCompanies}
-            defaultCompanyId={company.id}
-            lockCompany
-            triggerLabel="Invite customer"
-          />
           <Link href="/admin/companies">
             <Button variant="outline" size="sm">
               Back to companies
@@ -876,10 +835,9 @@ export function Company360View({ company, data }: Company360ViewProps) {
         <TasksTable companyId={company.id} tasks={data.tasks} />
       ) : null}
 
-      {activeTab === "users" ? (
-        <PortalUsersTable
-          portalUsers={data.portalUsers}
-          companies={inviteCompanies}
+      {activeTab === "contacts" ? (
+        <CompanyContactsSection
+          contacts={data.contacts}
           companyId={company.id}
           companyName={company.company_name}
         />

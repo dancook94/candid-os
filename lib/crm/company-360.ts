@@ -15,7 +15,10 @@ import {
   type TaskAssigneeProfile,
 } from "@/lib/crm/task-assignees";
 import type { TaskPriority, TaskStatus } from "@/lib/crm/types";
-import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  fetchContactsList,
+  type ContactListRow,
+} from "@/lib/crm/contacts";
 
 const TERMINAL_STAGE_FILTER = '("won","lost")';
 
@@ -49,13 +52,7 @@ export type Company360Summary = {
   overdueTasksCount: number;
 };
 
-export type Company360PortalUser = {
-  id: string;
-  full_name: string | null;
-  email: string | null;
-  account_status: string;
-  last_sign_in_at: string | null;
-};
+export type Company360Contact = ContactListRow;
 
 export type Company360ActivityCategory =
   | "opportunities"
@@ -95,7 +92,7 @@ export type Company360Data = {
   opportunities: OpportunityListRow[];
   quotes: AdminQuoteListRow[];
   tasks: Company360Task[];
-  portalUsers: Company360PortalUser[];
+  contacts: Company360Contact[];
   activity: Company360ActivityItem[];
   errors: string[];
 };
@@ -303,59 +300,20 @@ function extractQuoteId(metadata: Record<string, unknown> | null | undefined) {
   return typeof quoteId === "string" ? quoteId : null;
 }
 
-async function loadCompanyPortalUsers(
+async function loadCompanyContacts(
+  supabase: SupabaseClient,
   companyId: string,
   errors: string[]
-): Promise<Company360PortalUser[]> {
-  let adminClient;
+): Promise<Company360Contact[]> {
+  const { contacts, queryError } = await fetchContactsList(supabase, {
+    companyId,
+  });
 
-  try {
-    adminClient = createAdminClient();
-  } catch (error) {
-    errors.push(
-      error instanceof Error
-        ? `Portal users auth: ${error.message}`
-        : "Portal users auth unavailable."
-    );
-    return [];
+  if (queryError) {
+    errors.push(`Contacts: ${queryError}`);
   }
 
-  const { data: profiles, error: profilesError } = await adminClient
-    .from("profiles")
-    .select("id, full_name, account_status")
-    .eq("company_id", companyId)
-    .in("account_status", ["approved", "pending"])
-    .order("full_name", { ascending: true });
-
-  if (profilesError) {
-    errors.push(`Portal users: ${profilesError.message}`);
-    return [];
-  }
-
-  return Promise.all(
-    (profiles ?? []).map(async (profile) => {
-      const { data: authData, error: authError } =
-        await adminClient.auth.admin.getUserById(profile.id);
-
-      if (authError) {
-        return {
-          id: profile.id,
-          full_name: profile.full_name,
-          email: null,
-          account_status: profile.account_status,
-          last_sign_in_at: null,
-        };
-      }
-
-      return {
-        id: profile.id,
-        full_name: profile.full_name,
-        email: authData.user.email ?? null,
-        account_status: profile.account_status,
-        last_sign_in_at: authData.user.last_sign_in_at ?? null,
-      };
-    })
-  );
+  return contacts;
 }
 
 async function fetchCompanyTasks(
@@ -562,7 +520,6 @@ export async function fetchCompany360(
     { data: activeOpportunityRows, error: activeRowsError },
     opportunitiesResult,
     quotesResult,
-    portalUsers,
     { data: companyOpportunityIds, error: opportunityIdsError },
     { data: companyQuoteIds, error: quoteIdsError },
   ] = await Promise.all([
@@ -596,7 +553,6 @@ export async function fetchCompany360(
       sort: "newest",
       opportunityLink: "all",
     }),
-    loadCompanyPortalUsers(companyId, errors),
     supabase.from("opportunities").select("id, title").eq("company_id", companyId),
     supabase.from("quotes").select("id, quote_number").eq("company_id", companyId),
   ]);
@@ -645,7 +601,8 @@ export async function fetchCompany360(
   );
   const quoteIds = [...quoteLabelById.keys()];
 
-  const [tasks, activity] = await Promise.all([
+  const [contacts, tasks, activity] = await Promise.all([
+    loadCompanyContacts(supabase, companyId, errors),
     fetchCompanyTasks(
       supabase,
       companyId,
@@ -681,7 +638,7 @@ export async function fetchCompany360(
     opportunities,
     quotes: quotesResult.quotes,
     tasks,
-    portalUsers,
+    contacts,
     activity,
     errors,
   };
