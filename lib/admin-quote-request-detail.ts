@@ -23,9 +23,6 @@ const QUOTE_REQUEST_OPTIONAL_METADATA_COLUMNS = [
   "delivery_address_source",
 ] as const;
 
-type OptionalMetadataColumn =
-  (typeof QUOTE_REQUEST_OPTIONAL_METADATA_COLUMNS)[number];
-
 export type AdminQuoteRequestDetail = {
   id: string;
   company_id: string;
@@ -119,71 +116,25 @@ function emptyAddressMetadata(): Pick<
   };
 }
 
-async function loadOptionalMetadataColumn(
-  supabase: SupabaseClient,
-  routeId: string,
-  column: OptionalMetadataColumn
-): Promise<{
-  value: string | null;
-  missingColumn: boolean;
-  schemaCacheStale: boolean;
-  hardFailure: boolean;
-}> {
-  const { data, error } = await supabase
-    .from("quote_requests")
-    .select(column)
-    .eq("id", routeId)
-    .maybeSingle();
+const QUOTE_REQUEST_OPTIONAL_METADATA_SELECT =
+  QUOTE_REQUEST_OPTIONAL_METADATA_COLUMNS.join(", ");
 
-  if (error) {
-    logAdminQuoteRequestQueryError("address metadata", error, column);
-    const normalized = normalizeSupabaseQueryError(error);
+function mapAddressMetadataRow(
+  data: Record<string, unknown> | null | undefined
+): ReturnType<typeof emptyAddressMetadata> {
+  const metadata = emptyAddressMetadata();
 
-    if (isPostgrestSchemaCacheError(normalized)) {
-      return {
-        value: null,
-        missingColumn: true,
-        schemaCacheStale: true,
-        hardFailure: false,
-      };
-    }
-
-    if (isMissingColumnError(normalized)) {
-      return {
-        value: null,
-        missingColumn: true,
-        schemaCacheStale: false,
-        hardFailure: false,
-      };
-    }
-
-    return {
-      value: null,
-      missingColumn: false,
-      schemaCacheStale: false,
-      hardFailure: true,
-    };
+  for (const column of QUOTE_REQUEST_OPTIONAL_METADATA_COLUMNS) {
+    const rawValue = data?.[column];
+    metadata[column] =
+      typeof rawValue === "string"
+        ? rawValue
+        : rawValue == null
+          ? null
+          : String(rawValue);
   }
 
-  if (!data || typeof data !== "object") {
-    return {
-      value: null,
-      missingColumn: false,
-      schemaCacheStale: false,
-      hardFailure: false,
-    };
-  }
-
-  const rawValue = (data as Record<string, unknown>)[column];
-  const value =
-    typeof rawValue === "string" ? rawValue : rawValue == null ? null : String(rawValue);
-
-  return {
-    value,
-    missingColumn: false,
-    schemaCacheStale: false,
-    hardFailure: false,
-  };
+  return metadata;
 }
 
 async function loadAddressMetadata(
@@ -194,62 +145,100 @@ async function loadAddressMetadata(
   warning: string | null;
 }> {
   try {
-    const metadata = emptyAddressMetadata();
-    let loadedAny = false;
-    let missingAny = false;
-    let schemaCacheStale = false;
-    let hardFailure = false;
+    const { data, error } = await supabase
+      .from("quote_requests")
+      .select(QUOTE_REQUEST_OPTIONAL_METADATA_SELECT)
+      .eq("id", routeId)
+      .maybeSingle();
 
-    for (const column of QUOTE_REQUEST_OPTIONAL_METADATA_COLUMNS) {
-      const result = await loadOptionalMetadataColumn(supabase, routeId, column);
-
-      if (result.hardFailure) {
-        hardFailure = true;
-        break;
+    if (!error) {
+      if (process.env.NODE_ENV === "development") {
+        console.log("[admin quote request] address metadata loaded", {
+          routeId,
+          columnsAvailable: true,
+          values: mapAddressMetadataRow(
+            data as Record<string, unknown> | null | undefined
+          ),
+        });
       }
 
-      if (result.missingColumn) {
-        missingAny = true;
-        if (result.schemaCacheStale) {
-          schemaCacheStale = true;
-        }
-        continue;
-      }
-
-      metadata[column] = result.value;
-      if (result.value !== null) {
-        loadedAny = true;
-      }
-    }
-
-    if (hardFailure) {
       return {
-        metadata,
-        warning: "Extended delivery details could not be loaded.",
+        metadata: mapAddressMetadataRow(
+          data as Record<string, unknown> | null | undefined
+        ),
+        warning: null,
       };
     }
 
-    const warningParts: string[] = [];
+    const normalized = normalizeSupabaseQueryError(error);
+    logAdminQuoteRequestQueryError("address metadata", error);
 
-    if (schemaCacheStale) {
-      warningParts.push(
-        "PostgREST schema cache may be stale. Run: notify pgrst, 'reload schema';"
-      );
+    if (isPostgrestSchemaCacheError(normalized)) {
+      if (process.env.NODE_ENV === "development") {
+        console.log("[admin quote request] metadata warning trigger", {
+          routeId,
+          condition: "isPostgrestSchemaCacheError(normalized) === true",
+          code: normalized.code ?? null,
+          message: normalized.message ?? null,
+        });
+      }
+
+      return {
+        metadata: emptyAddressMetadata(),
+        warning:
+          "PostgREST schema cache may be stale. Run: notify pgrst, 'reload schema';",
+      };
     }
 
-    if (missingAny && !loadedAny) {
-      warningParts.push(
-        "Extended delivery address metadata is unavailable. Apply docs/proposed-quote-request-address-migration.sql to enable saved-address traceability fields."
-      );
-    } else if (missingAny) {
-      warningParts.push(
-        "Some extended delivery metadata columns are unavailable on quote_requests."
-      );
+    if (isMissingColumnError(normalized)) {
+      const missingColumns: string[] = [];
+
+      for (const column of QUOTE_REQUEST_OPTIONAL_METADATA_COLUMNS) {
+        const columnResult = await supabase
+          .from("quote_requests")
+          .select(column)
+          .eq("id", routeId)
+          .maybeSingle();
+
+        if (
+          columnResult.error &&
+          isMissingColumnError(normalizeSupabaseQueryError(columnResult.error))
+        ) {
+          missingColumns.push(column);
+        }
+      }
+
+      if (process.env.NODE_ENV === "development") {
+        console.log("[admin quote request] metadata warning trigger", {
+          routeId,
+          condition: "isMissingColumnError(normalized) === true",
+          code: normalized.code ?? null,
+          message: normalized.message ?? null,
+          missingColumns,
+        });
+      }
+
+      return {
+        metadata: emptyAddressMetadata(),
+        warning:
+          missingColumns.length > 0
+            ? `Extended delivery address metadata is unavailable. Missing quote_requests columns: ${missingColumns.join(", ")}. Apply docs/proposed-quote-request-address-migration.sql.`
+            : "Extended delivery address metadata is unavailable. Apply docs/proposed-quote-request-address-migration.sql to enable saved-address traceability fields.",
+      };
+    }
+
+    if (process.env.NODE_ENV === "development") {
+      console.log("[admin quote request] metadata warning trigger", {
+        routeId,
+        condition: "metadata query failed with non-schema error",
+        code: normalized.code ?? null,
+        message: normalized.message ?? null,
+      });
     }
 
     return {
-      metadata,
-      warning: warningParts.length > 0 ? warningParts.join(" ") : null,
+      metadata: emptyAddressMetadata(),
+      warning: "Extended delivery details could not be loaded.",
     };
   } catch (error) {
     logAdminQuoteRequestQueryError("address metadata", error);
