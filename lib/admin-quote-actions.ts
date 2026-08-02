@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
+import { createCrmActivity } from "@/lib/crm/create-crm-activity";
 import {
   applyQuoteStatusResponse,
   isQuoteAwaitingDecision,
@@ -130,14 +132,18 @@ export async function permanentlyDeleteQuoteAsAdmin(
   {
     quoteId,
     confirmation,
+    deletedBy,
   }: {
     quoteId: string;
     confirmation: string;
+    deletedBy: string;
   }
 ): Promise<PermanentDeleteQuoteResult> {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
-    .select("id, quote_number, status")
+    .select(
+      "id, quote_number, status, company_id, opportunity_id, contact_id, project_name"
+    )
     .eq("id", quoteId)
     .maybeSingle();
 
@@ -235,6 +241,31 @@ export async function permanentlyDeleteQuoteAsAdmin(
     if (deleteVersionsError) {
       return { ok: false, status: 500, message: deleteVersionsError.message };
     }
+  }
+
+  try {
+    await createCrmActivity(supabase, {
+      companyId: quote.company_id,
+      contactId: quote.contact_id,
+      opportunityId: quote.opportunity_id,
+      quoteId: quote.id,
+      activityType: CRM_ACTIVITY_TYPES.quoteDeleted,
+      description: `Quote Q-${quote.quote_number} permanently deleted.`,
+      metadata: {
+        quote_number: quote.quote_number,
+        project_name: quote.project_name,
+      },
+      actorProfileId: deletedBy,
+    });
+  } catch (activityError) {
+    return {
+      ok: false,
+      status: 500,
+      message:
+        activityError instanceof Error
+          ? activityError.message
+          : "Unable to record quote deletion activity.",
+    };
   }
 
   const { data: deletedQuote, error: deleteQuoteError } = await supabase

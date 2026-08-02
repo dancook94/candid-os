@@ -45,6 +45,7 @@ export async function POST(request: Request, context: RouteContext) {
   const result = await permanentlyDeleteQuoteAsAdmin(supabase, {
     quoteId: id,
     confirmation,
+    deletedBy: authResult.userId,
   });
 
   if (!result.ok) {
@@ -59,6 +60,7 @@ export async function POST(request: Request, context: RouteContext) {
 
   revalidatePath("/admin");
   revalidatePath("/admin/quotes");
+  revalidatePath("/admin/activity");
   revalidatePath("/dashboard");
   revalidatePath("/quotes");
 

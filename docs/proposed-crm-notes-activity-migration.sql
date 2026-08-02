@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS public.crm_activity (
   company_id                      uuid REFERENCES public.companies(id) ON DELETE CASCADE,
   contact_id                      uuid REFERENCES public.contacts(id) ON DELETE SET NULL,
   opportunity_id                  uuid REFERENCES public.opportunities(id) ON DELETE CASCADE,
-  quote_id                        uuid REFERENCES public.quotes(id) ON DELETE CASCADE,
+  quote_id                        uuid REFERENCES public.quotes(id) ON DELETE SET NULL,
   task_id                         uuid REFERENCES public.tasks(id) ON DELETE CASCADE,
   actor_profile_id                uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
   source_opportunity_activity_id  uuid UNIQUE,
@@ -359,11 +359,19 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
+  IF TG_OP = 'UPDATE'
+     AND OLD.quote_id IS NOT NULL
+     AND NEW.quote_id IS NULL
+     AND to_jsonb(OLD) - 'quote_id' = to_jsonb(NEW) - 'quote_id'
+  THEN
+    RETURN NEW;
+  END IF;
+
   IF public.is_approved_crm_admin() THEN
     RETURN OLD;
   END IF;
 
-  RAISE EXCEPTION 'CRM activity is append-only'
+  RAISE EXCEPTION 'CRM activity is immutable and cannot be updated or deleted'
     USING ERRCODE = 'insufficient_privilege';
 END;
 $$;
