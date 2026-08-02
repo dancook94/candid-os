@@ -2,6 +2,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { isDropboxConfigured } from "@/lib/dropbox/client";
 import {
+  getArtworkTableStatusLabel,
+} from "@/lib/jobs/upload-status-display";
+import {
   CUSTOMER_ARTWORK_STATUS_LABELS,
   JOB_STATUS_LABELS,
 } from "@/lib/jobs/constants";
@@ -342,8 +345,10 @@ export async function loadAdminJobDetail(adminClient: SupabaseClient, jobId: str
       uploaded_at: resolveArtworkUploadedAt(file),
       customer_notes: file.customer_notes?.trim() || null,
       uploadedByName: uploaderNameById.get(file.uploaded_by_profile_id) ?? null,
-      artworkStatusLabel:
-        CUSTOMER_ARTWORK_STATUS_LABELS[file.artwork_status] ?? file.artwork_status,
+      artworkStatusLabel: getArtworkTableStatusLabel(
+        file.upload_status,
+        file.artwork_status
+      ),
     })),
   };
 }

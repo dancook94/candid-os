@@ -4,7 +4,10 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
-import { CUSTOMER_ARTWORK_STATUS_LABELS } from "@/lib/jobs/constants";
+import {
+  getArtworkTableStatusLabel,
+  mapArtworkTableStatusToBadge,
+} from "@/lib/jobs/upload-status-display";
 import {
   formatArtworkCustomerNote,
   formatArtworkUploadedAt,
@@ -13,8 +16,12 @@ import type { CustomerJobFileView } from "@/lib/jobs/types";
 import { formatFileSize } from "@/lib/quote-request-attachments";
 import { JobArtworkUploader } from "@/components/job-artwork-uploader";
 
-function getCustomerArtworkStatusLabel(status: string) {
-  return CUSTOMER_ARTWORK_STATUS_LABELS[status] ?? status;
+function getCustomerArtworkStatusLabel(file: CustomerJobFileView) {
+  return getArtworkTableStatusLabel(file.uploadStatus, file.artworkStatus);
+}
+
+function mapArtworkStatusToBadge(file: CustomerJobFileView) {
+  return mapArtworkTableStatusToBadge(file.uploadStatus, file.artworkStatus);
 }
 
 type JobArtworkListProps = {
@@ -24,21 +31,6 @@ type JobArtworkListProps = {
   showArtworkRequired?: boolean;
   onChanged?: () => void;
 };
-
-function mapArtworkStatusToBadge(status: string) {
-  switch (status) {
-    case "approved":
-      return "approved" as const;
-    case "changes_required":
-      return "declined" as const;
-    case "under_review":
-      return "pending" as const;
-    case "superseded":
-      return "disabled" as const;
-    default:
-      return "draft" as const;
-  }
-}
 
 export function JobArtworkList({
   jobId,
@@ -104,8 +96,8 @@ export function JobArtworkList({
                     <td className="p-4 text-muted-foreground">v{file.versionNumber}</td>
                     <td className="p-4">
                       <StatusBadge
-                        status={mapArtworkStatusToBadge(file.artworkStatus)}
-                        label={getCustomerArtworkStatusLabel(file.artworkStatus)}
+                        status={mapArtworkStatusToBadge(file)}
+                        label={getCustomerArtworkStatusLabel(file)}
                       />
                     </td>
                     <td className="p-4 text-muted-foreground">

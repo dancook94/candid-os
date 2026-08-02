@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { reconcileArtworkUploadRecord } from "@/lib/jobs/reconcile-artwork-upload";
 import { JOB_ACTIVITY_TYPES, logJobActivity } from "@/lib/jobs/activity";
 import { JOB_LIST_COLUMNS } from "@/lib/jobs/job-select";
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
@@ -19,35 +20,27 @@ export type ReconcileAwaitingArtworkJobsResult = {
   errors: string[];
 };
 
-async function repairCompletedFileRecords(
+async function repairIncompleteFileRecords(
   adminClient: SupabaseClient,
   jobId: string
 ) {
   const { data: repairableFiles, error } = await adminClient
     .from("job_files")
-    .select("id, upload_status, dropbox_file_id, uploaded_at, created_at")
+    .select("id")
     .eq("job_id", jobId)
     .is("deleted_at", null)
-    .in("upload_status", ["failed", "processing"])
-    .not("dropbox_file_id", "is", null);
+    .in("upload_status", ["failed", "processing", "pending"]);
 
   if (error) {
     throw new Error(error.message);
   }
 
   for (const file of repairableFiles ?? []) {
-    const { error: updateError } = await adminClient
-      .from("job_files")
-      .update({
-        upload_status: "complete",
-        artwork_status: "uploaded",
-        uploaded_at: file.uploaded_at ?? file.created_at ?? new Date().toISOString(),
-      })
-      .eq("id", file.id);
-
-    if (updateError) {
-      throw new Error(updateError.message);
-    }
+    await reconcileArtworkUploadRecord(adminClient, {
+      jobFileId: file.id,
+      logActivity: false,
+      trigger: "awaiting_artwork_file_reconciliation",
+    });
   }
 }
 
@@ -55,7 +48,7 @@ async function jobHasCompletedUpload(
   adminClient: SupabaseClient,
   jobId: string
 ) {
-  await repairCompletedFileRecords(adminClient, jobId);
+  await repairIncompleteFileRecords(adminClient, jobId);
 
   const { count, error } = await adminClient
     .from("job_files")

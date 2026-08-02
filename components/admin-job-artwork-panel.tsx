@@ -6,10 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/status-badge";
+import type { JobUploadStatus } from "@/lib/jobs/types";
 import {
   formatArtworkCustomerNote,
   formatArtworkUploadedAt,
 } from "@/lib/jobs/artwork-display";
+import {
+  getArtworkTableStatusLabel,
+  mapArtworkTableStatusToBadge,
+} from "@/lib/jobs/upload-status-display";
 import { formatFileSize } from "@/lib/quote-request-attachments";
 
 type AdminJobFile = {
@@ -32,19 +37,18 @@ type AdminJobArtworkPanelProps = {
   files: AdminJobFile[];
 };
 
-function mapArtworkStatusToBadge(status: string) {
-  switch (status) {
-    case "approved":
-      return "approved" as const;
-    case "changes_required":
-      return "declined" as const;
-    case "under_review":
-      return "pending" as const;
-    case "superseded":
-      return "disabled" as const;
-    default:
-      return "draft" as const;
-  }
+function getAdminArtworkStatusLabel(file: AdminJobFile) {
+  return getArtworkTableStatusLabel(
+    file.upload_status as JobUploadStatus,
+    file.artwork_status
+  );
+}
+
+function mapArtworkStatusToBadge(file: AdminJobFile) {
+  return mapArtworkTableStatusToBadge(
+    file.upload_status as JobUploadStatus,
+    file.artwork_status
+  );
 }
 
 export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps) {
@@ -53,6 +57,27 @@ export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps
   const [changesComments, setChangesComments] = useState<Record<string, string>>({});
   const [internalNotesByFile, setInternalNotesByFile] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [reconcilingFileId, setReconcilingFileId] = useState<string | null>(null);
+
+  async function reconcileUpload(fileId: string) {
+    setError(null);
+    setReconcilingFileId(fileId);
+
+    const response = await fetch(
+      `/api/admin/jobs/${jobId}/files/${fileId}/reconcile-upload`,
+      { method: "POST" }
+    );
+
+    const payload = (await response.json()) as { error?: string; ok?: boolean };
+    setReconcilingFileId(null);
+
+    if (!response.ok || !payload.ok) {
+      setError(payload.error ?? "Unable to reconcile artwork upload.");
+      return;
+    }
+
+    window.location.reload();
+  }
 
   async function updateStatus(
     fileId: string,
@@ -116,8 +141,8 @@ export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps
                     <td className="p-4 text-muted-foreground">v{file.version_number}</td>
                     <td className="p-4">
                       <StatusBadge
-                        status={mapArtworkStatusToBadge(file.artwork_status)}
-                        label={file.artworkStatusLabel}
+                        status={mapArtworkStatusToBadge(file)}
+                        label={getAdminArtworkStatusLabel(file)}
                       />
                     </td>
                     <td className="p-4 text-muted-foreground">
@@ -140,6 +165,17 @@ export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps
                               Download
                             </Button>
                           </a>
+                        ) : null}
+                        {file.upload_status !== "complete" ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={reconcilingFileId === file.id}
+                            onClick={() => reconcileUpload(file.id)}
+                          >
+                            Reconcile
+                          </Button>
                         ) : null}
                         <Button
                           type="button"

@@ -207,17 +207,88 @@ export type DropboxFolderMetadata = {
   path_display: string;
 };
 
+type DropboxMetadataPayload =
+  | DropboxFileMetadata
+  | DropboxFolderMetadata
+  | { metadata?: DropboxFileMetadata | DropboxFolderMetadata | null };
+
+function normalizeDropboxMetadataResponse(
+  response: DropboxMetadataPayload
+): DropboxFileMetadata | DropboxFolderMetadata {
+  if (
+    response &&
+    typeof response === "object" &&
+    "metadata" in response &&
+    response.metadata &&
+    typeof response.metadata === "object"
+  ) {
+    return response.metadata;
+  }
+
+  return response as DropboxFileMetadata | DropboxFolderMetadata;
+}
+
+export async function getDropboxFileMetadataByPath(path: string) {
+  try {
+    const metadata = normalizeDropboxMetadataResponse(
+      await dropboxApiRequest<DropboxMetadataPayload>("/2/files/get_metadata", {
+        body: {
+          path,
+          include_media_info: false,
+          include_deleted: false,
+        },
+      })
+    );
+
+    if (
+      metadata &&
+      typeof metadata === "object" &&
+      "id" in metadata &&
+      "path_lower" in metadata &&
+      "rev" in metadata
+    ) {
+      return metadata as DropboxFileMetadata;
+    }
+
+    return null;
+  } catch (error) {
+    if (error instanceof DropboxError) {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+export async function listDropboxFolderFiles(folderPath: string) {
+  const response = await dropboxApiRequest<{
+    entries?: DropboxFileMetadata[];
+  }>("/2/files/list_folder", {
+    body: {
+      path: folderPath,
+      recursive: false,
+      include_deleted: false,
+    },
+  });
+
+  return (response.entries ?? []).filter(
+    (entry): entry is DropboxFileMetadata =>
+      Boolean(entry && typeof entry === "object" && "rev" in entry && "id" in entry)
+  );
+}
+
 export async function getDropboxMetadata(path: string) {
-  return dropboxApiRequest<{ metadata: DropboxFileMetadata | DropboxFolderMetadata }>(
-    "/2/files/get_metadata",
-    {
+  const metadata = normalizeDropboxMetadataResponse(
+    await dropboxApiRequest<DropboxMetadataPayload>("/2/files/get_metadata", {
       body: {
         path,
         include_media_info: false,
         include_deleted: false,
       },
-    }
+    })
   );
+
+  return { metadata };
 }
 
 export async function createDropboxFolder(path: string) {

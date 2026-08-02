@@ -1,3 +1,4 @@
+import type { PostgrestError } from "@supabase/supabase-js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { DropboxError, isDropboxConfigured } from "@/lib/dropbox/client";
@@ -25,6 +26,19 @@ import type { JobFileRecord } from "@/lib/jobs/types";
 import { syncJobStatusAfterArtworkUpload } from "@/lib/jobs/job-status-sync";
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
 import { createAdminClient } from "@/lib/supabase/admin";
+
+function formatSupabaseError(error: PostgrestError | null) {
+  if (!error) {
+    return null;
+  }
+
+  return {
+    message: error.message,
+    code: error.code,
+    details: error.details,
+    hint: error.hint,
+  };
+}
 
 function logArtworkUploadStep(
   step: string,
@@ -178,7 +192,6 @@ export async function createArtworkUploadSession(
       jobId,
       userId,
       companyId,
-      dropboxPath,
       message: error instanceof Error ? error.message : "Dropbox upload failed.",
     });
 
@@ -195,13 +208,12 @@ export async function createArtworkUploadSession(
       jobId,
       userId,
       companyId,
-      dropboxPath,
       message: "Dropbox did not return a session id.",
     });
     throw new JobError("Dropbox upload failed.", 502);
   }
 
-  const { data: fileRecord, error } = await adminClient
+  const { data: pendingRecord, error: insertError } = await adminClient
     .from("job_files")
     .insert({
       job_id: jobId,
@@ -212,10 +224,8 @@ export async function createArtworkUploadSession(
       file_extension: getArtworkExtension(input.fileName),
       mime_type: input.mimeType?.trim() || null,
       file_size_bytes: input.fileSizeBytes,
-      dropbox_upload_session_id: dropboxSession.session_id,
-      upload_session_offset: 0,
-      upload_status: "uploading",
-      artwork_status: input.supersedesFileId ? "uploaded" : "uploaded",
+      upload_status: "pending",
+      artwork_status: "uploaded",
       customer_notes: input.customerNotes?.trim() || null,
       version_number: versionNumber,
       supersedes_file_id: input.supersedesFileId ?? null,
@@ -227,13 +237,44 @@ export async function createArtworkUploadSession(
     jobId,
     userId,
     companyId,
-    uploadRecordId: fileRecord?.id ?? null,
-    insertError: error?.message ?? null,
+    uploadRecordId: pendingRecord?.id ?? null,
+    supabase: formatSupabaseError(insertError),
   });
 
-  if (error || !fileRecord?.id) {
+  if (insertError || !pendingRecord?.id) {
     throw new JobError(
-      error?.message ?? "Artwork record could not be created.",
+      insertError?.message ?? "Artwork record could not be created.",
+      500
+    );
+  }
+
+  const { data: fileRecord, error: sessionUpdateError } = await adminClient
+    .from("job_files")
+    .update({
+      dropbox_upload_session_id: dropboxSession.session_id,
+      upload_session_offset: 0,
+      upload_status: "uploading",
+    })
+    .eq("id", pendingRecord.id)
+    .select("*")
+    .single();
+
+  logArtworkUploadStep("database_uploading", {
+    jobId,
+    userId,
+    companyId,
+    uploadRecordId: fileRecord?.id ?? null,
+    supabase: formatSupabaseError(sessionUpdateError),
+  });
+
+  if (sessionUpdateError || !fileRecord?.id) {
+    await adminClient
+      .from("job_files")
+      .update({ upload_status: "failed" })
+      .eq("id", pendingRecord.id);
+
+    throw new JobError(
+      sessionUpdateError?.message ?? "Artwork record could not be created.",
       500
     );
   }
@@ -370,13 +411,10 @@ export async function finishArtworkUpload(
     jobId,
     userId,
     companyId,
-    fileId: file.id,
-    uploadRecord: {
-      upload_status: file.upload_status,
-      upload_session_offset: uploadedOffset,
-      file_size_bytes: file.file_size_bytes,
-      dropbox_path: dropboxPath,
-    },
+    uploadRecordId: file.id,
+    uploadStatus: file.upload_status,
+    uploadedBytes: uploadedOffset,
+    expectedBytes: file.file_size_bytes,
   });
 
   await adminClient
@@ -456,17 +494,12 @@ export async function finishArtworkUpload(
     throw new JobError("Dropbox upload failed.", 502);
   }
 
-  logArtworkUploadStep("dropbox_finish", {
+  logArtworkUploadStep("dropbox_commit_success", {
     jobId,
     userId,
     companyId,
-    fileId: file.id,
-    dropboxUploadResponse: {
-      id: dropboxMetadata.id,
-      path_lower: dropboxMetadata.path_lower,
-      rev: dropboxMetadata.rev,
-      content_hash: dropboxMetadata.content_hash ?? null,
-    },
+    uploadRecordId: file.id,
+    dropboxFileIdPresent: true,
   });
 
   if (file.supersedes_file_id) {
@@ -491,6 +524,7 @@ export async function finishArtworkUpload(
     artwork_status: "uploaded" as const,
     uploaded_at: now,
     customer_notes: file.customer_notes?.trim() || null,
+    file_size_bytes: dropboxMetadata.size ?? file.file_size_bytes,
   };
 
   const { data: completedFile, error: completeError } = await adminClient
@@ -504,11 +538,9 @@ export async function finishArtworkUpload(
     jobId,
     userId,
     companyId,
-    fileId: file.id,
-    databaseInsertResponse: {
-      recordId: completedFile?.id ?? null,
-      error: completeError?.message ?? null,
-    },
+    uploadRecordId: file.id,
+    recordId: completedFile?.id ?? null,
+    supabase: formatSupabaseError(completeError),
   });
 
   if (completeError || !completedFile?.id) {
@@ -524,16 +556,35 @@ export async function finishArtworkUpload(
         upload_status: "processing",
         uploaded_at: now,
         customer_notes: file.customer_notes?.trim() || null,
+        file_size_bytes: dropboxMetadata.size ?? file.file_size_bytes,
       })
       .eq("id", file.id);
 
     throw new JobError(
-      completeError?.message ?? "Artwork record could not be created.",
+      completeError?.message ?? "Artwork record could not be completed.",
       500
     );
   }
 
-  await syncJobStatusAfterArtworkUpload(adminClient, jobId);
+  try {
+    const jobStatusResult = await syncJobStatusAfterArtworkUpload(adminClient, jobId);
+
+    logArtworkUploadStep("job_status_update", {
+      jobId,
+      uploadRecordId: file.id,
+      updated: jobStatusResult.updated,
+      status: jobStatusResult.status,
+    });
+  } catch (jobStatusError) {
+    logArtworkUploadStep("job_status_update_failed", {
+      jobId,
+      uploadRecordId: file.id,
+      message:
+        jobStatusError instanceof Error
+          ? jobStatusError.message
+          : "Job status update failed.",
+    });
+  }
 
   try {
     await logJobActivity(adminClient, {
@@ -557,9 +608,9 @@ export async function finishArtworkUpload(
       },
     });
   } catch (activityError) {
-    logArtworkUploadStep("activity_log_failed", {
+    logArtworkUploadStep("activity_insert_failed", {
       jobId,
-      fileId: file.id,
+      uploadRecordId: file.id,
       message:
         activityError instanceof Error
           ? activityError.message
@@ -567,17 +618,39 @@ export async function finishArtworkUpload(
     });
   }
 
-  prepareArtworkUploadedNotification({
-    companyId,
-    jobId,
-    fileId: file.id,
-  });
+  try {
+    prepareArtworkUploadedNotification({
+      companyId,
+      jobId,
+      fileId: file.id,
+    });
+  } catch (notificationError) {
+    logArtworkUploadStep("notification_prepare_failed", {
+      jobId,
+      uploadRecordId: file.id,
+      message:
+        notificationError instanceof Error
+          ? notificationError.message
+          : "Unable to prepare artwork notification.",
+    });
+  }
 
-  revalidateJobPages({
-    jobId,
-    quoteId: context.job.quote_id,
-    opportunityId: context.job.opportunity_id,
-  });
+  try {
+    revalidateJobPages({
+      jobId,
+      quoteId: context.job.quote_id,
+      opportunityId: context.job.opportunity_id,
+    });
+  } catch (revalidationError) {
+    logArtworkUploadStep("revalidation_failed", {
+      jobId,
+      uploadRecordId: file.id,
+      message:
+        revalidationError instanceof Error
+          ? revalidationError.message
+          : "Route revalidation failed.",
+    });
+  }
 
   return completedFile as JobFileRecord;
 }
