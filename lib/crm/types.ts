@@ -78,6 +78,13 @@ export type TaskRecord = {
   updated_at: string;
 };
 
+export type TaskAssigneeRecord = {
+  task_id: string;
+  profile_id: string;
+  assigned_at: string;
+  assigned_by: string | null;
+};
+
 export type OpportunityNoteRecord = {
   id: string;
   opportunity_id: string;

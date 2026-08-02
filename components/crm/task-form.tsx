@@ -3,13 +3,13 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { StaffMultiSelect } from "@/components/crm/staff-multi-select";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { OPPORTUNITY_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
 import type { CrmStaffProfile } from "@/lib/crm/crm-staff";
 import {
   getTaskPriorityOptions,
@@ -20,7 +20,6 @@ import {
   toDateTimeLocalValue,
 } from "@/lib/crm/format-datetime";
 import type { TaskPriority, TaskStatus } from "@/lib/crm/types";
-import { createClient } from "@/lib/supabase/client";
 
 type CompanyOption = {
   id: string;
@@ -53,7 +52,7 @@ type TaskFormProps = {
   initialValues?: {
     title: string;
     description: string;
-    assignedTo: string;
+    assigneeProfileIds: string[];
     dueAt: string;
     priority: TaskPriority;
     status: TaskStatus;
@@ -80,14 +79,13 @@ export function TaskForm({
   successHref,
 }: TaskFormProps) {
   const router = useRouter();
-  const supabase = createClient();
 
   const [title, setTitle] = useState(initialValues?.title ?? "");
   const [description, setDescription] = useState(
     initialValues?.description ?? ""
   );
-  const [assignedTo, setAssignedTo] = useState(
-    initialValues?.assignedTo ?? currentUserId
+  const [assigneeProfileIds, setAssigneeProfileIds] = useState<string[]>(
+    initialValues?.assigneeProfileIds ?? [currentUserId]
   );
   const [dueAt, setDueAt] = useState(initialValues?.dueAt ?? "");
   const [priority, setPriority] = useState<TaskPriority>(
@@ -139,26 +137,6 @@ export function TaskForm({
     }
   }, [opportunityId, opportunities, quoteId, quotes]);
 
-  async function logTaskActivity(
-    targetOpportunityId: string,
-    activityType: string,
-    description: string
-  ) {
-    const { error: activityError } = await supabase
-      .from("opportunity_activity")
-      .insert({
-        opportunity_id: targetOpportunityId,
-        activity_type: activityType,
-        description,
-        metadata: { task_id: taskId ?? null },
-        created_by: currentUserId,
-      });
-
-    if (activityError) {
-      throw new Error(activityError.message);
-    }
-  }
-
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
@@ -170,8 +148,8 @@ export function TaskForm({
       return;
     }
 
-    if (!assignedTo) {
-      setError("Assignee is required.");
+    if (assigneeProfileIds.length === 0) {
+      setError("At least one assignee is required.");
       return;
     }
 
@@ -181,99 +159,41 @@ export function TaskForm({
       const payload = {
         title: trimmedTitle,
         description: description.trim() || null,
-        assigned_to: assignedTo,
-        due_at: parseDateTimeLocalValue(dueAt),
+        assigneeProfileIds,
+        dueAt: parseDateTimeLocalValue(dueAt),
         priority,
         status,
-        opportunity_id: opportunityId || null,
-        quote_id: quoteId || null,
-        company_id: companyId || null,
-        completed_at: status === "completed" ? new Date().toISOString() : null,
+        opportunityId: opportunityId || null,
+        quoteId: quoteId || null,
+        companyId: companyId || null,
       };
 
-      if (mode === "create") {
-        const { data: created, error: insertError } = await supabase
-          .from("tasks")
-          .insert({
-            ...payload,
-            created_by: currentUserId,
-          })
-          .select("id, opportunity_id")
-          .single();
+      const endpoint =
+        mode === "create"
+          ? "/api/crm/tasks"
+          : `/api/crm/tasks/${taskId}`;
 
-        if (insertError || !created) {
-          throw new Error(insertError?.message ?? "Unable to create task.");
-        }
+      const response = await fetch(endpoint, {
+        method: mode === "create" ? "POST" : "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-        if (created.opportunity_id) {
-          await logTaskActivity(
-            created.opportunity_id,
-            OPPORTUNITY_ACTIVITY_TYPES.taskCreated,
-            `Task "${trimmedTitle}" created.`
-          );
-        }
+      const result = (await response.json()) as {
+        error?: string;
+        taskId?: string;
+      };
 
-        router.push(
-          successHref ??
-            (created.opportunity_id
-              ? `/admin/opportunities/${created.opportunity_id}`
-              : "/admin/tasks")
-        );
-        router.refresh();
-        return;
+      if (!response.ok) {
+        throw new Error(result.error ?? "Unable to save task.");
       }
 
-      if (!taskId) {
-        throw new Error("Task ID is required for editing.");
-      }
-
-      const { data: existing, error: existingError } = await supabase
-        .from("tasks")
-        .select("status, opportunity_id")
-        .eq("id", taskId)
-        .single();
-
-      if (existingError || !existing) {
-        throw new Error(existingError?.message ?? "Task not found.");
-      }
-
-      const { error: updateError } = await supabase
-        .from("tasks")
-        .update(payload)
-        .eq("id", taskId);
-
-      if (updateError) {
-        throw new Error(updateError.message);
-      }
-
-      const targetOpportunityId =
-        payload.opportunity_id ?? existing.opportunity_id;
-
-      if (targetOpportunityId) {
-        if (
-          existing.status !== "completed" &&
-          payload.status === "completed"
-        ) {
-          await logTaskActivity(
-            targetOpportunityId,
-            OPPORTUNITY_ACTIVITY_TYPES.taskCompleted,
-            `Task "${trimmedTitle}" completed.`
-          );
-        }
-
-        if (
-          existing.status === "completed" &&
-          payload.status !== "completed"
-        ) {
-          await logTaskActivity(
-            targetOpportunityId,
-            OPPORTUNITY_ACTIVITY_TYPES.taskReopened,
-            `Task "${trimmedTitle}" reopened.`
-          );
-        }
-      }
-
-      router.push(successHref ?? "/admin/tasks");
+      router.push(
+        successHref ??
+          (payload.opportunityId
+            ? `/admin/opportunities/${payload.opportunityId}`
+            : "/admin/tasks")
+      );
       router.refresh();
     } catch (submitError) {
       setError(
@@ -314,20 +234,13 @@ export function TaskForm({
               />
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="assignedTo">Assigned to</Label>
-              <Select
-                id="assignedTo"
-                value={assignedTo}
-                onChange={(event) => setAssignedTo(event.target.value)}
-                required
-              >
-                {crmStaff.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.full_name?.trim() || "Unnamed staff member"}
-                  </option>
-                ))}
-              </Select>
+            <div className="space-y-2 md:col-span-2">
+              <StaffMultiSelect
+                staff={crmStaff}
+                selectedIds={assigneeProfileIds}
+                onChange={setAssigneeProfileIds}
+                minSelected={1}
+              />
             </div>
 
             <div className="space-y-2">
@@ -465,11 +378,14 @@ export function buildTaskFormInitialValues(task: {
   opportunity_id: string | null;
   quote_id: string | null;
   company_id: string | null;
-}) {
+}, assigneeProfileIds?: string[]) {
   return {
     title: task.title,
     description: task.description ?? "",
-    assignedTo: task.assigned_to,
+    assigneeProfileIds:
+      assigneeProfileIds && assigneeProfileIds.length > 0
+        ? assigneeProfileIds
+        : [task.assigned_to],
     dueAt: toDateTimeLocalValue(task.due_at),
     priority: task.priority,
     status: task.status,

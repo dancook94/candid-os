@@ -1,10 +1,14 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  StaffMultiSelect,
+  StaffOwnerSelect,
+} from "@/components/crm/staff-multi-select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
@@ -155,58 +159,6 @@ export function OpportunityForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const availableCollaborators = useMemo(
-    () => crmStaff.filter((member) => member.id !== ownerId),
-    [crmStaff, ownerId]
-  );
-
-  function toggleCollaborator(profileId: string) {
-    setCollaboratorIds((current) =>
-      current.includes(profileId)
-        ? current.filter((id) => id !== profileId)
-        : [...current, profileId]
-    );
-  }
-
-  async function syncCollaborators(
-    targetOpportunityId: string,
-    previousCollaboratorIds: string[]
-  ) {
-    const toAdd = collaboratorIds.filter(
-      (id) => !previousCollaboratorIds.includes(id)
-    );
-    const toRemove = previousCollaboratorIds.filter(
-      (id) => !collaboratorIds.includes(id)
-    );
-
-    if (toRemove.length > 0) {
-      const { error: deleteError } = await supabase
-        .from("opportunity_members")
-        .delete()
-        .eq("opportunity_id", targetOpportunityId)
-        .in("profile_id", toRemove);
-
-      if (deleteError) {
-        throw new Error(deleteError.message);
-      }
-    }
-
-    if (toAdd.length > 0) {
-      const { error: insertError } = await supabase
-        .from("opportunity_members")
-        .insert(
-          toAdd.map((profileId) => ({
-            opportunity_id: targetOpportunityId,
-            profile_id: profileId,
-          }))
-        );
-
-      if (insertError) {
-        throw new Error(insertError.message);
-      }
-    }
-  }
-
   async function logActivity(
     targetOpportunityId: string,
     activityType: string,
@@ -321,9 +273,7 @@ export function OpportunityForm({
       }
 
       const previousStage = initialValues?.stage ?? "new_enquiry";
-      const previousOwnerId = initialValues?.ownerId ?? ownerId;
       const previousEstimatedValue = initialValues?.estimatedValue ?? "";
-      const previousCollaboratorIds = initialValues?.collaboratorIds ?? [];
       const timestamps = buildStageTimestamps(stage, previousStage);
 
       const { error: updateError } = await supabase
@@ -333,7 +283,6 @@ export function OpportunityForm({
           description: description.trim() || null,
           estimated_value: parsedEstimatedValue,
           stage,
-          owner_profile_id: ownerId,
           expected_close_date: parseDateInputValue(expectedCloseDate),
           next_follow_up_at: parseDateTimeLocalValue(nextFollowUpAt),
           source,
@@ -346,7 +295,27 @@ export function OpportunityForm({
         throw new Error(updateError.message);
       }
 
-      await syncCollaborators(opportunityId, previousCollaboratorIds);
+      const assignmentResponse = await fetch(
+        `/api/crm/opportunities/${opportunityId}/assignments`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ownerProfileId: ownerId,
+            collaboratorProfileIds: collaboratorIds,
+          }),
+        }
+      );
+
+      const assignmentPayload = (await assignmentResponse.json()) as {
+        error?: string;
+      };
+
+      if (!assignmentResponse.ok) {
+        throw new Error(
+          assignmentPayload.error ?? "Unable to update assignments."
+        );
+      }
 
       if (previousStage !== stage) {
         await logActivity(
@@ -354,30 +323,6 @@ export function OpportunityForm({
           OPPORTUNITY_ACTIVITY_TYPES.stageChanged,
           `Stage changed from ${previousStage.replaceAll("_", " ")} to ${stage.replaceAll("_", " ")}.`,
           { from: previousStage, to: stage }
-        );
-      }
-
-      if (previousOwnerId !== ownerId) {
-        await logActivity(
-          opportunityId,
-          OPPORTUNITY_ACTIVITY_TYPES.ownerChanged,
-          "Opportunity owner changed.",
-          { from: previousOwnerId, to: ownerId }
-        );
-      }
-
-      const previousCollaboratorKey = [...previousCollaboratorIds].sort().join(",");
-      const nextCollaboratorKey = [...collaboratorIds].sort().join(",");
-
-      if (previousCollaboratorKey !== nextCollaboratorKey) {
-        await logActivity(
-          opportunityId,
-          OPPORTUNITY_ACTIVITY_TYPES.collaboratorsChanged,
-          "Collaborators updated.",
-          {
-            from: previousCollaboratorIds,
-            to: collaboratorIds,
-          }
         );
       }
 
@@ -497,27 +442,16 @@ export function OpportunityForm({
               </div>
             ) : null}
 
-            <div className="space-y-2">
-              <Label htmlFor="owner">Owner</Label>
-              <Select
-                id="owner"
-                value={ownerId}
-                onChange={(event) => {
-                  const nextOwnerId = event.target.value;
-                  setOwnerId(nextOwnerId);
-                  setCollaboratorIds((current) =>
-                    current.filter((id) => id !== nextOwnerId)
-                  );
-                }}
-                required
-              >
-                {crmStaff.map((member) => (
-                  <option key={member.id} value={member.id}>
-                    {member.full_name?.trim() || "Unnamed staff member"}
-                  </option>
-                ))}
-              </Select>
-            </div>
+            <StaffOwnerSelect
+              staff={crmStaff}
+              value={ownerId}
+              onChange={(nextOwnerId) => {
+                setOwnerId(nextOwnerId);
+                setCollaboratorIds((current) =>
+                  current.filter((id) => id !== nextOwnerId)
+                );
+              }}
+            />
 
             <div className="space-y-2">
               <Label htmlFor="source">Source</Label>
@@ -557,31 +491,14 @@ export function OpportunityForm({
             </div>
           </div>
 
-          <div className="space-y-3">
-            <Label>Collaborators</Label>
-            <div className="grid gap-2 rounded-xl border border-border p-4 md:grid-cols-2">
-              {availableCollaborators.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No other CRM staff available.
-                </p>
-              ) : (
-                availableCollaborators.map((member) => (
-                  <label
-                    key={member.id}
-                    className="flex items-center gap-2 text-sm"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={collaboratorIds.includes(member.id)}
-                      onChange={() => toggleCollaborator(member.id)}
-                      className="rounded border-input"
-                    />
-                    <span>{member.full_name?.trim() || "Unnamed staff member"}</span>
-                  </label>
-                ))
-              )}
-            </div>
-          </div>
+          <StaffMultiSelect
+            label="Collaborators"
+            staff={crmStaff}
+            selectedIds={collaboratorIds}
+            onChange={setCollaboratorIds}
+            excludeIds={[ownerId]}
+            minSelected={0}
+          />
 
           {error ? (
             <p className="text-sm text-destructive" role="alert">

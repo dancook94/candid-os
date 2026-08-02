@@ -1,5 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { getStaffDisplayName } from "@/lib/crm/crm-staff";
+import {
+  loadTaskAssigneesByTaskIds,
+  loadTaskIdsForAssignee,
+  type TaskAssigneeProfile,
+} from "@/lib/crm/task-assignees";
 import {
   isTaskPriority,
   isTaskStatus,
@@ -51,6 +57,7 @@ export type TaskListRow = {
   description: string | null;
   assigned_to: string;
   assignee_name: string;
+  assignees: TaskAssigneeProfile[];
   due_at: string | null;
   completed_at: string | null;
   status: TaskStatus;
@@ -204,7 +211,8 @@ type TaskRecord = {
 function applyViewFilter(
   records: TaskRecord[],
   view: TaskListView,
-  currentUserId: string
+  currentUserId: string,
+  assigneesByTaskId: Map<string, TaskAssigneeProfile[]>
 ) {
   const now = new Date();
   const todayStart = new Date(now);
@@ -214,7 +222,15 @@ function applyViewFilter(
 
   switch (view) {
     case "my":
-      return records.filter((record) => record.assigned_to === currentUserId);
+      return records.filter((record) => {
+        const assignees = assigneesByTaskId.get(record.id) ?? [];
+
+        if (assignees.some((assignee) => assignee.id === currentUserId)) {
+          return true;
+        }
+
+        return record.assigned_to === currentUserId;
+      });
     case "today":
       return records.filter((record) => {
         if (!record.due_at || !OPEN_TASK_STATUSES.includes(record.status)) {
@@ -256,7 +272,16 @@ export async function fetchTasksList(
   let query = supabase.from("tasks").select("*");
 
   if (filters.assigneeId) {
-    query = query.eq("assigned_to", filters.assigneeId);
+    const taskIdsForAssignee = await loadTaskIdsForAssignee(
+      supabase,
+      filters.assigneeId
+    );
+
+    if (taskIdsForAssignee && taskIdsForAssignee.length > 0) {
+      query = query.in("id", taskIdsForAssignee);
+    } else {
+      query = query.eq("assigned_to", filters.assigneeId);
+    }
   }
 
   if (filters.status) {
@@ -305,7 +330,15 @@ export async function fetchTasksList(
   }
 
   let records = (taskRows ?? []) as TaskRecord[];
-  records = applyViewFilter(records, filters.view, currentUserId);
+  const taskIds = records.map((record) => record.id);
+  const assigneesByTaskId = await loadTaskAssigneesByTaskIds(supabase, taskIds);
+
+  records = applyViewFilter(
+    records,
+    filters.view,
+    currentUserId,
+    assigneesByTaskId
+  );
 
   if (records.length === 0) {
     return {
@@ -315,7 +348,6 @@ export async function fetchTasksList(
     };
   }
 
-  const assigneeIds = [...new Set(records.map((record) => record.assigned_to))];
   const opportunityIds = [
     ...new Set(
       records
@@ -331,32 +363,21 @@ export async function fetchTasksList(
     ),
   ];
 
-  const [{ data: assignees }, { data: opportunities }, { data: companies }] =
-    await Promise.all([
-      supabase
-        .from("profiles")
-        .select("id, full_name")
-        .in("id", assigneeIds),
-      opportunityIds.length > 0
-        ? supabase
-            .from("opportunities")
-            .select("id, title")
-            .in("id", opportunityIds)
-        : Promise.resolve({ data: [] as { id: string; title: string }[] }),
-      companyIds.length > 0
-        ? supabase
-            .from("companies")
-            .select("id, company_name")
-            .in("id", companyIds)
-        : Promise.resolve({ data: [] as { id: string; company_name: string }[] }),
-    ]);
+  const [{ data: opportunities }, { data: companies }] = await Promise.all([
+    opportunityIds.length > 0
+      ? supabase
+          .from("opportunities")
+          .select("id, title")
+          .in("id", opportunityIds)
+      : Promise.resolve({ data: [] as { id: string; title: string }[] }),
+    companyIds.length > 0
+      ? supabase
+          .from("companies")
+          .select("id, company_name")
+          .in("id", companyIds)
+      : Promise.resolve({ data: [] as { id: string; company_name: string }[] }),
+  ]);
 
-  const assigneeNameById = new Map(
-    (assignees ?? []).map((profile) => [
-      profile.id,
-      profile.full_name?.trim() || "Unnamed staff member",
-    ])
-  );
   const opportunityTitleById = new Map(
     (opportunities ?? []).map((opportunity) => [
       opportunity.id,
@@ -367,29 +388,36 @@ export async function fetchTasksList(
     (companies ?? []).map((company) => [company.id, company.company_name])
   );
 
-  const tasks: TaskListRow[] = records.map((record) => ({
-    id: record.id,
-    title: record.title,
-    description: record.description,
-    assigned_to: record.assigned_to,
-    assignee_name:
-      assigneeNameById.get(record.assigned_to) ?? "Unnamed staff member",
-    due_at: record.due_at,
-    completed_at: record.completed_at,
-    status: record.status,
-    priority: record.priority,
-    opportunity_id: record.opportunity_id,
-    opportunity_title: record.opportunity_id
-      ? opportunityTitleById.get(record.opportunity_id) ?? null
-      : null,
-    company_id: record.company_id,
-    company_name: record.company_id
-      ? companyNameById.get(record.company_id) ?? null
-      : null,
-    quote_id: record.quote_id,
-    updated_at: record.updated_at,
-    created_at: record.created_at,
-  }));
+  const tasks: TaskListRow[] = records.map((record) => {
+    const assignees = assigneesByTaskId.get(record.id) ?? [];
+    const primaryAssignee = assignees[0];
+
+    return {
+      id: record.id,
+      title: record.title,
+      description: record.description,
+      assigned_to: record.assigned_to,
+      assignee_name: primaryAssignee
+        ? getStaffDisplayName(primaryAssignee)
+        : "Unnamed staff member",
+      assignees,
+      due_at: record.due_at,
+      completed_at: record.completed_at,
+      status: record.status,
+      priority: record.priority,
+      opportunity_id: record.opportunity_id,
+      opportunity_title: record.opportunity_id
+        ? opportunityTitleById.get(record.opportunity_id) ?? null
+        : null,
+      company_id: record.company_id,
+      company_name: record.company_id
+        ? companyNameById.get(record.company_id) ?? null
+        : null,
+      quote_id: record.quote_id,
+      updated_at: record.updated_at,
+      created_at: record.created_at,
+    };
+  });
 
   return {
     tasks,

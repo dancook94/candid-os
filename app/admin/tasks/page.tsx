@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/app-shell";
+import { TaskAssigneeDisplay } from "@/components/crm/task-assignee-display";
 import { TaskPriorityBadge } from "@/components/crm/task-badges";
 import { TaskStatusToggle } from "@/components/crm/task-status-toggle";
 import { EmptyState } from "@/components/empty-state";
@@ -265,7 +266,7 @@ export default async function AdminTasksPage({
                     <th className="px-6 py-3 font-medium">Task</th>
                     <th className="px-6 py-3 font-medium">Opportunity</th>
                     <th className="px-6 py-3 font-medium">Company</th>
-                    <th className="px-6 py-3 font-medium">Assigned to</th>
+                    <th className="px-6 py-3 font-medium">Assigned staff</th>
                     <th className="px-6 py-3 font-medium">Due</th>
                     <th className="px-6 py-3 font-medium">Priority</th>
                     <th className="px-6 py-3 font-medium">Status</th>
@@ -292,7 +293,9 @@ export default async function AdminTasksPage({
                         )}
                       </td>
                       <td className="px-6 py-4">{task.company_name ?? "—"}</td>
-                      <td className="px-6 py-4">{task.assignee_name}</td>
+                      <td className="px-6 py-4">
+                        <TaskAssigneeDisplay assignees={task.assignees} />
+                      </td>
                       <td className="px-6 py-4">
                         {formatCrmDateTime(task.due_at)}
                       </td>
@@ -302,10 +305,7 @@ export default async function AdminTasksPage({
                       <td className="px-6 py-4">
                         <TaskStatusToggle
                           taskId={task.id}
-                          taskTitle={task.title}
                           status={task.status}
-                          opportunityId={task.opportunity_id}
-                          currentUserId={currentUserId}
                         />
                       </td>
                       <td className="px-6 py-4">

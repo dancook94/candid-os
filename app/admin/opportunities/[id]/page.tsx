@@ -3,11 +3,13 @@ import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { CreateQuoteButton } from "@/components/crm/create-quote-button";
+import { OpportunityAssignmentEditor } from "@/components/crm/opportunity-assignment-editor";
 import { OpportunityNoteForm } from "@/components/crm/opportunity-note-form";
 import { OpportunityQuickActions } from "@/components/crm/opportunity-quick-actions";
 import { OpportunityStageBadge } from "@/components/crm/opportunity-stage-badge";
 import { OpportunityStageChange } from "@/components/crm/opportunity-stage-change";
 import { StaffAvatarStack } from "@/components/crm/staff-avatar-stack";
+import { TaskAssigneeDisplay } from "@/components/crm/task-assignee-display";
 import { TaskPriorityBadge, TaskStatusBadge } from "@/components/crm/task-badges";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
@@ -17,12 +19,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buildCrmAppShellProps } from "@/lib/admin-shell-props";
 import { requireCrmPageAccess } from "@/lib/crm-page-access";
 import { formatActivityTypeLabel } from "@/lib/crm/activity-types";
-import { getStaffDisplayName } from "@/lib/crm/crm-staff";
+import { getStaffDisplayName, loadCrmStaffProfiles } from "@/lib/crm/crm-staff";
 import {
   formatCrmDate,
   formatCrmDateTime,
 } from "@/lib/crm/format-datetime";
-import { loadOpportunityDetail } from "@/lib/crm/opportunity-detail";
+import { loadOpportunityCollaboratorIds, loadOpportunityDetail } from "@/lib/crm/opportunity-detail";
 import { formatOpportunitySourceLabel } from "@/lib/crm/source-labels";
 import { getActiveQuotesForOpportunity } from "@/lib/crm/opportunity-linking";
 import { OPEN_TASK_STATUSES } from "@/lib/crm/task-config";
@@ -61,7 +63,11 @@ export default async function OpportunityDetailPage({
     notFound();
   }
 
-  const activeQuotes = await getActiveQuotesForOpportunity(supabase, id);
+  const [activeQuotes, crmStaff, collaboratorIds] = await Promise.all([
+    getActiveQuotesForOpportunity(supabase, id),
+    loadCrmStaffProfiles(supabase),
+    loadOpportunityCollaboratorIds(supabase, id),
+  ]);
 
   const { opportunity } = detail;
   const openTasks = detail.tasks.filter((task) =>
@@ -309,6 +315,13 @@ export default async function OpportunityDetailPage({
               />
             </CardContent>
           </Card>
+
+          <OpportunityAssignmentEditor
+            opportunityId={id}
+            crmStaff={crmStaff}
+            ownerId={opportunity.owner_profile_id}
+            collaboratorIds={collaboratorIds}
+          />
         </div>
 
         <div className="mt-6 grid gap-6 xl:grid-cols-2">
@@ -347,6 +360,9 @@ export default async function OpportunityDetailPage({
                           <p className="mt-1 text-sm text-muted-foreground">
                             Due {formatCrmDateTime(task.due_at)}
                           </p>
+                          <div className="mt-2">
+                            <TaskAssigneeDisplay assignees={task.assignees} />
+                          </div>
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <TaskStatusBadge status={task.status} />

@@ -5,27 +5,18 @@ import { useRouter } from "next/navigation";
 
 import { TaskStatusBadge } from "@/components/crm/task-badges";
 import { Button } from "@/components/ui/button";
-import { OPPORTUNITY_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
 import type { TaskStatus } from "@/lib/crm/types";
-import { createClient } from "@/lib/supabase/client";
 
 type TaskStatusToggleProps = {
   taskId: string;
-  taskTitle: string;
   status: TaskStatus;
-  opportunityId: string | null;
-  currentUserId: string;
 };
 
 export function TaskStatusToggle({
   taskId,
-  taskTitle,
   status,
-  opportunityId,
-  currentUserId,
 }: TaskStatusToggleProps) {
   const router = useRouter();
-  const supabase = createClient();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -34,45 +25,18 @@ export function TaskStatusToggle({
     setIsSubmitting(true);
 
     const nextStatus = status === "completed" ? "open" : "completed";
-    const completedAt =
-      nextStatus === "completed" ? new Date().toISOString() : null;
 
     try {
-      const { error: updateError } = await supabase
-        .from("tasks")
-        .update({
-          status: nextStatus,
-          completed_at: completedAt,
-        })
-        .eq("id", taskId);
+      const response = await fetch(`/api/crm/tasks/${taskId}/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: nextStatus }),
+      });
 
-      if (updateError) {
-        throw new Error(updateError.message);
-      }
+      const payload = (await response.json()) as { error?: string };
 
-      if (opportunityId) {
-        const activityType =
-          nextStatus === "completed"
-            ? OPPORTUNITY_ACTIVITY_TYPES.taskCompleted
-            : OPPORTUNITY_ACTIVITY_TYPES.taskReopened;
-        const description =
-          nextStatus === "completed"
-            ? `Task "${taskTitle}" completed.`
-            : `Task "${taskTitle}" reopened.`;
-
-        const { error: activityError } = await supabase
-          .from("opportunity_activity")
-          .insert({
-            opportunity_id: opportunityId,
-            activity_type: activityType,
-            description,
-            metadata: { task_id: taskId },
-            created_by: currentUserId,
-          });
-
-        if (activityError) {
-          throw new Error(activityError.message);
-        }
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to update task.");
       }
 
       router.refresh();

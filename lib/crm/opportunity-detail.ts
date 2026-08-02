@@ -8,13 +8,19 @@ import type {
   OpportunityStage,
   TaskRecord,
 } from "@/lib/crm/types";
+import {
+  loadTaskAssigneesByTaskIds,
+  type TaskAssigneeProfile,
+} from "@/lib/crm/task-assignees";
 
 export type OpportunityDetailStaffMember = {
   id: string;
   full_name: string | null;
 };
 
-export type OpportunityDetailTask = TaskRecord;
+export type OpportunityDetailTask = TaskRecord & {
+  assignees: TaskAssigneeProfile[];
+};
 
 export type OpportunityDetailNote = OpportunityNoteRecord & {
   author_name: string;
@@ -173,6 +179,11 @@ export async function loadOpportunityDetail(
   const quoteRows = quotes ?? [];
   let currentQuoteValue: number | null = null;
   const enrichedQuotes: OpportunityDetailQuote[] = [];
+  const taskRows = (tasks ?? []) as TaskRecord[];
+  const assigneesByTaskId = await loadTaskAssigneesByTaskIds(
+    supabase,
+    taskRows.map((task) => task.id)
+  );
 
   if (quoteRows.length > 0) {
     const quoteIds = quoteRows.map((quote) => quote.id);
@@ -223,7 +234,10 @@ export async function loadOpportunityDetail(
       full_name: null,
     }) as OpportunityDetailStaffMember,
     collaborators,
-    tasks: (tasks ?? []) as OpportunityDetailTask[],
+    tasks: taskRows.map((task) => ({
+      ...task,
+      assignees: assigneesByTaskId.get(task.id) ?? [],
+    })),
     notes: (notes ?? []).map((note) => ({
       ...(note as OpportunityNoteRecord),
       author_name: authorNameById.get(note.created_by) ?? "Unknown author",

@@ -9,6 +9,7 @@ import { PageHeader } from "@/components/page-header";
 import { buildCrmAppShellProps } from "@/lib/admin-shell-props";
 import { requireCrmPageAccess } from "@/lib/crm-page-access";
 import { loadCrmStaffProfiles } from "@/lib/crm/crm-staff";
+import { loadTaskAssigneeIds } from "@/lib/crm/task-assignees";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +46,7 @@ export default async function EditTaskPage({ params }: EditTaskPageProps) {
     notFound();
   }
 
-  const [{ data: companies }, { data: opportunities }, { data: quotes }, crmStaff] =
+  const [{ data: companies }, { data: opportunities }, { data: quotes }, crmStaff, assigneeProfileIds] =
     await Promise.all([
       supabase
         .from("companies")
@@ -64,9 +65,10 @@ export default async function EditTaskPage({ params }: EditTaskPageProps) {
         .order("updated_at", { ascending: false })
         .limit(200),
       loadCrmStaffProfiles(supabase),
+      loadTaskAssigneeIds(supabase, id),
     ]);
 
-  const initialValues = buildTaskFormInitialValues(task);
+  const initialValues = buildTaskFormInitialValues(task, assigneeProfileIds);
 
   return (
     <AppShell {...shellProps}>

@@ -373,21 +373,35 @@ export async function ensureQuoteFollowUpTask(
 
   const title = `Follow up Q-${quoteNumber} — ${projectName}`;
 
-  const { error: taskError } = await supabase.from("tasks").insert({
-    title,
-    description: null,
-    assigned_to: assigneeId,
-    created_by: createdBy,
-    due_at: dueAt.toISOString(),
-    status: "open",
-    priority: "normal",
-    opportunity_id: opportunityId,
-    quote_id: quoteId,
-    company_id: companyId,
+  const { data: createdTask, error: taskError } = await supabase
+    .from("tasks")
+    .insert({
+      title,
+      description: null,
+      assigned_to: assigneeId,
+      created_by: createdBy,
+      due_at: dueAt.toISOString(),
+      status: "open",
+      priority: "normal",
+      opportunity_id: opportunityId,
+      quote_id: quoteId,
+      company_id: companyId,
+    })
+    .select("id")
+    .single();
+
+  if (taskError || !createdTask) {
+    throw new Error(taskError?.message ?? "Unable to create follow-up task.");
+  }
+
+  const { error: assigneeError } = await supabase.from("task_assignees").insert({
+    task_id: createdTask.id,
+    profile_id: assigneeId,
+    assigned_by: createdBy,
   });
 
-  if (taskError) {
-    throw new Error(taskError.message);
+  if (assigneeError) {
+    throw new Error(assigneeError.message);
   }
 
   await logOpportunityActivity(supabase, {
