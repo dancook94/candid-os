@@ -25,6 +25,7 @@ export type AdminQuoteValueMetric = {
 export type AdminQuoteMetrics = {
   quotesSent: AdminQuoteValueMetric;
   quotesAccepted: AdminQuoteValueMetric;
+  quotesDeclined: AdminQuoteValueMetric;
   errors: string[];
 };
 
@@ -66,17 +67,24 @@ export async function fetchAdminQuoteMetrics(
 ): Promise<AdminQuoteMetrics> {
   const errors: string[] = [];
 
-  const [{ data: sentQuotes, error: sentQuotesError }, { data: acceptedQuotes, error: acceptedQuotesError }] =
-    await Promise.all([
-      supabase
-        .from("quotes")
-        .select("id, current_version, status")
-        .eq("status", "sent"),
-      supabase
-        .from("quotes")
-        .select("id, current_version, status")
-        .eq("status", "accepted"),
-    ]);
+  const [
+    { data: sentQuotes, error: sentQuotesError },
+    { data: acceptedQuotes, error: acceptedQuotesError },
+    { data: declinedQuotes, error: declinedQuotesError },
+  ] = await Promise.all([
+    supabase
+      .from("quotes")
+      .select("id, current_version, status")
+      .eq("status", "sent"),
+    supabase
+      .from("quotes")
+      .select("id, current_version, status")
+      .eq("status", "accepted"),
+    supabase
+      .from("quotes")
+      .select("id, current_version, status")
+      .eq("status", "declined"),
+  ]);
 
   if (sentQuotesError) {
     errors.push(`Quotes sent: ${sentQuotesError.message}`);
@@ -86,12 +94,21 @@ export async function fetchAdminQuoteMetrics(
     errors.push(`Quotes accepted: ${acceptedQuotesError.message}`);
   }
 
-  const relevantQuotes = [...(sentQuotes ?? []), ...(acceptedQuotes ?? [])];
+  if (declinedQuotesError) {
+    errors.push(`Quotes declined: ${declinedQuotesError.message}`);
+  }
+
+  const relevantQuotes = [
+    ...(sentQuotes ?? []),
+    ...(acceptedQuotes ?? []),
+    ...(declinedQuotes ?? []),
+  ];
 
   if (relevantQuotes.length === 0) {
     return {
       quotesSent: emptyMetric(),
       quotesAccepted: emptyMetric(),
+      quotesDeclined: emptyMetric(),
       errors,
     };
   }
@@ -110,12 +127,14 @@ export async function fetchAdminQuoteMetrics(
     return {
       quotesSent: emptyMetric(),
       quotesAccepted: emptyMetric(),
+      quotesDeclined: emptyMetric(),
       errors,
     };
   }
 
   const sentRows: { total: number }[] = [];
   const acceptedRows: { total: number }[] = [];
+  const declinedRows: { total: number }[] = [];
 
   for (const version of versions ?? []) {
     const quote = quoteById.get(version.quote_id);
@@ -133,12 +152,18 @@ export async function fetchAdminQuoteMetrics(
 
     if (matchCurrentVersion(quote, version, "accepted", "accepted")) {
       acceptedRows.push({ total });
+      continue;
+    }
+
+    if (matchCurrentVersion(quote, version, "declined", "declined")) {
+      declinedRows.push({ total });
     }
   }
 
   return {
     quotesSent: buildMetric(sentRows),
     quotesAccepted: buildMetric(acceptedRows),
+    quotesDeclined: buildMetric(declinedRows),
     errors,
   };
 }

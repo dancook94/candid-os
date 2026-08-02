@@ -82,7 +82,14 @@ function mapToBadgeStatus(value: string): BadgeStatus {
   return "draft";
 }
 
-export default async function AdminQuotesPage() {
+type AdminQuotesPageProps = {
+  searchParams: Promise<{ status?: string }>;
+};
+
+export default async function AdminQuotesPage({
+  searchParams,
+}: AdminQuotesPageProps) {
+  const { status: statusFilter } = await searchParams;
   const supabase = await createClient();
 
   const {
@@ -107,12 +114,18 @@ export default async function AdminQuotesPage() {
     redirect(resolveAdminAccessDeniedPath(profile?.user_role));
   }
 
-  const { data, error } = await supabase
+  let quotesQuery = supabase
     .from("quotes")
     .select(
       "id, quote_number, company_id, project_name, status, current_version, updated_at"
     )
     .order("updated_at", { ascending: false });
+
+  if (statusFilter === "declined") {
+    quotesQuery = quotesQuery.eq("status", "declined");
+  }
+
+  const { data, error } = await quotesQuery;
 
   const quotes: QuoteRow[] = data ?? [];
   const queryError = error?.message ?? null;
@@ -149,7 +162,11 @@ export default async function AdminQuotesPage() {
         <PageHeader
           eyebrow="Administration"
           title="Quotes"
-          description="Create and manage customer quotes."
+          description={
+            statusFilter === "declined"
+              ? "Declined customer quotes."
+              : "Create and manage customer quotes."
+          }
           actions={newQuoteButton}
         />
 
@@ -164,9 +181,17 @@ export default async function AdminQuotesPage() {
           </Card>
         ) : quotes.length === 0 ? (
           <EmptyState
-            title="No quotes yet"
-            description="Create your first draft quote to get started."
-            action={newQuoteButton}
+            title={
+              statusFilter === "declined"
+                ? "No declined quotes"
+                : "No quotes yet"
+            }
+            description={
+              statusFilter === "declined"
+                ? "There are no declined quotes to show."
+                : "Create your first draft quote to get started."
+            }
+            action={statusFilter === "declined" ? undefined : newQuoteButton}
           />
         ) : (
           <Card className="portal-surface overflow-hidden">

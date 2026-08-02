@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { cn } from "@/lib/utils";
 import {
   Card,
@@ -13,6 +15,8 @@ type StatCardProps = {
   description?: string;
   meta?: string;
   className?: string;
+  href?: string;
+  accentClassName?: string;
 };
 
 export function StatCard({
@@ -21,10 +25,21 @@ export function StatCard({
   description,
   meta,
   className,
+  href,
+  accentClassName,
 }: StatCardProps) {
-  return (
-    <Card className={cn("portal-surface overflow-hidden", className)}>
-      <div className="h-0.5 bg-[var(--candid-yellow)]/70" aria-hidden />
+  const card = (
+    <Card
+      className={cn(
+        "portal-surface overflow-hidden",
+        href && "transition-shadow hover:shadow-md",
+        className
+      )}
+    >
+      <div
+        className={cn("h-0.5 bg-[var(--candid-yellow)]/70", accentClassName)}
+        aria-hidden
+      />
 
       <CardHeader className="pb-0">
         <CardTitle className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
@@ -49,4 +64,17 @@ export function StatCard({
       </CardContent>
     </Card>
   );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        {card}
+      </Link>
+    );
+  }
+
+  return card;
 }

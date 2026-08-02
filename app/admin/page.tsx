@@ -93,7 +93,7 @@ export default async function AdminPage() {
           </Card>
         ) : null}
 
-        <div className="mb-8 grid gap-5 md:grid-cols-2">
+        <div className="mb-8 grid gap-5 md:grid-cols-3">
           <StatCard
             label="Quotes sent"
             value={quoteMetrics.quotesSent.formattedValue}
@@ -106,6 +106,15 @@ export default async function AdminPage() {
             value={quoteMetrics.quotesAccepted.formattedValue}
             description="Confirmed quote value"
             meta={quoteMetrics.quotesAccepted.formattedQuoteCount}
+          />
+
+          <StatCard
+            label="Quotes declined"
+            value={quoteMetrics.quotesDeclined.formattedValue}
+            description="Lost quote value"
+            meta={quoteMetrics.quotesDeclined.formattedQuoteCount}
+            href="/admin/quotes?status=declined"
+            accentClassName="bg-red-400/45"
           />
         </div>
 
