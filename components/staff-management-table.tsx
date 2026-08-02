@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { StatusBadge } from "@/components/status-badge";
+import { StaffAvatarDisplay } from "@/components/staff-avatar-display";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatRoleLabel } from "@/lib/staff-roles";
@@ -140,8 +141,17 @@ export function StaffManagementTable({
                 ) : (
                   filteredStaff.map((member) => (
                     <tr key={member.id}>
-                      <td className="px-4 py-3.5 font-medium text-foreground">
-                        {member.full_name || "Unnamed user"}
+                      <td className="px-4 py-3.5">
+                        <div className="flex items-center gap-3">
+                          <StaffAvatarDisplay
+                            fullName={member.full_name || "Unnamed user"}
+                            avatarUrl={member.avatarUrl}
+                            size="sm"
+                          />
+                          <span className="font-medium text-foreground">
+                            {member.full_name || "Unnamed user"}
+                          </span>
+                        </div>
                       </td>
 
                       <td className="px-4 py-3.5 text-muted-foreground">

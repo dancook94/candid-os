@@ -8,9 +8,10 @@ import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatPaymentTermsLabel } from "@/lib/payment-terms";
+import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { createClient } from "@/lib/supabase/server";
 import { buildLoginUrl } from "@/lib/auth-redirect";
-import { isCandidAdminRole, isSuperAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
+import { isCandidAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
 
 type CustomerProfile = {
   id: string;
@@ -95,7 +96,7 @@ export default async function AdminCustomersPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, user_role, account_status")
+    .select("full_name, user_role, account_status, avatar_storage_path")
     .eq("id", user.id)
     .single();
 
@@ -148,13 +149,10 @@ export default async function AdminCustomersPage() {
     .eq("is_active", true)
     .order("company_name");
 
+  const shellProps = await buildAdminAppShellProps(supabase, profile);
+
   return (
-    <AppShell
-      userRole="admin"
-      showStaffNav={isSuperAdminRole(profile.user_role)}
-      userName={profile.full_name || "Candid administrator"}
-      companyName="Candid Creative"
-    >
+    <AppShell {...shellProps}>
       <div className="mx-auto max-w-7xl">
         <PageHeader
           eyebrow="Administration"

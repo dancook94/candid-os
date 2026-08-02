@@ -6,6 +6,7 @@ import { InviteStaffDialog } from "@/components/invite-staff-dialog";
 import { PageHeader } from "@/components/page-header";
 import { StaffManagementTable } from "@/components/staff-management-table";
 import { Card, CardContent } from "@/components/ui/card";
+import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { buildLoginUrl } from "@/lib/auth-redirect";
 import { loadStaffMembersWithAuth, type StaffMemberRecord } from "@/lib/staff-members";
 import { isCandidAdminRole, isSuperAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
@@ -26,7 +27,7 @@ export default async function AdminStaffPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, user_role, account_status")
+    .select("full_name, user_role, account_status, avatar_storage_path")
     .eq("id", user.id)
     .single();
 
@@ -53,14 +54,10 @@ export default async function AdminStaffPage() {
   }
 
   const isDevelopment = process.env.NODE_ENV === "development";
+  const shellProps = await buildAdminAppShellProps(supabase, profile);
 
   return (
-    <AppShell
-      userRole="admin"
-      showStaffNav
-      userName={profile.full_name || "Candid administrator"}
-      companyName="Candid Creative"
-    >
+    <AppShell {...shellProps}>
       <div className="mx-auto max-w-7xl">
         <PageHeader
           eyebrow="Administration"

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
+import { StaffAvatarDisplay } from "@/components/staff-avatar-display";
 import {
   Card,
   CardContent,
@@ -10,9 +11,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { buildLoginUrl } from "@/lib/auth-redirect";
+import { buildStaffAppShellProps } from "@/lib/admin-shell-props";
+import { loadStaffAvatarSignedUrl } from "@/lib/staff-avatar-server";
 import {
   isCandidAdminRole,
   isLimitedStaffRole,
+  isStaffRole,
 } from "@/lib/staff-roles";
 import { createClient } from "@/lib/supabase/server";
 
@@ -31,11 +35,13 @@ export default async function StaffWorkspacePage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, user_role, account_status")
+    .select(
+      "full_name, user_role, account_status, avatar_storage_path"
+    )
     .eq("id", user.id)
     .single();
 
-  if (!profile || profile.account_status !== "approved") {
+  if (!profile || profile.account_status !== "approved" || !isStaffRole(profile.user_role)) {
     redirect("/login");
   }
 
@@ -47,18 +53,25 @@ export default async function StaffWorkspacePage() {
     redirect("/dashboard");
   }
 
+  const shellProps = await buildStaffAppShellProps(supabase, profile);
+  const avatarPreviewUrl = await loadStaffAvatarSignedUrl(supabase, profile);
+
   return (
-    <AppShell
-      userRole="staff"
-      userName={profile.full_name || "Candid team member"}
-      companyName="Candid Creative"
-    >
+    <AppShell {...shellProps}>
       <div className="mx-auto max-w-3xl">
-        <PageHeader
-          eyebrow="Staff workspace"
-          title="Welcome back"
-          description="Your dedicated Candid OS workspace is being prepared."
-        />
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <PageHeader
+            eyebrow="Staff workspace"
+            title="Welcome back"
+            description="Your dedicated Candid OS workspace is being prepared."
+          />
+
+          <StaffAvatarDisplay
+            fullName={profile.full_name || "Candid team member"}
+            avatarUrl={avatarPreviewUrl}
+            size="lg"
+          />
+        </div>
 
         <Card className="portal-surface overflow-hidden rounded-2xl shadow-sm ring-0">
           <CardHeader className="border-b border-border">

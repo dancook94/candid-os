@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 
 import { CompanyLogoDisplay } from "@/components/company-logo-display";
+import { StaffAvatarDisplay } from "@/components/staff-avatar-display";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +27,7 @@ type AppShellProps = {
   userName?: string;
   companyName?: string;
   companyLogoUrl?: string | null;
+  userAvatarUrl?: string | null;
 };
 
 const customerLinks = [
@@ -114,6 +116,7 @@ export function AppShell({
   userName,
   companyName,
   companyLogoUrl = null,
+  userAvatarUrl = null,
 }: AppShellProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -137,6 +140,8 @@ export function AppShell({
         : "Customer portal";
   const displayName = userName || "Candid OS user";
   const displayCompany = companyName || "Candid Creative";
+  const showStaffAvatar = userRole === "admin" || userRole === "staff";
+  const profileHref = showStaffAvatar ? "/staff/profile" : null;
 
   async function handleLogout() {
     await supabase.auth.signOut();
@@ -200,16 +205,40 @@ export function AppShell({
 
         <div className="border-t border-border p-4">
           <div className="mb-3 flex items-center gap-3 rounded-xl bg-muted/50 px-3 py-3">
-            <div
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background"
-              aria-hidden
-            >
-              {getInitials(displayName)}
-            </div>
+            {showStaffAvatar ? (
+              profileHref ? (
+                <Link href={profileHref} className="shrink-0">
+                  <StaffAvatarDisplay
+                    fullName={displayName}
+                    avatarUrl={userAvatarUrl}
+                    size="sm"
+                  />
+                </Link>
+              ) : (
+                <StaffAvatarDisplay
+                  fullName={displayName}
+                  avatarUrl={userAvatarUrl}
+                  size="sm"
+                />
+              )
+            ) : (
+              <div
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background"
+                aria-hidden
+              >
+                {getInitials(displayName)}
+              </div>
+            )}
 
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-foreground">
-                {displayName}
+                {profileHref ? (
+                  <Link href={profileHref} className="hover:underline">
+                    {displayName}
+                  </Link>
+                ) : (
+                  displayName
+                )}
               </p>
               <div className="mt-0.5 flex items-center gap-2">
                 {userRole === "customer" && companyLogoUrl ? (

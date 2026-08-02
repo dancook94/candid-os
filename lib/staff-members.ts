@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { STAFF_ROLES } from "@/lib/staff-roles";
+import { createStaffAvatarSignedUrl } from "@/lib/staff-avatars";
 
 export type StaffMemberRecord = {
   id: string;
@@ -9,6 +10,8 @@ export type StaffMemberRecord = {
   created_at: string;
   email: string | null;
   last_sign_in_at: string | null;
+  avatar_storage_path: string | null;
+  avatarUrl: string | null;
 };
 
 export async function loadStaffMembersWithAuth(): Promise<StaffMemberRecord[]> {
@@ -16,7 +19,9 @@ export async function loadStaffMembersWithAuth(): Promise<StaffMemberRecord[]> {
 
   const { data: profiles, error: profilesError } = await adminClient
     .from("profiles")
-    .select("id, full_name, user_role, account_status, created_at")
+    .select(
+      "id, full_name, user_role, account_status, created_at, avatar_storage_path"
+    )
     .in("user_role", [...STAFF_ROLES])
     .order("created_at", { ascending: false });
 
@@ -29,11 +34,19 @@ export async function loadStaffMembersWithAuth(): Promise<StaffMemberRecord[]> {
       const { data: authData, error: authError } =
         await adminClient.auth.admin.getUserById(profile.id);
 
+      const avatarUrl = profile.avatar_storage_path
+        ? await createStaffAvatarSignedUrl(
+            adminClient,
+            profile.avatar_storage_path
+          )
+        : null;
+
       if (authError) {
         return {
           ...profile,
           email: null,
           last_sign_in_at: null,
+          avatarUrl,
         };
       }
 
@@ -41,6 +54,7 @@ export async function loadStaffMembersWithAuth(): Promise<StaffMemberRecord[]> {
         ...profile,
         email: authData.user.email ?? null,
         last_sign_in_at: authData.user.last_sign_in_at ?? null,
+        avatarUrl,
       };
     })
   );

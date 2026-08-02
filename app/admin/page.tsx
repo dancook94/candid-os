@@ -13,8 +13,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { fetchAdminQuoteMetrics } from "@/lib/admin-quote-metrics";
+import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { buildLoginUrl } from "@/lib/auth-redirect";
-import { isCandidAdminRole, isSuperAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
+import { isCandidAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +36,7 @@ export default async function AdminPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, account_status, user_role")
+    .select("full_name, account_status, user_role, avatar_storage_path")
     .eq("id", user.id)
     .single();
 
@@ -64,13 +65,10 @@ export default async function AdminPage() {
         .order("company_name"),
     ]);
 
+  const shellProps = await buildAdminAppShellProps(supabase, profile);
+
   return (
-    <AppShell
-      userRole="admin"
-      showStaffNav={isSuperAdminRole(profile.user_role)}
-      userName={profile.full_name || "Candid administrator"}
-      companyName="Candid Creative"
-    >
+    <AppShell {...shellProps}>
       <div className="mx-auto max-w-6xl">
         <PageHeader
           eyebrow="Administration"

@@ -16,9 +16,10 @@ import {
 } from "@/lib/payment-terms";
 import { computeDefaultQuoteExpiryDate } from "@/lib/app-settings";
 import { loadAppSettings } from "@/lib/app-settings-server";
+import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { createClient } from "@/lib/supabase/server";
 import { buildLoginUrl } from "@/lib/auth-redirect";
-import { isCandidAdminRole, isSuperAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
+import { isCandidAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
 
 type NewQuotePageProps = {
   searchParams: Promise<{ quoteRequestId?: string }>;
@@ -45,7 +46,7 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("full_name, user_role, account_status")
+    .select("full_name, user_role, account_status, avatar_storage_path")
     .eq("id", user.id)
     .single();
 
@@ -122,13 +123,10 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
     }
   }
 
+  const shellProps = await buildAdminAppShellProps(supabase, profile);
+
   return (
-    <AppShell
-      userRole="admin"
-      showStaffNav={isSuperAdminRole(profile.user_role)}
-      userName={profile.full_name || "Candid administrator"}
-      companyName="Candid Creative"
-    >
+    <AppShell {...shellProps}>
       <div className="mx-auto max-w-5xl">
         <PageHeader
           eyebrow="Administration"
