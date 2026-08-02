@@ -69,7 +69,7 @@ export default function SetPasswordForm() {
       return;
     }
 
-    router.push(resolvePostLoginPath(profile, null));
+    router.replace(resolvePostLoginPath(profile, null));
     router.refresh();
   }
 

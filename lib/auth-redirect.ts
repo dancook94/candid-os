@@ -19,6 +19,10 @@ export function sanitizeNextPath(next: string | null | undefined) {
   return next;
 }
 
+export function resolveInviteCallbackNextPath(next: string | null | undefined) {
+  return sanitizeNextPath(next) ?? "/set-password";
+}
+
 export function buildLoginUrl(nextPath?: string | null) {
   const safeNext = sanitizeNextPath(nextPath ?? null);
 

@@ -10,6 +10,12 @@ export default async function SetPasswordPage() {
     data: { user },
   } = await supabase.auth.getUser();
 
+  if (process.env.NODE_ENV === "development") {
+    console.info("[set-password] session check", {
+      hasAuthenticatedUser: Boolean(user),
+    });
+  }
+
   if (!user) {
     redirect("/login");
   }
