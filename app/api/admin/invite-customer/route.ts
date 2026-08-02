@@ -72,7 +72,7 @@ export async function POST(request: Request) {
   }
 
   const requestUrl = new URL(request.url);
-  const redirectTo = `${requestUrl.origin}/auth/callback`;
+  const redirectTo = `${requestUrl.origin}/auth/callback?next=/set-password`;
 
   let adminClient;
 
