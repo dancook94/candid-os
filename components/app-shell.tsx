@@ -10,6 +10,7 @@ import {
   ClipboardList,
   FileText,
   Gauge,
+  History,
   LogOut,
   Package,
   Settings,
@@ -101,6 +102,11 @@ const crmLinks = [
     href: "/admin/tasks",
     label: "Tasks",
     icon: CheckSquare,
+  },
+  {
+    href: "/admin/activity",
+    label: "Activity",
+    icon: History,
   },
 ];
 

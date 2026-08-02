@@ -104,10 +104,16 @@ export function AdminDashboardRecentActivityPanel({ data }: AdminDashboardCrmPro
 
   return (
     <Card className="portal-surface mb-8 overflow-hidden">
-      <CardHeader className="border-b border-border">
+      <CardHeader className="flex flex-row items-center justify-between gap-4 border-b border-border">
         <CardTitle className="text-lg font-semibold">
           Recent CRM activity
         </CardTitle>
+        <Link
+          href="/admin/activity"
+          className="text-sm font-medium text-foreground hover:underline"
+        >
+          View all activity
+        </Link>
       </CardHeader>
       <CardContent className="p-0">
         <div className="divide-y divide-border">
