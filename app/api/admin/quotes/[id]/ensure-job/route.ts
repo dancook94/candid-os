@@ -50,6 +50,7 @@ export async function POST(_request: Request, context: RouteContext) {
   const taskResult = await reconcileQuoteFollowUpTasks({
     quoteId: id,
     actorProfileId: authResult.userId,
+    trigger: "accepted_quote_reconciliation",
   });
 
   const adminClient = createAdminClient();

@@ -17,15 +17,20 @@ export async function completeQuoteFollowUpTasksAfterAcceptance({
       quoteId,
       actorProfileId,
       jobId,
+      trigger: "quote_accepted",
     });
   } catch (error) {
-    if (process.env.NODE_ENV === "development") {
-      console.error("[tasks] quote follow-up auto-complete failed", {
-        quoteId,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[tasks] quote follow-up auto-complete failed", {
+      quoteId,
+      message,
+    });
 
-    return { completedTaskIds: [], alreadyCompletedCount: 0 };
+    return {
+      completedTaskIds: [],
+      alreadyCompletedCount: 0,
+      matchedTaskIds: [],
+      errors: [message],
+    };
   }
 }

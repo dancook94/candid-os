@@ -5,6 +5,10 @@ import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
 import { LOST_REASON_QUOTE_DECLINED } from "@/lib/crm/lost-reasons";
 import { buildQuoteFollowUpTaskTitle } from "@/lib/crm/complete-quote-follow-up-tasks";
 import {
+  QUOTE_FOLLOW_UP_AUTOMATION_KEY,
+  supportsTaskAutomationKey,
+} from "@/lib/crm/task-automation-key";
+import {
   formatOpportunityStageLabel,
   isOpportunityStage,
 } from "@/lib/crm/opportunity-stages";
@@ -417,21 +421,28 @@ export async function ensureQuoteFollowUpTask(
   }
 
   const title = buildQuoteFollowUpTaskTitle(quoteNumber, projectName);
+  const useAutomationKey = await supportsTaskAutomationKey(supabase);
+
+  const insertPayload: Record<string, unknown> = {
+    title,
+    description: null,
+    assigned_to: assigneeId,
+    created_by: createdBy,
+    due_at: dueAt.toISOString(),
+    status: "open",
+    priority: "normal",
+    opportunity_id: opportunityId,
+    quote_id: quoteId,
+    company_id: companyId,
+  };
+
+  if (useAutomationKey) {
+    insertPayload.automation_key = QUOTE_FOLLOW_UP_AUTOMATION_KEY;
+  }
 
   const { data: createdTask, error: taskError } = await supabase
     .from("tasks")
-    .insert({
-      title,
-      description: null,
-      assigned_to: assigneeId,
-      created_by: createdBy,
-      due_at: dueAt.toISOString(),
-      status: "open",
-      priority: "normal",
-      opportunity_id: opportunityId,
-      quote_id: quoteId,
-      company_id: companyId,
-    })
+    .insert(insertPayload)
     .select("id")
     .single();
 

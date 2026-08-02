@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AdminQuoteFollowUpTaskPanel } from "@/components/admin-quote-follow-up-task-panel";
 import { AdminQuoteLinkedJobPanel } from "@/components/admin-quote-linked-job-panel";
 import { AdminQuoteManagementActions } from "@/components/admin-quote-management-actions";
 import { CreateQuoteVersionButton } from "@/components/create-quote-version-button";
@@ -27,7 +28,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { loadLinkedJobForQuote } from "@/lib/admin-job-metrics";
+import { loadOpenQuoteFollowUpTasksForQuote } from "@/lib/crm/complete-quote-follow-up-tasks";
 import { reconcileQuoteFollowUpTasks } from "@/lib/crm/reconcile-quote-follow-up-tasks";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { logDevQuery } from "@/lib/dev-query-log";
@@ -314,8 +317,33 @@ export default async function QuoteDetailPage({
 
   const linkedJob = await loadLinkedJobForQuote(quote.id, quote.status);
 
+  let openFollowUpTasks: Awaited<
+    ReturnType<typeof loadOpenQuoteFollowUpTasksForQuote>
+  >["openTasks"] = [];
+
   if (quote.status === "accepted") {
-    await reconcileQuoteFollowUpTasks({ quoteId: quote.id });
+    const adminClient = createAdminClient();
+    const followUpState = await loadOpenQuoteFollowUpTasksForQuote(
+      adminClient,
+      quote.id
+    );
+    openFollowUpTasks = followUpState.openTasks;
+
+    const reconcileResult = await reconcileQuoteFollowUpTasks({
+      quoteId: quote.id,
+      trigger: "accepted_quote_reconciliation",
+    });
+
+    if (reconcileResult.errors.length > 0) {
+      console.error("[quote-detail] follow-up task reconciliation failed", {
+        quoteId: quote.id,
+        errors: reconcileResult.errors,
+      });
+    } else if (reconcileResult.completedTaskIds.length > 0) {
+      openFollowUpTasks = openFollowUpTasks.filter(
+        (task) => !reconcileResult.completedTaskIds.includes(task.id)
+      );
+    }
   }
 
   return (
@@ -408,6 +436,12 @@ export default async function QuoteDetailPage({
           linkedJobId={linkedJob.linkedJobId}
           linkedJobReference={linkedJob.linkedJobReference}
           schemaMissing={linkedJob.schemaMissing}
+        />
+
+        <AdminQuoteFollowUpTaskPanel
+          quoteId={quote.id}
+          quoteStatus={quote.status}
+          openFollowUpTasks={openFollowUpTasks}
         />
 
         <QuoteLinkedOpportunitySection

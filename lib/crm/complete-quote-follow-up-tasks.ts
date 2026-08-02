@@ -3,6 +3,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
 import { logOpportunityActivity } from "@/lib/crm/opportunity-stage-sync";
 import { OPEN_TASK_STATUSES } from "@/lib/crm/task-config";
+import {
+  QUOTE_FOLLOW_UP_AUTOMATION_KEY,
+  supportsTaskAutomationKey,
+  type QuoteFollowUpCompletionTrigger,
+} from "@/lib/crm/task-automation-key";
 
 export type QuoteFollowUpTaskRow = {
   id: string;
@@ -11,12 +16,21 @@ export type QuoteFollowUpTaskRow = {
   opportunity_id: string | null;
   company_id: string | null;
   quote_id: string | null;
+  automation_key?: string | null;
 };
 
 export type CompleteQuoteFollowUpTasksResult = {
   completedTaskIds: string[];
   alreadyCompletedCount: number;
+  matchedTaskIds: string[];
+  errors: string[];
 };
+
+const TASK_SELECT_BASE =
+  "id, title, status, opportunity_id, company_id, quote_id";
+
+const TASK_SELECT =
+  `${TASK_SELECT_BASE}, automation_key`;
 
 export function buildQuoteFollowUpTaskTitle(
   quoteNumber: number,
@@ -25,18 +39,44 @@ export function buildQuoteFollowUpTaskTitle(
   return `Follow up Q-${quoteNumber} — ${projectName}`;
 }
 
+export function buildQuoteFollowUpTitleReference(quoteNumber: number) {
+  return `Q-${quoteNumber}`;
+}
+
 export function isQuoteFollowUpTaskTitle(title: string, quoteNumber: number) {
   return title.startsWith(`Follow up Q-${quoteNumber} — `);
 }
 
-function isOpenQuoteFollowUpTask(
+export function titleReferencesQuote(title: string, quoteNumber: number) {
+  return title.includes(buildQuoteFollowUpTitleReference(quoteNumber));
+}
+
+function isStructuredQuoteFollowUpTask(task: QuoteFollowUpTaskRow) {
+  return task.automation_key === QUOTE_FOLLOW_UP_AUTOMATION_KEY;
+}
+
+function isLegacyQuoteFollowUpTask(task: QuoteFollowUpTaskRow, quoteNumber: number) {
+  const titleLooksLikeFollowUp =
+    task.title.startsWith("Follow up ") || task.title.startsWith("Follow-up ");
+
+  return (
+    titleLooksLikeFollowUp && titleReferencesQuote(task.title, quoteNumber)
+  );
+}
+
+export function isQuoteFollowUpTaskCandidate(
   task: QuoteFollowUpTaskRow,
   quoteNumber: number
 ) {
-  return (
-    OPEN_TASK_STATUSES.includes(task.status as (typeof OPEN_TASK_STATUSES)[number]) &&
-    isQuoteFollowUpTaskTitle(task.title, quoteNumber)
-  );
+  if (isStructuredQuoteFollowUpTask(task)) {
+    return true;
+  }
+
+  return isQuoteFollowUpTaskTitle(task.title, quoteNumber);
+}
+
+function isOpenTaskStatus(status: string) {
+  return OPEN_TASK_STATUSES.includes(status as (typeof OPEN_TASK_STATUSES)[number]);
 }
 
 async function loadAcceptedQuoteContext(
@@ -62,7 +102,16 @@ async function loadAcceptedQuoteContext(
   return quote;
 }
 
-async function findOpenQuoteFollowUpTasks(
+function selectOpenTasks(
+  adminClient: SupabaseClient,
+  useAutomationKey: boolean
+) {
+  return adminClient
+    .from("tasks")
+    .select(useAutomationKey ? TASK_SELECT : TASK_SELECT_BASE);
+}
+
+export async function findOpenQuoteFollowUpTasks(
   adminClient: SupabaseClient,
   {
     quoteId,
@@ -75,10 +124,12 @@ async function findOpenQuoteFollowUpTasks(
   }
 ) {
   const matched = new Map<string, QuoteFollowUpTaskRow>();
+  const useAutomationKey = await supportsTaskAutomationKey(adminClient);
 
-  const { data: byQuote, error: byQuoteError } = await adminClient
-    .from("tasks")
-    .select("id, title, status, opportunity_id, company_id, quote_id")
+  const { data: byQuote, error: byQuoteError } = await selectOpenTasks(
+    adminClient,
+    useAutomationKey
+  )
     .eq("quote_id", quoteId)
     .in("status", [...OPEN_TASK_STATUSES]);
 
@@ -86,26 +137,38 @@ async function findOpenQuoteFollowUpTasks(
     throw new Error(byQuoteError.message);
   }
 
-  for (const task of (byQuote ?? []) as QuoteFollowUpTaskRow[]) {
-    if (isOpenQuoteFollowUpTask(task, quoteNumber)) {
+  for (const task of (byQuote ?? []) as unknown as QuoteFollowUpTaskRow[]) {
+    if (isOpenTaskStatus(task.status) && isQuoteFollowUpTaskCandidate(task, quoteNumber)) {
       matched.set(task.id, task);
     }
   }
 
   if (opportunityId) {
-    const { data: legacyTasks, error: legacyError } = await adminClient
-      .from("tasks")
-      .select("id, title, status, opportunity_id, company_id, quote_id")
+    const { data: byOpportunity, error: byOpportunityError } = await selectOpenTasks(
+      adminClient,
+      useAutomationKey
+    )
       .eq("opportunity_id", opportunityId)
-      .is("quote_id", null)
       .in("status", [...OPEN_TASK_STATUSES]);
 
-    if (legacyError) {
-      throw new Error(legacyError.message);
+    if (byOpportunityError) {
+      throw new Error(byOpportunityError.message);
     }
 
-    for (const task of (legacyTasks ?? []) as QuoteFollowUpTaskRow[]) {
-      if (isOpenQuoteFollowUpTask(task, quoteNumber)) {
+    for (const task of (byOpportunity ?? []) as unknown as QuoteFollowUpTaskRow[]) {
+      if (!isOpenTaskStatus(task.status)) {
+        continue;
+      }
+
+      if (task.quote_id && task.quote_id !== quoteId) {
+        continue;
+      }
+
+      if (
+        isQuoteFollowUpTaskCandidate(task, quoteNumber) ||
+        (isLegacyQuoteFollowUpTask(task, quoteNumber) &&
+          (task.quote_id === quoteId || !task.quote_id))
+      ) {
         matched.set(task.id, task);
       }
     }
@@ -128,13 +191,12 @@ async function hasAutoCompleteActivity(
     .limit(1);
 
   if (error) {
-    if (process.env.NODE_ENV === "development") {
-      console.error("[tasks] failed to check auto-complete activity", {
-        quoteId,
-        taskId,
-        message: error.message,
-      });
-    }
+    console.error("[tasks] failed to check quote follow-up auto-complete activity", {
+      quoteId,
+      taskId,
+      code: error.code,
+      message: error.message,
+    });
 
     return false;
   }
@@ -149,6 +211,7 @@ async function logQuoteFollowUpTaskAutoCompleted({
   opportunityId,
   jobId,
   actorProfileId,
+  trigger,
 }: {
   adminClient: SupabaseClient;
   task: QuoteFollowUpTaskRow;
@@ -156,6 +219,7 @@ async function logQuoteFollowUpTaskAutoCompleted({
   opportunityId: string | null;
   jobId: string | null;
   actorProfileId?: string | null;
+  trigger: QuoteFollowUpCompletionTrigger;
 }) {
   const alreadyLogged = await hasAutoCompleteActivity(adminClient, quoteId, task.id);
 
@@ -163,15 +227,20 @@ async function logQuoteFollowUpTaskAutoCompleted({
     return;
   }
 
+  const description =
+    trigger === "accepted_quote_reconciliation"
+      ? `Follow-up task "${task.title}" completed during accepted-quote reconciliation.`
+      : `Follow-up task "${task.title}" completed automatically after quote acceptance.`;
+
   await logOpportunityActivity(adminClient, {
     opportunityId: task.opportunity_id ?? opportunityId,
     companyId: task.company_id,
     quoteId,
     taskId: task.id,
     activityType: CRM_ACTIVITY_TYPES.quoteFollowUpTaskAutoCompleted,
-    description: `Follow-up task "${task.title}" completed automatically after quote acceptance.`,
+    description,
     metadata: {
-      trigger: "quote_accepted",
+      trigger,
       task_id: task.id,
       quote_id: quoteId,
       opportunity_id: opportunityId,
@@ -189,16 +258,25 @@ export async function completeQuoteFollowUpTasksForAcceptedQuote(
     quoteId,
     actorProfileId,
     jobId = null,
+    trigger = "quote_accepted",
   }: {
     quoteId: string;
     actorProfileId?: string | null;
     jobId?: string | null;
+    trigger?: QuoteFollowUpCompletionTrigger;
   }
 ): Promise<CompleteQuoteFollowUpTasksResult> {
+  const errors: string[] = [];
+
   const quote = await loadAcceptedQuoteContext(adminClient, quoteId);
 
   if (!quote) {
-    return { completedTaskIds: [], alreadyCompletedCount: 0 };
+    return {
+      completedTaskIds: [],
+      alreadyCompletedCount: 0,
+      matchedTaskIds: [],
+      errors: ["Quote is not accepted or could not be loaded."],
+    };
   }
 
   const openTasks = await findOpenQuoteFollowUpTasks(adminClient, {
@@ -208,7 +286,12 @@ export async function completeQuoteFollowUpTasksForAcceptedQuote(
   });
 
   if (openTasks.length === 0) {
-    return { completedTaskIds: [], alreadyCompletedCount: 0 };
+    return {
+      completedTaskIds: [],
+      alreadyCompletedCount: 0,
+      matchedTaskIds: [],
+      errors: [],
+    };
   }
 
   const completedAt = new Date().toISOString();
@@ -227,22 +310,25 @@ export async function completeQuoteFollowUpTasksForAcceptedQuote(
       })
       .eq("id", task.id)
       .in("status", [...OPEN_TASK_STATUSES])
-      .select("id")
+      .select("id, status, completed_at")
       .maybeSingle();
 
     if (updateError) {
-      if (process.env.NODE_ENV === "development") {
-        console.error("[tasks] failed to auto-complete quote follow-up task", {
-          quoteId,
-          taskId: task.id,
-          message: updateError.message,
-        });
-      }
-
+      const message = `[tasks] failed to complete follow-up task ${task.id}: ${updateError.message}${updateError.code ? ` (${updateError.code})` : ""}`;
+      console.error(message, {
+        quoteId,
+        taskId: task.id,
+        details: updateError.details,
+        hint: updateError.hint,
+      });
+      errors.push(message);
       continue;
     }
 
     if (!updatedTask) {
+      const message = `[tasks] follow-up task ${task.id} was matched but not updated (status may have changed concurrently).`;
+      console.error(message, { quoteId, taskId: task.id, taskStatus: task.status });
+      errors.push(message);
       continue;
     }
 
@@ -256,20 +342,51 @@ export async function completeQuoteFollowUpTasksForAcceptedQuote(
         opportunityId: quote.opportunity_id,
         jobId,
         actorProfileId,
+        trigger,
       });
     } catch (error) {
-      if (process.env.NODE_ENV === "development") {
-        console.error("[tasks] failed to log quote follow-up auto-complete activity", {
-          quoteId,
-          taskId: task.id,
-          message: error instanceof Error ? error.message : String(error),
-        });
-      }
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to log quote follow-up auto-complete activity.";
+      console.error("[tasks] activity logging failed", {
+        quoteId,
+        taskId: task.id,
+        message,
+      });
+      errors.push(message);
     }
   }
 
   return {
     completedTaskIds,
     alreadyCompletedCount: 0,
+    matchedTaskIds: openTasks.map((task) => task.id),
+    errors,
+  };
+}
+
+export async function loadOpenQuoteFollowUpTasksForQuote(
+  adminClient: SupabaseClient,
+  quoteId: string
+) {
+  const quote = await loadAcceptedQuoteContext(adminClient, quoteId);
+
+  if (!quote) {
+    return {
+      quoteAccepted: false,
+      openTasks: [] as QuoteFollowUpTaskRow[],
+    };
+  }
+
+  const openTasks = await findOpenQuoteFollowUpTasks(adminClient, {
+    quoteId: quote.id,
+    quoteNumber: quote.quote_number,
+    opportunityId: quote.opportunity_id,
+  });
+
+  return {
+    quoteAccepted: true,
+    openTasks,
   };
 }
