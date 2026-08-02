@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AdminQuoteLinkedJobPanel } from "@/components/admin-quote-linked-job-panel";
 import { AdminQuoteManagementActions } from "@/components/admin-quote-management-actions";
 import { CreateQuoteVersionButton } from "@/components/create-quote-version-button";
 import { DeleteBrokenQuoteButton } from "@/components/delete-broken-quote-button";
@@ -25,6 +26,7 @@ import {
 } from "@/components/quote-version-selector";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { loadLinkedJobForQuote } from "@/lib/admin-job-metrics";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { logDevQuery } from "@/lib/dev-query-log";
@@ -309,6 +311,8 @@ export default async function QuoteDetailPage({
 
   const missingVersions = versions.length === 0;
 
+  const linkedJob = await loadLinkedJobForQuote(quote.id, quote.status);
+
   return (
     <AppShell {...shellProps}>
       <div className="mx-auto max-w-5xl">
@@ -391,6 +395,14 @@ export default async function QuoteDetailPage({
           total={Number(quoteVersion?.total ?? 0)}
           canRespondOnBehalf={canRespondOnBehalf}
           hidePermanentDelete={missingVersions}
+        />
+
+        <AdminQuoteLinkedJobPanel
+          quoteId={quote.id}
+          quoteStatus={quote.status}
+          linkedJobId={linkedJob.linkedJobId}
+          linkedJobReference={linkedJob.linkedJobReference}
+          schemaMissing={linkedJob.schemaMissing}
         />
 
         <QuoteLinkedOpportunitySection

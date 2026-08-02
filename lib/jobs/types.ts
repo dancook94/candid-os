@@ -29,18 +29,30 @@ export const JOB_ARTWORK_STATUSES = [
 
 export type JobArtworkStatus = (typeof JOB_ARTWORK_STATUSES)[number];
 
+export const DROPBOX_SETUP_STATUSES = ["pending", "ready", "failed"] as const;
+
+export type DropboxSetupStatus = (typeof DROPBOX_SETUP_STATUSES)[number];
+
 export type JobRecord = {
   id: string;
   company_id: string;
   quote_id: string;
+  quote_version_id: string | null;
   opportunity_id: string | null;
+  quote_request_id: string | null;
+  contact_id: string | null;
   job_reference: string;
   project_name: string;
   status: JobStatus;
   fulfilment_method: string | null;
   required_date: string | null;
-  dropbox_folder_path: string;
+  artwork_required: boolean;
+  customer_visible: boolean;
+  accepted_at: string | null;
+  accepted_by: string | null;
+  dropbox_folder_path: string | null;
   dropbox_folder_id: string | null;
+  dropbox_setup_status: DropboxSetupStatus;
   created_at: string;
   updated_at: string;
 };
@@ -103,6 +115,7 @@ export type CustomerJobDetail = {
   fulfilmentMethod: string | null;
   quoteId: string;
   quoteNumber: string | null;
+  artworkRequired: boolean;
   dropboxConfigured: boolean;
   files: CustomerJobFileView[];
 };

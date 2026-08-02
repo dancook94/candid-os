@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { respondToCustomerQuote } from "@/lib/customer-quote-response";
 import { revalidateQuoteWorkflowRoutes } from "@/lib/quote-route-revalidation";
 import { resolveQuoteRequestIdFromQuote } from "@/lib/quote-request-link";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 type RouteContext = {
@@ -37,12 +38,33 @@ async function handleQuoteResponse(
 
   const quoteRequestId = await resolveQuoteRequestIdFromQuote(supabase, id);
 
+  let opportunityId: string | null = null;
+
+  if (action === "accept") {
+    const adminClient = createAdminClient();
+    const { data: quote } = await adminClient
+      .from("quotes")
+      .select("opportunity_id")
+      .eq("id", id)
+      .maybeSingle();
+
+    opportunityId = quote?.opportunity_id ?? null;
+  }
+
   revalidateQuoteWorkflowRoutes({
     quoteId: id,
     quoteRequestId,
+    jobId: result.job?.jobId ?? null,
+    opportunityId,
   });
 
-  return NextResponse.json({ success: true });
+  return NextResponse.json({
+    success: true,
+    jobId: result.job?.jobId ?? null,
+    jobReference: result.job?.jobReference ?? null,
+    jobWarning: result.job?.jobWarning ?? null,
+    schemaMissing: result.job?.schemaMissing ?? false,
+  });
 }
 
 export async function POST(_request: Request, context: RouteContext) {

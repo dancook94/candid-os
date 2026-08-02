@@ -17,6 +17,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { fetchAdminJobMetrics } from "@/lib/admin-job-metrics";
 import { fetchAdminQuoteMetrics } from "@/lib/admin-quote-metrics";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
@@ -39,9 +40,10 @@ export default async function AdminPage() {
   } = await supabase.auth.getUser();
   const currentUserId = user?.id ?? "";
 
-  const [quoteMetrics, crmDashboard, { data: pendingUsers }, { data: companies }] =
+  const [quoteMetrics, jobMetrics, crmDashboard, { data: pendingUsers }, { data: companies }] =
     await Promise.all([
       fetchAdminQuoteMetrics(supabase),
+      fetchAdminJobMetrics(supabase),
       showCrmOverview && currentUserId
         ? fetchAdminDashboardCrm(supabase, currentUserId)
         : Promise.resolve(null),
@@ -62,6 +64,7 @@ export default async function AdminPage() {
   const shellProps = await buildAdminAppShellProps(supabase, profile);
   const dashboardErrors = [
     ...quoteMetrics.errors,
+    ...jobMetrics.errors,
     ...(crmDashboard?.errors ?? []),
   ];
 
@@ -89,7 +92,7 @@ export default async function AdminPage() {
           </Card>
         ) : null}
 
-        <div className="mb-8 grid gap-5 md:grid-cols-3">
+        <div className="mb-8 grid gap-5 md:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Quotes sent"
             value={quoteMetrics.quotesSent.formattedValue}
@@ -103,6 +106,18 @@ export default async function AdminPage() {
             value={quoteMetrics.quotesAccepted.formattedValue}
             description="Confirmed quote value"
             meta={quoteMetrics.quotesAccepted.formattedQuoteCount}
+            href="/admin/quotes?status=accepted"
+          />
+
+          <StatCard
+            label="Artwork required"
+            value={String(jobMetrics.artworkRequiredCount)}
+            description="Accepted jobs awaiting customer artwork"
+            meta={
+              jobMetrics.schemaMissing
+                ? "Jobs schema not deployed"
+                : `${jobMetrics.artworkRequiredCount} job${jobMetrics.artworkRequiredCount === 1 ? "" : "s"}`
+            }
             href="/admin/quotes?status=accepted"
           />
 

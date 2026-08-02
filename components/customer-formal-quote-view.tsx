@@ -55,6 +55,8 @@ export type CustomerFormalQuoteViewProps = {
   total: number;
   lineItems: CustomerFormalQuoteLineItem[];
   linkedRequestId: string | null;
+  linkedJobId?: string | null;
+  linkedJobReference?: string | null;
   customerCompanyName: string | null;
   customerContactName: string | null;
   customerEmail: string | null;
@@ -132,12 +134,14 @@ function CustomerQuoteDecisionSection({
   versionNumber,
   total,
   decisionState,
+  linkedJobId,
 }: {
   quoteId: string;
   quoteNumber: number;
   versionNumber: number;
   total: number;
   decisionState: QuoteDecisionState;
+  linkedJobId?: string | null;
 }) {
   if (decisionState.kind === "awaiting_decision") {
     return (
@@ -158,12 +162,19 @@ function CustomerQuoteDecisionSection({
         aria-label="Quote decision"
         className="mb-8 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900"
       >
-        <p className="font-semibold">Quotation accepted</p>
+        <p className="font-semibold">Quote accepted successfully.</p>
         <p className="mt-1">
           You accepted Q-{quoteNumber}, Version {versionNumber}.
           {decidedOn ? ` Accepted on ${decidedOn}.` : ""} Candid Creative has
           been notified.
         </p>
+        {linkedJobId ? (
+          <div className="mt-4">
+            <Link href={`/jobs/${linkedJobId}`}>
+              <Button>Continue to job</Button>
+            </Link>
+          </div>
+        ) : null}
       </section>
     );
   }
@@ -221,6 +232,7 @@ export function CustomerFormalQuoteView({
   total,
   lineItems,
   linkedRequestId,
+  linkedJobId,
   customerCompanyName,
   customerContactName,
   customerEmail,
@@ -308,6 +320,7 @@ export function CustomerFormalQuoteView({
           versionNumber={versionNumber}
           total={total}
           decisionState={decisionState}
+          linkedJobId={linkedJobId}
         />
 
         <section

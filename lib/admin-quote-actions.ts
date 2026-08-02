@@ -125,17 +125,39 @@ export async function respondToQuoteAsAdmin(
 
   if (action === "accept") {
     try {
-      await ensureJobForAcceptedQuote({
+      const jobResult = await ensureJobForAcceptedQuote({
         quoteId,
         actorProfileId: changedBy,
       });
-    } catch (error) {
-      if (process.env.NODE_ENV === "development") {
-        console.error("[jobs] failed to create job from admin accepted quote", {
-          quoteId,
-          message: error instanceof Error ? error.message : String(error),
-        });
+
+      if (!jobResult.job && !jobResult.schemaMissing) {
+        return {
+          ok: false,
+          status: 500,
+          message:
+            "Quote was accepted, but the production job could not be created.",
+        };
       }
+
+      return {
+        ok: true,
+        job: {
+          jobId: jobResult.job?.id ?? null,
+          jobReference: jobResult.job?.job_reference ?? null,
+          jobCreated: jobResult.created,
+          jobWarning: jobResult.warning,
+          schemaMissing: jobResult.schemaMissing,
+        },
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        status: 500,
+        message:
+          error instanceof Error
+            ? `Quote was accepted, but job setup failed: ${error.message}`
+            : "Quote was accepted, but job setup failed.",
+      };
     }
   }
 

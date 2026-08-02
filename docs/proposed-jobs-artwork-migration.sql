@@ -10,19 +10,27 @@ BEGIN;
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS public.jobs (
-  id                  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  company_id          uuid NOT NULL REFERENCES public.companies(id) ON DELETE RESTRICT,
-  quote_id            uuid NOT NULL REFERENCES public.quotes(id) ON DELETE RESTRICT,
-  opportunity_id      uuid REFERENCES public.opportunities(id) ON DELETE SET NULL,
-  job_reference       text NOT NULL,
-  project_name        text NOT NULL,
-  status              text NOT NULL DEFAULT 'awaiting_artwork',
-  fulfilment_method   text,
-  required_date       date,
-  dropbox_folder_path text NOT NULL,
-  dropbox_folder_id   text,
-  created_at          timestamptz NOT NULL DEFAULT now(),
-  updated_at          timestamptz NOT NULL DEFAULT now(),
+  id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id            uuid NOT NULL REFERENCES public.companies(id) ON DELETE RESTRICT,
+  quote_id              uuid NOT NULL REFERENCES public.quotes(id) ON DELETE RESTRICT,
+  quote_version_id      uuid REFERENCES public.quote_versions(id) ON DELETE SET NULL,
+  opportunity_id        uuid REFERENCES public.opportunities(id) ON DELETE SET NULL,
+  quote_request_id      uuid REFERENCES public.quote_requests(id) ON DELETE SET NULL,
+  contact_id            uuid REFERENCES public.contacts(id) ON DELETE SET NULL,
+  job_reference         text NOT NULL,
+  project_name          text NOT NULL,
+  status                text NOT NULL DEFAULT 'awaiting_artwork',
+  fulfilment_method     text,
+  required_date         date,
+  artwork_required      boolean NOT NULL DEFAULT true,
+  customer_visible      boolean NOT NULL DEFAULT true,
+  accepted_at           timestamptz,
+  accepted_by           uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  dropbox_folder_path   text,
+  dropbox_folder_id     text,
+  dropbox_setup_status  text NOT NULL DEFAULT 'pending',
+  created_at            timestamptz NOT NULL DEFAULT now(),
+  updated_at            timestamptz NOT NULL DEFAULT now(),
 
   CONSTRAINT jobs_job_reference_not_blank CHECK (btrim(job_reference) <> ''),
   CONSTRAINT jobs_project_name_not_blank CHECK (btrim(project_name) <> ''),
@@ -35,6 +43,9 @@ CREATE TABLE IF NOT EXISTS public.jobs (
       'cancelled'
     )
   ),
+  CONSTRAINT jobs_dropbox_setup_status_check CHECK (
+    dropbox_setup_status IN ('pending', 'ready', 'failed')
+  ),
   CONSTRAINT jobs_one_per_quote UNIQUE (quote_id)
 );
 
@@ -42,7 +53,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS jobs_job_reference_idx
   ON public.jobs (job_reference);
 
 CREATE INDEX IF NOT EXISTS jobs_company_id_idx
-  ON public.jobs (company_id, updated_at DESC);
+  ON public.jobs (company_id, updated_at DESC)
+  WHERE customer_visible = true;
 
 CREATE INDEX IF NOT EXISTS jobs_status_idx
   ON public.jobs (status, updated_at DESC);
@@ -51,6 +63,10 @@ COMMENT ON TABLE public.jobs IS
   'Customer production jobs created when a formal quote is accepted.';
 COMMENT ON COLUMN public.jobs.dropbox_folder_path IS
   'Root job folder in Candid Creative Dropbox. Subfolders are created beneath this path.';
+COMMENT ON COLUMN public.jobs.dropbox_setup_status IS
+  'Dropbox folder provisioning state: pending, ready, or failed.';
+COMMENT ON COLUMN public.jobs.artwork_required IS
+  'When false, customer artwork upload is not requested for this job.';
 
 -- ---------------------------------------------------------------------------
 -- 2. job_files (customer artwork metadata — bytes in Dropbox)
@@ -81,7 +97,7 @@ CREATE TABLE IF NOT EXISTS public.job_files (
   uploaded_at               timestamptz,
   reviewed_at               timestamptz,
   approved_at               timestamptz,
-  approved_by_profile_id    uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  approved_by_profile_id      uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
   changes_required_comment  text,
   created_at                timestamptz NOT NULL DEFAULT now(),
   deleted_at                timestamptz,
@@ -139,7 +155,7 @@ CREATE TRIGGER jobs_set_updated_at
 ALTER TABLE public.jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.job_files ENABLE ROW LEVEL SECURITY;
 
--- Customers: read own company jobs and customer artwork files only.
+-- Customers: read own company jobs where customer_visible = true.
 -- Staff CRM roles: read/write jobs and files for their company portfolio.
 -- Service role bypasses RLS for server-side Dropbox orchestration.
 

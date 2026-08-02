@@ -66,6 +66,7 @@ export const CUSTOMER_ARTWORK_STATUS_LABELS: Record<string, string> = {
 };
 
 export const JOB_ACTIVITY_TYPES = {
+  jobCreatedFromAcceptedQuote: "job_created_from_accepted_quote",
   customerArtworkUploaded: "customer_artwork_uploaded",
   customerArtworkReplaced: "customer_artwork_replaced",
   artworkReviewStarted: "artwork_review_started",

@@ -272,6 +272,7 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
           total={formalQuote.total}
           lineItems={formalQuote.lineItems}
           linkedRequestId={formalQuote.linkedRequestId}
+          linkedJobId={formalQuote.linkedJobId}
           customerCompanyName={formalQuote.customerCompanyName}
           customerContactName={formalQuote.customerContactName}
           customerEmail={formalQuote.customerEmail}

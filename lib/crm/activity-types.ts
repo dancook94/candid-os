@@ -26,6 +26,7 @@ export const CRM_ACTIVITY_TYPES = {
   quoteVersionCreated: "quote_version_created",
   quoteSent: "quote_sent",
   quoteAccepted: "quote_accepted",
+  jobCreatedFromAcceptedQuote: "job_created_from_accepted_quote",
   quoteDeclined: "quote_declined",
   quoteLinked: "quote_linked",
   quoteDeleted: "quote_deleted",

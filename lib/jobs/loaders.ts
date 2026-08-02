@@ -6,6 +6,7 @@ import {
   JOB_STATUS_LABELS,
 } from "@/lib/jobs/constants";
 import { isMissingJobsSchemaError } from "@/lib/jobs/errors";
+import { JOB_LIST_COLUMNS } from "@/lib/jobs/job-select";
 import type {
   CustomerJobDetail,
   CustomerJobFileView,
@@ -68,10 +69,9 @@ export async function loadCustomerJobs(
 
   let query = adminClient
     .from("jobs")
-    .select(
-      "id, company_id, quote_id, opportunity_id, job_reference, project_name, status, fulfilment_method, required_date, dropbox_folder_path, dropbox_folder_id, created_at, updated_at"
-    )
+    .select(JOB_LIST_COLUMNS)
     .eq("company_id", companyId)
+    .eq("customer_visible", true)
     .order("updated_at", { ascending: false });
 
   if (options.filter && options.filter !== "all") {
@@ -89,10 +89,15 @@ export async function loadCustomerJobs(
       return {
         jobs: [] as CustomerJobRecord[],
         jobsDataAvailable: false,
+        loadError: null as string | null,
       };
     }
 
-    throw error;
+    return {
+      jobs: [] as CustomerJobRecord[],
+      jobsDataAvailable: false,
+      loadError: error.message,
+    };
   }
 
   const jobs = (data ?? []) as JobRecord[];
@@ -115,6 +120,7 @@ export async function loadCustomerJobs(
       mapJobToCustomerListRecord(job, quoteNumberById.get(job.quote_id) ?? null)
     ),
     jobsDataAvailable: true,
+    loadError: null as string | null,
   };
 }
 
@@ -127,11 +133,10 @@ export async function loadCustomerJobDetail(
 
   const { data: job, error: jobError } = await adminClient
     .from("jobs")
-    .select(
-      "id, company_id, quote_id, opportunity_id, job_reference, project_name, status, fulfilment_method, required_date, dropbox_folder_path, dropbox_folder_id, created_at, updated_at"
-    )
+    .select(JOB_LIST_COLUMNS)
     .eq("id", jobId)
     .eq("company_id", companyId)
+    .eq("customer_visible", true)
     .maybeSingle();
 
   if (jobError) {
@@ -170,16 +175,19 @@ export async function loadCustomerJobDetail(
     (uploaders ?? []).map((profile) => [profile.id, profile.full_name])
   );
 
+  const typedJob = job as JobRecord;
+
   return {
-    id: job.id,
-    reference: job.job_reference,
-    projectTitle: job.project_name,
-    status: job.status,
-    statusLabel: JOB_STATUS_LABELS[job.status] ?? job.status,
-    requiredDate: job.required_date,
-    fulfilmentMethod: job.fulfilment_method,
-    quoteId: job.quote_id,
+    id: typedJob.id,
+    reference: typedJob.job_reference,
+    projectTitle: typedJob.project_name,
+    status: typedJob.status,
+    statusLabel: JOB_STATUS_LABELS[typedJob.status] ?? typedJob.status,
+    requiredDate: typedJob.required_date,
+    fulfilmentMethod: typedJob.fulfilment_method,
+    quoteId: typedJob.quote_id,
     quoteNumber: quote?.quote_number ? `Q-${quote.quote_number}` : null,
+    artworkRequired: typedJob.artwork_required,
     dropboxConfigured: isDropboxConfigured(),
     files: ((files ?? []) as JobFileRecord[]).map((file) =>
       mapJobFileToCustomerView(
@@ -197,9 +205,7 @@ export function getCustomerArtworkStatusLabel(status: string) {
 export async function loadAdminJobDetail(adminClient: SupabaseClient, jobId: string) {
   const { data: job, error } = await adminClient
     .from("jobs")
-    .select(
-      "id, company_id, quote_id, opportunity_id, job_reference, project_name, status, fulfilment_method, required_date, dropbox_folder_path, dropbox_folder_id, created_at, updated_at"
-    )
+    .select(JOB_LIST_COLUMNS)
     .eq("id", jobId)
     .maybeSingle();
 
@@ -215,16 +221,34 @@ export async function loadAdminJobDetail(adminClient: SupabaseClient, jobId: str
     return null;
   }
 
-  const [{ data: company }, { data: quote }, { data: files }] = await Promise.all([
-    adminClient.from("companies").select("company_name").eq("id", job.company_id).maybeSingle(),
-    adminClient.from("quotes").select("id, quote_number").eq("id", job.quote_id).maybeSingle(),
-    adminClient
-      .from("job_files")
-      .select("*")
-      .eq("job_id", job.id)
-      .is("deleted_at", null)
-      .order("created_at", { ascending: false }),
-  ]);
+  const typedJob = job as JobRecord;
+
+  const [{ data: company }, { data: quote }, { data: files }, { data: opportunity }] =
+    await Promise.all([
+      adminClient
+        .from("companies")
+        .select("company_name")
+        .eq("id", typedJob.company_id)
+        .maybeSingle(),
+      adminClient
+        .from("quotes")
+        .select("id, quote_number")
+        .eq("id", typedJob.quote_id)
+        .maybeSingle(),
+      adminClient
+        .from("job_files")
+        .select("*")
+        .eq("job_id", typedJob.id)
+        .is("deleted_at", null)
+        .order("created_at", { ascending: false }),
+      typedJob.opportunity_id
+        ? adminClient
+            .from("opportunities")
+            .select("id, title")
+            .eq("id", typedJob.opportunity_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
 
   const uploaderIds = [
     ...new Set((files ?? []).map((file) => file.uploaded_by_profile_id)),
@@ -240,9 +264,10 @@ export async function loadAdminJobDetail(adminClient: SupabaseClient, jobId: str
   );
 
   return {
-    job: job as JobRecord,
+    job: typedJob,
     companyName: company?.company_name ?? "Unknown company",
     quoteNumber: quote?.quote_number ?? null,
+    opportunityTitle: opportunity?.title ?? null,
     files: ((files ?? []) as JobFileRecord[]).map((file) => ({
       ...file,
       uploadedByName: uploaderNameById.get(file.uploaded_by_profile_id) ?? null,

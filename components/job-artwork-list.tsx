@@ -17,6 +17,7 @@ type JobArtworkListProps = {
   jobId: string;
   files: CustomerJobFileView[];
   dropboxConfigured: boolean;
+  showArtworkRequired?: boolean;
   onChanged?: () => void;
 };
 
@@ -53,19 +54,29 @@ export function JobArtworkList({
   jobId,
   files,
   dropboxConfigured,
+  showArtworkRequired = false,
   onChanged,
 }: JobArtworkListProps) {
   const [replaceFileId, setReplaceFileId] = useState<string | null>(null);
 
   return (
     <div className="space-y-8">
+      {showArtworkRequired ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-4">
+          <p className="text-base font-semibold text-amber-950">Artwork required</p>
+          <p className="mt-1 text-sm text-amber-900">
+            Please upload the artwork required for this job.
+          </p>
+        </div>
+      ) : null}
+
       <JobArtworkUploader
         jobId={jobId}
         enabled={dropboxConfigured}
         disabledMessage={
           dropboxConfigured
             ? null
-            : "Dropbox integration is not configured."
+            : "Artwork upload is not available yet. Please contact Candid Creative."
         }
         replaceFileId={replaceFileId}
         onComplete={() => {

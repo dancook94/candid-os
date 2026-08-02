@@ -2,6 +2,7 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 
 import { requireCustomerSettingsContext } from "@/lib/customer-settings/auth";
 import { JobError } from "@/lib/jobs/errors";
+import { JOB_LIST_COLUMNS } from "@/lib/jobs/job-select";
 import type { JobFileRecord, JobRecord } from "@/lib/jobs/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -21,9 +22,7 @@ export async function requireCustomerJobContext(
 
   const { data: job, error } = await adminClient
     .from("jobs")
-    .select(
-      "id, company_id, quote_id, opportunity_id, job_reference, project_name, status, fulfilment_method, required_date, dropbox_folder_path, dropbox_folder_id, created_at, updated_at"
-    )
+    .select(JOB_LIST_COLUMNS)
     .eq("id", jobId)
     .maybeSingle();
 
@@ -36,6 +35,10 @@ export async function requireCustomerJobContext(
   }
 
   if (job.company_id !== context.company.id) {
+    throw new JobError("Forbidden.", 403);
+  }
+
+  if (!job.customer_visible) {
     throw new JobError("Forbidden.", 403);
   }
 
@@ -76,9 +79,7 @@ export async function requireAdminJobAccess(
 ) {
   const { data: job, error } = await adminClient
     .from("jobs")
-    .select(
-      "id, company_id, quote_id, opportunity_id, job_reference, project_name, status, fulfilment_method, required_date, dropbox_folder_path, dropbox_folder_id, created_at, updated_at"
-    )
+    .select(JOB_LIST_COLUMNS)
     .eq("id", jobId)
     .maybeSingle();
 

@@ -33,6 +33,7 @@ export type LoadCustomerJobsResult = {
   jobs: CustomerJobRecord[];
   /** False until a customer-safe jobs table and RLS policies exist. */
   jobsDataAvailable: boolean;
+  loadError: string | null;
 };
 
 export function filterCustomerJobsByStatus(

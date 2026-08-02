@@ -31,9 +31,9 @@ export default async function CustomerJobsPage() {
   const canLoadCompanyJobs =
     profile.account_status === "approved" && Boolean(profile.company_id);
 
-  const { jobs, jobsDataAvailable } = canLoadCompanyJobs
+  const { jobs, jobsDataAvailable, loadError } = canLoadCompanyJobs
     ? await loadCustomerJobs(supabase, profile.company_id!)
-    : { jobs: [], jobsDataAvailable: false };
+    : { jobs: [], jobsDataAvailable: false, loadError: null };
 
   const emptyActions = (
     <div className="flex flex-wrap items-center justify-center gap-3">
@@ -68,7 +68,18 @@ export default async function CustomerJobsPage() {
           </Card>
         )}
 
-        {process.env.NODE_ENV === "development" && !jobsDataAvailable ? (
+        {loadError ? (
+          <Card className="portal-surface mt-6 border-red-200 bg-red-50">
+            <CardContent className="pt-6">
+              <p className="text-sm font-medium text-red-800">
+                Unable to load jobs
+              </p>
+              <p className="mt-1 text-sm text-red-700">{loadError}</p>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {process.env.NODE_ENV === "development" && !jobsDataAvailable && !loadError ? (
           <p className="mt-6 text-sm text-muted-foreground">
             Production jobs schema is not deployed yet. This page will list
             company jobs once a customer-safe jobs table and quote-to-job

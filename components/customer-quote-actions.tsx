@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -21,6 +22,12 @@ type CustomerQuoteActionsProps = {
 };
 
 type ConfirmAction = "accept" | "decline" | null;
+
+type AcceptResponse = {
+  error?: string;
+  jobId?: string | null;
+  jobWarning?: string | null;
+};
 
 export function CustomerQuoteActions({
   quoteId,
@@ -48,7 +55,7 @@ export function CustomerQuoteActions({
 
     try {
       const response = await fetch(endpoint, { method: "POST" });
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as AcceptResponse;
 
       if (!response.ok) {
         setError(payload.error ?? "Unable to update this quotation.");
@@ -63,6 +70,12 @@ export function CustomerQuoteActions({
       }
 
       setConfirmAction(null);
+
+      if (confirmAction === "accept" && payload.jobId) {
+        router.push(`/jobs/${payload.jobId}`);
+        return;
+      }
+
       router.refresh();
     } catch {
       setError("Unable to update this quotation. Please try again.");

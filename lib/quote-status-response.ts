@@ -2,6 +2,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type QuoteResponseAction = "accept" | "decline";
 
+export type QuoteAcceptanceJobInfo = {
+  jobId: string | null;
+  jobReference: string | null;
+  jobCreated: boolean;
+  jobWarning: string | null;
+  schemaMissing: boolean;
+};
+
 type QuoteResponseContext = {
   quote: {
     id: string;
@@ -16,7 +24,7 @@ type QuoteResponseContext = {
 };
 
 export type QuoteStatusResponseResult =
-  | { ok: true }
+  | { ok: true; job?: QuoteAcceptanceJobInfo }
   | { ok: false; status: number; message: string };
 
 function responseError(

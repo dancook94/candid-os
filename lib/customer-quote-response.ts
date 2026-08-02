@@ -1,11 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { ensureJobForAcceptedQuote } from "@/lib/jobs/create-from-quote";
+import {
+  ensureJobForAcceptedQuote,
+  reconcileJobForAcceptedQuote,
+} from "@/lib/jobs/create-from-quote";
 import {
   applyQuoteStatusResponse,
   getQuoteDecisionState,
   isQuoteAwaitingDecision,
   quoteResponseConflictMessage,
+  type QuoteAcceptanceJobInfo,
   type QuoteResponseAction,
   type QuoteStatusResponseResult,
 } from "@/lib/quote-status-response";
@@ -30,6 +34,18 @@ export type CustomerQuoteResponseResult = QuoteStatusResponseResult;
 
 function responseError(status: number, message: string): CustomerQuoteResponseResult {
   return { ok: false, status, message };
+}
+
+function mapJobResult(
+  result: Awaited<ReturnType<typeof ensureJobForAcceptedQuote>>
+): QuoteAcceptanceJobInfo {
+  return {
+    jobId: result.job?.id ?? null,
+    jobReference: result.job?.job_reference ?? null,
+    jobCreated: result.created,
+    jobWarning: result.warning,
+    schemaMissing: result.schemaMissing,
+  };
 }
 
 async function loadQuoteContext(
@@ -123,6 +139,23 @@ export async function respondToCustomerQuote(
   const loaded = await loadQuoteContext(supabase, userId, quoteId);
 
   if ("ok" in loaded) {
+    if (
+      !loaded.ok &&
+      loaded.status === 409 &&
+      action === "accept" &&
+      loaded.message.includes("already been accepted")
+    ) {
+      const jobResult = await reconcileJobForAcceptedQuote({
+        quoteId,
+        actorProfileId: userId,
+      });
+
+      return {
+        ok: true,
+        job: mapJobResult(jobResult),
+      };
+    }
+
     return loaded;
   }
 
@@ -141,17 +174,33 @@ export async function respondToCustomerQuote(
 
   if (action === "accept") {
     try {
-      await ensureJobForAcceptedQuote({
+      const jobResult = await ensureJobForAcceptedQuote({
         quoteId,
         actorProfileId: userId,
       });
-    } catch (error) {
-      if (process.env.NODE_ENV === "development") {
-        console.error("[jobs] failed to create job from accepted quote", {
-          quoteId,
-          message: error instanceof Error ? error.message : String(error),
-        });
+
+      if (!jobResult.job && !jobResult.schemaMissing) {
+        return {
+          ok: false,
+          status: 500,
+          message:
+            "Your quote was accepted, but the production job could not be created. Please contact Candid Creative.",
+        };
       }
+
+      return {
+        ok: true,
+        job: mapJobResult(jobResult),
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        status: 500,
+        message:
+          error instanceof Error
+            ? `Your quote was accepted, but job setup failed: ${error.message}`
+            : "Your quote was accepted, but job setup failed. Please contact Candid Creative.",
+      };
     }
   }
 
@@ -181,4 +230,11 @@ export function canCustomerRespondToQuote({
     acceptedAt,
     declinedAt,
   }).canRespond;
+}
+
+export async function ensureLinkedJobForAcceptedQuote(
+  quoteId: string,
+  actorProfileId?: string | null
+) {
+  return reconcileJobForAcceptedQuote({ quoteId, actorProfileId });
 }

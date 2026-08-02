@@ -105,6 +105,52 @@ export default async function AdminJobDetailPage({
               <p className="text-muted-foreground">Company</p>
               <p className="mt-2 font-medium text-neutral-950">{detail.companyName}</p>
             </div>
+            <div>
+              <p className="text-muted-foreground">Artwork required</p>
+              <p className="mt-2 font-medium text-neutral-950">
+                {detail.job.artwork_required ? "Yes" : "No"}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground">Dropbox setup</p>
+              <p className="mt-2 font-medium text-neutral-950">
+                {detail.job.dropbox_setup_status === "ready"
+                  ? "Ready"
+                  : detail.job.dropbox_setup_status === "failed"
+                    ? "Failed"
+                    : "Pending"}
+              </p>
+            </div>
+            {detail.opportunityTitle ? (
+              <div>
+                <p className="text-muted-foreground">Opportunity</p>
+                <p className="mt-2 font-medium text-neutral-950">
+                  {detail.job.opportunity_id ? (
+                    <Link
+                      href={`/admin/opportunities/${detail.job.opportunity_id}`}
+                      className="underline-offset-4 hover:underline"
+                    >
+                      {detail.opportunityTitle}
+                    </Link>
+                  ) : (
+                    detail.opportunityTitle
+                  )}
+                </p>
+              </div>
+            ) : null}
+            {detail.job.quote_request_id ? (
+              <div>
+                <p className="text-muted-foreground">Quote request</p>
+                <p className="mt-2 font-medium text-neutral-950">
+                  <Link
+                    href={`/admin/quote-requests/${detail.job.quote_request_id}`}
+                    className="underline-offset-4 hover:underline"
+                  >
+                    View quote request
+                  </Link>
+                </p>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 

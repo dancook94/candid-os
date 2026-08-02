@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { ensureLinkedJobForAcceptedQuote } from "@/lib/customer-quote-response";
 import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
 import { resolveCustomerQuoteStatus } from "@/lib/quote-customer-status";
 import {
@@ -42,6 +43,8 @@ export type CustomerFormalQuoteData = {
   total: number;
   lineItems: CustomerFormalQuoteLineItemData[];
   linkedRequestId: string | null;
+  linkedJobId: string | null;
+  linkedJobReference: string | null;
   customerCompanyName: string | null;
   customerContactName: string | null;
   customerEmail: string | null;
@@ -164,6 +167,16 @@ export async function fetchCustomerFormalQuote(
     declinedAt: displayVersion.declined_at,
   });
 
+  let linkedJobId: string | null = null;
+  let linkedJobReference: string | null = null;
+
+  if (decisionState.kind === "accepted") {
+    const jobResult = await ensureLinkedJobForAcceptedQuote(formalQuote.id);
+
+    linkedJobId = jobResult.job?.id ?? null;
+    linkedJobReference = jobResult.job?.job_reference ?? null;
+  }
+
   return {
     quoteId: formalQuote.id,
     quoteNumber: formalQuote.quote_number,
@@ -184,6 +197,8 @@ export async function fetchCustomerFormalQuote(
     total: Number(displayVersion.total ?? 0),
     lineItems,
     linkedRequestId: formalQuote.quote_request_id,
+    linkedJobId,
+    linkedJobReference,
     customerCompanyName:
       customerCompany?.company_name ?? resolvedCompanyName ?? null,
     customerContactName: resolvedContactName,
