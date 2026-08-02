@@ -6,6 +6,9 @@ import {
   JOB_STATUS_LABELS,
 } from "@/lib/jobs/constants";
 import {
+  resolveArtworkUploadedAt,
+} from "@/lib/jobs/artwork-display";
+import {
   getCustomerChangesRequiredComment,
   jobNeedsArtworkUpload,
   resolveCustomerJobStatus,
@@ -61,9 +64,9 @@ function mapJobFileToCustomerView(
     mimeType: file.mime_type,
     uploadStatus: file.upload_status,
     artworkStatus: file.artwork_status,
-    customerNotes: file.customer_notes,
+    customerNotes: file.customer_notes?.trim() || null,
     versionNumber: file.version_number,
-    uploadedAt: file.uploaded_at,
+    uploadedAt: resolveArtworkUploadedAt(file),
     uploadedByName,
     canRemove: canModify,
     canReplace: canModify,
@@ -331,6 +334,8 @@ export async function loadAdminJobDetail(adminClient: SupabaseClient, jobId: str
     opportunityTitle: opportunity?.title ?? null,
     files: ((files ?? []) as JobFileRecord[]).map((file) => ({
       ...file,
+      uploaded_at: resolveArtworkUploadedAt(file),
+      customer_notes: file.customer_notes?.trim() || null,
       uploadedByName: uploaderNameById.get(file.uploaded_by_profile_id) ?? null,
       artworkStatusLabel:
         CUSTOMER_ARTWORK_STATUS_LABELS[file.artwork_status] ?? file.artwork_status,

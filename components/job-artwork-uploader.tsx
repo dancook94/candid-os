@@ -36,6 +36,7 @@ export function JobArtworkUploader({
   const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef(false);
   const [note, setNote] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [upload, setUpload] = useState<UploadState | null>(null);
 
@@ -178,6 +179,7 @@ export function JobArtworkUploader({
       setUpload((current) =>
         current ? { ...current, status: "complete", progress: 100 } : current
       );
+      setNote("");
       onComplete?.();
     } catch (error) {
       setUpload((current) =>
@@ -198,7 +200,16 @@ export function JobArtworkUploader({
       return;
     }
 
-    void startUpload(selectedFiles[0], note);
+    setSelectedFile(selectedFiles[0]);
+  }
+
+  function handleStartUpload() {
+    if (!canInteract || !selectedFile) {
+      return;
+    }
+
+    void startUpload(selectedFile, note);
+    setSelectedFile(null);
   }
 
   return (
@@ -214,6 +225,20 @@ export function JobArtworkUploader({
         </div>
       ) : (
         <>
+          <div className="space-y-2">
+            <Label htmlFor="artwork-note">Upload note (optional)</Label>
+            <Input
+              id="artwork-note"
+              value={note}
+              disabled={!canInteract}
+              placeholder="Final artwork, fonts outlined, etc."
+              onChange={(event) => setNote(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Add your note before starting the upload.
+            </p>
+          </div>
+
           <div
             className={cn(
               "rounded-xl border border-dashed px-6 py-10 text-center transition",
@@ -259,6 +284,15 @@ export function JobArtworkUploader({
               >
                 Browse files
               </Button>
+              {selectedFile ? (
+                <Button
+                  type="button"
+                  disabled={!canInteract}
+                  onClick={handleStartUpload}
+                >
+                  Upload artwork
+                </Button>
+              ) : null}
               {upload?.status === "uploading" || upload?.status === "processing" ? (
                 <Button
                   type="button"
@@ -280,16 +314,27 @@ export function JobArtworkUploader({
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="artwork-note">Upload note (optional)</Label>
-            <Input
-              id="artwork-note"
-              value={note}
-              disabled={!canInteract}
-              placeholder="Final artwork, fonts outlined, etc."
-              onChange={(event) => setNote(event.target.value)}
-            />
-          </div>
+          {selectedFile && !upload ? (
+            <div className="rounded-xl border border-border bg-background px-4 py-4 text-sm">
+              <p className="font-medium text-neutral-950">Selected file</p>
+              <p className="mt-1 text-muted-foreground">
+                {selectedFile.name} · {formatFileSize(selectedFile.size)}
+              </p>
+              <div className="mt-3 flex flex-wrap gap-3">
+                <Button type="button" disabled={!canInteract} onClick={handleStartUpload}>
+                  Upload artwork
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!canInteract}
+                  onClick={() => setSelectedFile(null)}
+                >
+                  Clear selection
+                </Button>
+              </div>
+            </div>
+          ) : null}
 
           {upload ? (
             <div className="rounded-xl border border-border bg-background px-4 py-4">

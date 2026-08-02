@@ -7,6 +7,7 @@ import {
   startDropboxUploadSession,
 } from "@/lib/dropbox/upload-session";
 import { ensureDropboxOnExistingJob } from "@/lib/jobs/create-from-quote";
+import { resolveArtworkUploadedAtIso } from "@/lib/jobs/artwork-display";
 import {
   JOB_ACTIVITY_TYPES,
   logJobActivity,
@@ -478,7 +479,7 @@ export async function finishArtworkUpload(
       .eq("job_id", jobId);
   }
 
-  const now = new Date().toISOString();
+  const now = resolveArtworkUploadedAtIso(dropboxMetadata.server_modified);
   const completionPayload = {
     dropbox_file_id: dropboxMetadata.id,
     dropbox_path_lower: dropboxMetadata.path_lower,
@@ -486,9 +487,10 @@ export async function finishArtworkUpload(
     content_hash: dropboxMetadata.content_hash ?? null,
     dropbox_upload_session_id: null,
     upload_session_offset: null,
-    upload_status: "complete",
-    artwork_status: "uploaded",
+    upload_status: "complete" as const,
+    artwork_status: "uploaded" as const,
     uploaded_at: now,
+    customer_notes: file.customer_notes?.trim() || null,
   };
 
   const { data: completedFile, error: completeError } = await adminClient
@@ -520,6 +522,8 @@ export async function finishArtworkUpload(
         dropbox_upload_session_id: null,
         upload_session_offset: null,
         upload_status: "processing",
+        uploaded_at: now,
+        customer_notes: file.customer_notes?.trim() || null,
       })
       .eq("id", file.id);
 

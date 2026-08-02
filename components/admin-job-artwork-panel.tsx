@@ -6,6 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/status-badge";
+import {
+  formatArtworkCustomerNote,
+  formatArtworkUploadedAt,
+} from "@/lib/jobs/artwork-display";
 import { formatFileSize } from "@/lib/quote-request-attachments";
 
 type AdminJobFile = {
@@ -44,6 +48,7 @@ function mapArtworkStatusToBadge(status: string) {
 }
 
 export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps) {
+  const [expandedFileId, setExpandedFileId] = useState<string | null>(null);
   const [pendingFileId, setPendingFileId] = useState<string | null>(null);
   const [changesComments, setChangesComments] = useState<Record<string, string>>({});
   const [internalNotesByFile, setInternalNotesByFile] = useState<Record<string, string>>({});
@@ -90,121 +95,165 @@ export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps
         </p>
       ) : (
         <div className="space-y-4">
-          {files.map((file) => (
-            <div
-              key={file.id}
-              className="rounded-xl border border-border bg-background p-4"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-4">
-                <div>
-                  <p className="font-medium text-neutral-950">{file.file_name}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Version {file.version_number} · {formatFileSize(file.file_size_bytes)} ·{" "}
-                    {file.uploadedByName ?? "Unknown uploader"}
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="portal-table">
+              <thead>
+                <tr>
+                  <th>File</th>
+                  <th>Version</th>
+                  <th>Status</th>
+                  <th>Uploaded</th>
+                  <th>Uploaded by</th>
+                  <th>Size</th>
+                  <th>Note</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {files.map((file) => (
+                  <tr key={file.id}>
+                    <td className="p-4 font-medium text-foreground">{file.file_name}</td>
+                    <td className="p-4 text-muted-foreground">v{file.version_number}</td>
+                    <td className="p-4">
+                      <StatusBadge
+                        status={mapArtworkStatusToBadge(file.artwork_status)}
+                        label={file.artworkStatusLabel}
+                      />
+                    </td>
+                    <td className="p-4 text-muted-foreground">
+                      {formatArtworkUploadedAt(file.uploaded_at)}
+                    </td>
+                    <td className="p-4 text-muted-foreground">
+                      {file.uploadedByName ?? "—"}
+                    </td>
+                    <td className="p-4 text-muted-foreground">
+                      {formatFileSize(file.file_size_bytes)}
+                    </td>
+                    <td className="p-4 text-muted-foreground">
+                      {formatArtworkCustomerNote(file.customer_notes)}
+                    </td>
+                    <td className="p-4">
+                      <div className="flex flex-wrap gap-2">
+                        {file.upload_status === "complete" ? (
+                          <a href={`/api/admin/jobs/${jobId}/files/${file.id}`}>
+                            <Button type="button" variant="outline" size="sm">
+                              Download
+                            </Button>
+                          </a>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setExpandedFileId((current) =>
+                              current === file.id ? null : file.id
+                            )
+                          }
+                        >
+                          Review
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {files.map((file) =>
+            expandedFileId === file.id ? (
+              <div
+                key={`review-${file.id}`}
+                className="rounded-xl border border-border bg-background p-4"
+              >
+                <p className="font-medium text-neutral-950">{file.file_name}</p>
+                {file.changes_required_comment ? (
+                  <p className="mt-2 text-sm text-amber-900">
+                    Changes requested: {file.changes_required_comment}
                   </p>
-                  {file.customer_notes ? (
-                    <p className="mt-2 text-sm text-neutral-950">
-                      Customer note: {file.customer_notes}
-                    </p>
-                  ) : null}
-                  {file.changes_required_comment ? (
-                    <p className="mt-2 text-sm text-amber-900">
-                      Changes requested: {file.changes_required_comment}
-                    </p>
-                  ) : null}
-                  {file.internal_notes ? (
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      Internal notes: {file.internal_notes}
-                    </p>
-                  ) : null}
-                </div>
-                <StatusBadge
-                  status={mapArtworkStatusToBadge(file.artwork_status)}
-                  label={file.artworkStatusLabel}
-                />
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                {file.upload_status === "complete" ? (
-                  <a href={`/api/admin/jobs/${jobId}/files/${file.id}`}>
-                    <Button type="button" variant="outline" size="sm">
-                      Download
-                    </Button>
-                  </a>
                 ) : null}
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={pendingFileId === file.id}
-                  onClick={() => updateStatus(file.id, "under_review")}
-                >
-                  Start review
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={pendingFileId === file.id}
-                  onClick={() =>
-                    updateStatus(file.id, "approved", {
-                      internalNotes: internalNotesByFile[file.id],
-                    })
-                  }
-                >
-                  Approve
-                </Button>
-              </div>
+                {file.internal_notes ? (
+                  <p className="mt-2 text-sm text-muted-foreground">
+                    Internal notes: {file.internal_notes}
+                  </p>
+                ) : null}
 
-              <div className="mt-4 grid gap-3 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor={`changes-${file.id}`}>Customer-facing comment</Label>
-                  <Input
-                    id={`changes-${file.id}`}
-                    value={changesComments[file.id] ?? ""}
-                    onChange={(event) =>
-                      setChangesComments((current) => ({
-                        ...current,
-                        [file.id]: event.target.value,
-                      }))
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={pendingFileId === file.id}
+                    onClick={() => updateStatus(file.id, "under_review")}
+                  >
+                    Start review
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={pendingFileId === file.id}
+                    onClick={() =>
+                      updateStatus(file.id, "approved", {
+                        internalNotes: internalNotesByFile[file.id],
+                      })
                     }
-                    placeholder="Required when requesting changes"
-                  />
+                  >
+                    Approve
+                  </Button>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor={`internal-${file.id}`}>Internal notes</Label>
-                  <Input
-                    id={`internal-${file.id}`}
-                    value={internalNotesByFile[file.id] ?? ""}
-                    onChange={(event) =>
-                      setInternalNotesByFile((current) => ({
-                        ...current,
-                        [file.id]: event.target.value,
-                      }))
-                    }
-                    placeholder="Internal review notes"
-                  />
-                </div>
-              </div>
 
-              <div className="mt-3">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={pendingFileId === file.id}
-                  onClick={() =>
-                    updateStatus(file.id, "changes_required", {
-                      changesRequiredComment: changesComments[file.id],
-                      internalNotes: internalNotesByFile[file.id],
-                    })
-                  }
-                >
-                  Request changes
-                </Button>
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor={`changes-${file.id}`}>Customer-facing comment</Label>
+                    <Input
+                      id={`changes-${file.id}`}
+                      value={changesComments[file.id] ?? ""}
+                      onChange={(event) =>
+                        setChangesComments((current) => ({
+                          ...current,
+                          [file.id]: event.target.value,
+                        }))
+                      }
+                      placeholder="Required when requesting changes"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor={`internal-${file.id}`}>Internal notes</Label>
+                    <Input
+                      id={`internal-${file.id}`}
+                      value={internalNotesByFile[file.id] ?? ""}
+                      onChange={(event) =>
+                        setInternalNotesByFile((current) => ({
+                          ...current,
+                          [file.id]: event.target.value,
+                        }))
+                      }
+                      placeholder="Internal review notes"
+                    />
+                  </div>
+                </div>
+
+                <div className="mt-3">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={pendingFileId === file.id}
+                    onClick={() =>
+                      updateStatus(file.id, "changes_required", {
+                        changesRequiredComment: changesComments[file.id],
+                        internalNotes: internalNotesByFile[file.id],
+                      })
+                    }
+                  >
+                    Request changes
+                  </Button>
+                </div>
               </div>
-            </div>
-          ))}
+            ) : null
+          )}
         </div>
       )}
     </div>

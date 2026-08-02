@@ -5,6 +5,10 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
 import { CUSTOMER_ARTWORK_STATUS_LABELS } from "@/lib/jobs/constants";
+import {
+  formatArtworkCustomerNote,
+  formatArtworkUploadedAt,
+} from "@/lib/jobs/artwork-display";
 import type { CustomerJobFileView } from "@/lib/jobs/types";
 import { formatFileSize } from "@/lib/quote-request-attachments";
 import { JobArtworkUploader } from "@/components/job-artwork-uploader";
@@ -20,20 +24,6 @@ type JobArtworkListProps = {
   showArtworkRequired?: boolean;
   onChanged?: () => void;
 };
-
-function formatDate(dateString: string | null) {
-  if (!dateString) {
-    return "—";
-  }
-
-  return new Date(dateString).toLocaleString("en-GB", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
 
 function mapArtworkStatusToBadge(status: string) {
   switch (status) {
@@ -119,7 +109,7 @@ export function JobArtworkList({
                       />
                     </td>
                     <td className="p-4 text-muted-foreground">
-                      {formatDate(file.uploadedAt)}
+                      {formatArtworkUploadedAt(file.uploadedAt)}
                     </td>
                     <td className="p-4 text-muted-foreground">
                       {file.uploadedByName ?? "—"}
@@ -128,7 +118,7 @@ export function JobArtworkList({
                       {formatFileSize(file.fileSizeBytes)}
                     </td>
                     <td className="p-4 text-muted-foreground">
-                      {file.customerNotes ?? "—"}
+                      {formatArtworkCustomerNote(file.customerNotes)}
                     </td>
                     <td className="p-4">
                       <div className="flex flex-wrap gap-2">
