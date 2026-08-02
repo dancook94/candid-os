@@ -173,6 +173,33 @@ export type DropboxFileMetadata = {
   server_modified?: string;
 };
 
+export function extractDropboxFileMetadata(
+  response: DropboxFileMetadata | { metadata?: DropboxFileMetadata | null }
+): DropboxFileMetadata {
+  if (
+    response &&
+    typeof response === "object" &&
+    "metadata" in response &&
+    response.metadata &&
+    typeof response.metadata.id === "string"
+  ) {
+    return response.metadata;
+  }
+
+  if (
+    response &&
+    typeof response === "object" &&
+    "id" in response &&
+    typeof response.id === "string" &&
+    "path_lower" in response &&
+    typeof response.path_lower === "string"
+  ) {
+    return response as DropboxFileMetadata;
+  }
+
+  throw new DropboxError("Dropbox did not return file metadata.", 502);
+}
+
 export type DropboxFolderMetadata = {
   id: string;
   name: string;

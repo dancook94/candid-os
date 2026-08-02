@@ -38,6 +38,13 @@ export async function POST(
       supersedesFileId: body.supersedesFileId,
     });
 
+    if (!result.file?.id) {
+      return NextResponse.json(
+        { error: "Artwork record could not be created." },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({
       fileId: result.file.id,
       sessionId: result.sessionId,

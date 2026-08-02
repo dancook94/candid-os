@@ -1,5 +1,6 @@
 import {
   dropboxContentUpload,
+  extractDropboxFileMetadata,
   type DropboxFileMetadata,
 } from "@/lib/dropbox/client";
 
@@ -43,8 +44,10 @@ export async function finishDropboxUploadSession({
   sessionId: string;
   totalSize: number;
   dropboxPath: string;
-}) {
-  return dropboxContentUpload<{ metadata: DropboxFileMetadata }>(
+}): Promise<DropboxFileMetadata> {
+  const response = await dropboxContentUpload<
+    DropboxFileMetadata | { metadata: DropboxFileMetadata }
+  >(
     "/2/files/upload_session/finish",
     {
       arg: {
@@ -63,6 +66,8 @@ export async function finishDropboxUploadSession({
       body: new Uint8Array(0),
     }
   );
+
+  return extractDropboxFileMetadata(response);
 }
 
 export async function uploadSmallDropboxFile({
@@ -71,8 +76,10 @@ export async function uploadSmallDropboxFile({
 }: {
   dropboxPath: string;
   body: ArrayBuffer;
-}) {
-  return dropboxContentUpload<{ metadata: DropboxFileMetadata }>(
+}): Promise<DropboxFileMetadata> {
+  const response = await dropboxContentUpload<
+    DropboxFileMetadata | { metadata: DropboxFileMetadata }
+  >(
     "/2/files/upload",
     {
       arg: {
@@ -85,4 +92,6 @@ export async function uploadSmallDropboxFile({
       body,
     }
   );
+
+  return extractDropboxFileMetadata(response);
 }

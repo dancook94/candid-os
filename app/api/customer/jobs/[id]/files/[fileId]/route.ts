@@ -62,6 +62,13 @@ export async function PUT(
     const jobContext = await requireCustomerJobContext(supabase, user, jobId);
     const file = await finishArtworkUpload(jobContext, fileId);
 
+    if (!file?.id) {
+      return NextResponse.json(
+        { error: "Artwork record could not be created." },
+        { status: 500 }
+      );
+    }
+
     return NextResponse.json({
       success: true,
       fileId: file.id,

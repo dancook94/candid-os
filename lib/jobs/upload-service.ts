@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { isDropboxConfigured } from "@/lib/dropbox/client";
+import { DropboxError, isDropboxConfigured } from "@/lib/dropbox/client";
 import {
   appendDropboxUploadSession,
   finishDropboxUploadSession,
@@ -24,6 +24,32 @@ import type { JobFileRecord } from "@/lib/jobs/types";
 import { syncJobStatusAfterArtworkUpload } from "@/lib/jobs/job-status-sync";
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
 import { createAdminClient } from "@/lib/supabase/admin";
+
+function logArtworkUploadStep(
+  step: string,
+  details: Record<string, unknown>
+) {
+  if (process.env.NODE_ENV !== "development") {
+    return;
+  }
+
+  console.info("[artwork-upload]", {
+    step,
+    ...details,
+  });
+}
+
+function getUploadContextIds(context: CustomerJobContext) {
+  const jobId = context.job?.id;
+  const userId = context.profile?.id;
+  const companyId = context.company?.id;
+
+  if (!jobId || !userId || !companyId) {
+    throw new JobError("Upload context is incomplete.", 500);
+  }
+
+  return { jobId, userId, companyId };
+}
 
 async function getNextArtworkVersion(
   adminClient: SupabaseClient,
@@ -84,6 +110,8 @@ export async function createArtworkUploadSession(
     supersedesFileId?: string | null;
   }
 ) {
+  const { jobId, userId, companyId } = getUploadContextIds(context);
+
   if (!isDropboxConfigured()) {
     throw new JobError("Dropbox integration is not configured.", 503);
   }
@@ -111,7 +139,7 @@ export async function createArtworkUploadSession(
       .from("job_files")
       .select("id, artwork_status, upload_status")
       .eq("id", input.supersedesFileId)
-      .eq("job_id", context.job.id)
+      .eq("job_id", jobId)
       .maybeSingle();
 
     if (existingError) {
@@ -132,7 +160,7 @@ export async function createArtworkUploadSession(
 
   const { versionNumber, originalFileName } = await getNextArtworkVersion(
     adminClient,
-    context.job.id,
+    jobId,
     input.fileName,
     input.supersedesFileId
   );
@@ -141,14 +169,43 @@ export async function createArtworkUploadSession(
   const dropboxFolder = `${jobWithDropbox.dropbox_folder_path}/01 Customer Artwork`;
   const dropboxPath = `${dropboxFolder}/${storedFileName}`;
 
-  const dropboxSession = await startDropboxUploadSession();
+  let dropboxSession: { session_id?: string };
+  try {
+    dropboxSession = await startDropboxUploadSession();
+  } catch (error) {
+    logArtworkUploadStep("dropbox_session_start_failed", {
+      jobId,
+      userId,
+      companyId,
+      dropboxPath,
+      message: error instanceof Error ? error.message : "Dropbox upload failed.",
+    });
+
+    throw new JobError(
+      error instanceof DropboxError
+        ? `Dropbox upload failed: ${error.message}`
+        : "Dropbox upload failed.",
+      502
+    );
+  }
+
+  if (!dropboxSession?.session_id) {
+    logArtworkUploadStep("dropbox_session_start_failed", {
+      jobId,
+      userId,
+      companyId,
+      dropboxPath,
+      message: "Dropbox did not return a session id.",
+    });
+    throw new JobError("Dropbox upload failed.", 502);
+  }
 
   const { data: fileRecord, error } = await adminClient
     .from("job_files")
     .insert({
-      job_id: context.job.id,
-      company_id: context.company.id,
-      uploaded_by_profile_id: context.profile.id,
+      job_id: jobId,
+      company_id: companyId,
+      uploaded_by_profile_id: userId,
       file_name: storedFileName,
       original_file_name: originalFileName,
       file_extension: getArtworkExtension(input.fileName),
@@ -165,8 +222,19 @@ export async function createArtworkUploadSession(
     .select("*")
     .single();
 
-  if (error || !fileRecord) {
-    throw new JobError(error?.message ?? "Unable to start artwork upload.", 500);
+  logArtworkUploadStep("database_insert", {
+    jobId,
+    userId,
+    companyId,
+    uploadRecordId: fileRecord?.id ?? null,
+    insertError: error?.message ?? null,
+  });
+
+  if (error || !fileRecord?.id) {
+    throw new JobError(
+      error?.message ?? "Artwork record could not be created.",
+      500
+    );
   }
 
   return {
@@ -181,17 +249,27 @@ export async function appendArtworkUploadChunk(
   fileId: string,
   chunk: ArrayBuffer
 ) {
+  const { jobId, userId, companyId } = getUploadContextIds(context);
+
+  if (!fileId) {
+    throw new JobError("Upload session not found.", 404);
+  }
+
   const adminClient = createAdminClient();
   const { data: file, error } = await adminClient
     .from("job_files")
     .select("*")
     .eq("id", fileId)
-    .eq("job_id", context.job.id)
-    .eq("company_id", context.company.id)
+    .eq("job_id", jobId)
+    .eq("company_id", companyId)
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (error || !file) {
+  if (error) {
+    throw new JobError(error.message, 500);
+  }
+
+  if (!file?.id) {
     throw new JobError("Upload session not found.", 404);
   }
 
@@ -200,7 +278,26 @@ export async function appendArtworkUploadChunk(
   }
 
   const offset = file.upload_session_offset ?? 0;
-  await appendDropboxUploadSession(file.dropbox_upload_session_id, offset, chunk);
+
+  try {
+    await appendDropboxUploadSession(file.dropbox_upload_session_id, offset, chunk);
+  } catch (error) {
+    logArtworkUploadStep("dropbox_chunk_failed", {
+      jobId,
+      userId,
+      companyId,
+      fileId: file.id,
+      offset,
+      message: error instanceof Error ? error.message : "Dropbox upload failed.",
+    });
+
+    throw new JobError(
+      error instanceof DropboxError
+        ? `Dropbox upload failed: ${error.message}`
+        : "Dropbox upload failed.",
+      502
+    );
+  }
 
   const nextOffset = offset + chunk.byteLength;
   const { error: updateError } = await adminClient
@@ -224,17 +321,27 @@ export async function finishArtworkUpload(
   context: CustomerJobContext,
   fileId: string
 ) {
+  const { jobId, userId, companyId } = getUploadContextIds(context);
+
+  if (!fileId) {
+    throw new JobError("Upload session not found.", 404);
+  }
+
   const adminClient = createAdminClient();
   const { data: file, error } = await adminClient
     .from("job_files")
     .select("*")
     .eq("id", fileId)
-    .eq("job_id", context.job.id)
-    .eq("company_id", context.company.id)
+    .eq("job_id", jobId)
+    .eq("company_id", companyId)
     .is("deleted_at", null)
     .maybeSingle();
 
-  if (error || !file) {
+  if (error) {
+    throw new JobError(error.message, 500);
+  }
+
+  if (!file?.id) {
     throw new JobError("Upload session not found.", 404);
   }
 
@@ -258,88 +365,32 @@ export async function finishArtworkUpload(
 
   const dropboxPath = `${jobWithDropbox.dropbox_folder_path}/01 Customer Artwork/${file.file_name}`;
 
+  logArtworkUploadStep("finish_start", {
+    jobId,
+    userId,
+    companyId,
+    fileId: file.id,
+    uploadRecord: {
+      upload_status: file.upload_status,
+      upload_session_offset: uploadedOffset,
+      file_size_bytes: file.file_size_bytes,
+      dropbox_path: dropboxPath,
+    },
+  });
+
   await adminClient
     .from("job_files")
     .update({ upload_status: "processing" })
     .eq("id", file.id);
 
+  let dropboxMetadata;
   try {
-    const finished = await finishDropboxUploadSession({
+    dropboxMetadata = await finishDropboxUploadSession({
       sessionId: file.dropbox_upload_session_id,
       totalSize: file.file_size_bytes,
       dropboxPath,
     });
-
-    const now = new Date().toISOString();
-
-    if (file.supersedes_file_id) {
-      await adminClient
-        .from("job_files")
-        .update({
-          artwork_status: "superseded",
-        })
-        .eq("id", file.supersedes_file_id)
-        .eq("job_id", context.job.id);
-    }
-
-    const { data: completedFile, error: completeError } = await adminClient
-      .from("job_files")
-      .update({
-        dropbox_file_id: finished.metadata.id,
-        dropbox_path_lower: finished.metadata.path_lower,
-        dropbox_revision: finished.metadata.rev,
-        content_hash: finished.metadata.content_hash ?? null,
-        dropbox_upload_session_id: null,
-        upload_session_offset: null,
-        upload_status: "complete",
-        artwork_status: "uploaded",
-        uploaded_at: now,
-      })
-      .eq("id", file.id)
-      .select("*")
-      .single();
-
-    if (completeError || !completedFile) {
-      throw new JobError(completeError?.message ?? "Unable to finalise upload.", 500);
-    }
-
-    await logJobActivity(adminClient, {
-      activityType: file.supersedes_file_id
-        ? JOB_ACTIVITY_TYPES.customerArtworkReplaced
-        : JOB_ACTIVITY_TYPES.customerArtworkUploaded,
-      description: file.supersedes_file_id
-        ? `${context.company.company_name} uploaded replacement artwork for ${context.job.job_reference}.`
-        : `${context.company.company_name} uploaded artwork for ${context.job.job_reference}.`,
-      companyId: context.company.id,
-      quoteId: context.job.quote_id,
-      opportunityId: context.job.opportunity_id,
-      contactId: context.contact?.id ?? null,
-      actorProfileId: context.profile.id,
-      metadata: {
-        job_id: context.job.id,
-        job_file_id: file.id,
-        version_number: file.version_number,
-        file_name: file.file_name,
-        file_size_bytes: file.file_size_bytes,
-      },
-    });
-
-    prepareArtworkUploadedNotification({
-      companyId: context.company.id,
-      jobId: context.job.id,
-      fileId: file.id,
-    });
-
-    await syncJobStatusAfterArtworkUpload(adminClient, context.job.id);
-
-    revalidateJobPages({
-      jobId: context.job.id,
-      quoteId: context.job.quote_id,
-      opportunityId: context.job.opportunity_id,
-    });
-
-    return completedFile as JobFileRecord;
-  } catch (uploadError) {
+  } catch (error) {
     await adminClient
       .from("job_files")
       .update({
@@ -349,30 +400,182 @@ export async function finishArtworkUpload(
       })
       .eq("id", file.id);
 
+    logArtworkUploadStep("dropbox_finish_failed", {
+      jobId,
+      userId,
+      companyId,
+      fileId: file.id,
+      message: error instanceof Error ? error.message : "Dropbox upload failed.",
+    });
+
+    try {
+      await logJobActivity(adminClient, {
+        activityType: JOB_ACTIVITY_TYPES.artworkUploadFailed,
+        description: `Artwork upload failed for ${context.job.job_reference}.`,
+        companyId,
+        quoteId: context.job.quote_id,
+        opportunityId: context.job.opportunity_id,
+        contactId: context.contact?.id ?? null,
+        actorProfileId: userId,
+        metadata: {
+          job_id: jobId,
+          job_file_id: file.id,
+          version_number: file.version_number,
+        },
+      });
+    } catch (activityError) {
+      logArtworkUploadStep("activity_log_failed", {
+        jobId,
+        fileId: file.id,
+        message:
+          activityError instanceof Error
+            ? activityError.message
+            : "Unable to create activity log.",
+      });
+    }
+
+    throw new JobError(
+      error instanceof DropboxError
+        ? `Dropbox upload failed: ${error.message}`
+        : "Dropbox upload failed.",
+      502
+    );
+  }
+
+  if (!dropboxMetadata?.id || !dropboxMetadata.path_lower || !dropboxMetadata.rev) {
+    await adminClient
+      .from("job_files")
+      .update({
+        upload_status: "failed",
+        dropbox_upload_session_id: null,
+        upload_session_offset: null,
+      })
+      .eq("id", file.id);
+
+    throw new JobError("Dropbox upload failed.", 502);
+  }
+
+  logArtworkUploadStep("dropbox_finish", {
+    jobId,
+    userId,
+    companyId,
+    fileId: file.id,
+    dropboxUploadResponse: {
+      id: dropboxMetadata.id,
+      path_lower: dropboxMetadata.path_lower,
+      rev: dropboxMetadata.rev,
+      content_hash: dropboxMetadata.content_hash ?? null,
+    },
+  });
+
+  if (file.supersedes_file_id) {
+    await adminClient
+      .from("job_files")
+      .update({
+        artwork_status: "superseded",
+      })
+      .eq("id", file.supersedes_file_id)
+      .eq("job_id", jobId);
+  }
+
+  const now = new Date().toISOString();
+  const completionPayload = {
+    dropbox_file_id: dropboxMetadata.id,
+    dropbox_path_lower: dropboxMetadata.path_lower,
+    dropbox_revision: dropboxMetadata.rev,
+    content_hash: dropboxMetadata.content_hash ?? null,
+    dropbox_upload_session_id: null,
+    upload_session_offset: null,
+    upload_status: "complete",
+    artwork_status: "uploaded",
+    uploaded_at: now,
+  };
+
+  const { data: completedFile, error: completeError } = await adminClient
+    .from("job_files")
+    .update(completionPayload)
+    .eq("id", file.id)
+    .select("*")
+    .single();
+
+  logArtworkUploadStep("database_complete", {
+    jobId,
+    userId,
+    companyId,
+    fileId: file.id,
+    databaseInsertResponse: {
+      recordId: completedFile?.id ?? null,
+      error: completeError?.message ?? null,
+    },
+  });
+
+  if (completeError || !completedFile?.id) {
+    await adminClient
+      .from("job_files")
+      .update({
+        dropbox_file_id: dropboxMetadata.id,
+        dropbox_path_lower: dropboxMetadata.path_lower,
+        dropbox_revision: dropboxMetadata.rev,
+        content_hash: dropboxMetadata.content_hash ?? null,
+        dropbox_upload_session_id: null,
+        upload_session_offset: null,
+        upload_status: "processing",
+      })
+      .eq("id", file.id);
+
+    throw new JobError(
+      completeError?.message ?? "Artwork record could not be created.",
+      500
+    );
+  }
+
+  try {
     await logJobActivity(adminClient, {
-      activityType: JOB_ACTIVITY_TYPES.artworkUploadFailed,
-      description: `Artwork upload failed for ${context.job.job_reference}.`,
-      companyId: context.company.id,
+      activityType: file.supersedes_file_id
+        ? JOB_ACTIVITY_TYPES.customerArtworkReplaced
+        : JOB_ACTIVITY_TYPES.customerArtworkUploaded,
+      description: file.supersedes_file_id
+        ? `${context.company.company_name} uploaded replacement artwork for ${context.job.job_reference}.`
+        : `${context.company.company_name} uploaded artwork for ${context.job.job_reference}.`,
+      companyId,
       quoteId: context.job.quote_id,
       opportunityId: context.job.opportunity_id,
       contactId: context.contact?.id ?? null,
-      actorProfileId: context.profile.id,
+      actorProfileId: userId,
       metadata: {
-        job_id: context.job.id,
+        job_id: jobId,
         job_file_id: file.id,
         version_number: file.version_number,
+        file_name: file.file_name,
+        file_size_bytes: file.file_size_bytes,
       },
     });
-
-    throw uploadError instanceof JobError
-      ? uploadError
-      : new JobError(
-          uploadError instanceof Error
-            ? uploadError.message
-            : "Artwork upload failed.",
-          502
-        );
+  } catch (activityError) {
+    logArtworkUploadStep("activity_log_failed", {
+      jobId,
+      fileId: file.id,
+      message:
+        activityError instanceof Error
+          ? activityError.message
+          : "Unable to create activity log.",
+    });
   }
+
+  prepareArtworkUploadedNotification({
+    companyId,
+    jobId,
+    fileId: file.id,
+  });
+
+  await syncJobStatusAfterArtworkUpload(adminClient, jobId);
+
+  revalidateJobPages({
+    jobId,
+    quoteId: context.job.quote_id,
+    opportunityId: context.job.opportunity_id,
+  });
+
+  return completedFile as JobFileRecord;
 }
 
 export async function softDeleteCustomerArtworkFile(
