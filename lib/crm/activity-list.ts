@@ -98,6 +98,7 @@ export const ACTIVITY_TYPE_GROUPS: Record<
     CRM_ACTIVITY_TYPES.estimatedValueChanged,
     CRM_ACTIVITY_TYPES.opportunityWon,
     CRM_ACTIVITY_TYPES.opportunityLost,
+    CRM_ACTIVITY_TYPES.opportunityDeleted,
   ],
   quotes: [
     CRM_ACTIVITY_TYPES.quoteCreated,

@@ -1,15 +1,18 @@
 import { notFound } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
+import { DeleteOpportunitySection } from "@/components/crm/delete-opportunity-section";
 import { OpportunityForm } from "@/components/crm/opportunity-form";
 import { PageHeader } from "@/components/page-header";
 import { buildCrmAppShellProps } from "@/lib/admin-shell-props";
 import { requireCrmPageAccess } from "@/lib/crm-page-access";
 import { loadCrmStaffProfiles } from "@/lib/crm/crm-staff";
+import { getOpportunityDeletionBlockers } from "@/lib/crm/opportunity-delete";
 import { buildOpportunityFormInitialValues } from "@/lib/crm/opportunity-form-values";
 import {
   loadOpportunityCollaboratorIds,
 } from "@/lib/crm/opportunity-detail";
+import { isAdminRole } from "@/lib/staff-roles";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -48,20 +51,28 @@ export default async function EditOpportunityPage({
     notFound();
   }
 
-  const [{ data: companies }, crmStaff, collaboratorIds] = await Promise.all([
-    supabase
-      .from("companies")
-      .select("id, company_name")
-      .eq("is_active", true)
-      .order("company_name"),
-    loadCrmStaffProfiles(supabase),
-    loadOpportunityCollaboratorIds(supabase, id),
-  ]);
+  const [{ data: companies }, { data: company }, crmStaff, collaboratorIds, deletionBlockers] =
+    await Promise.all([
+      supabase
+        .from("companies")
+        .select("id, company_name")
+        .eq("is_active", true)
+        .order("company_name"),
+      supabase
+        .from("companies")
+        .select("company_name")
+        .eq("id", opportunity.company_id)
+        .maybeSingle(),
+      loadCrmStaffProfiles(supabase),
+      loadOpportunityCollaboratorIds(supabase, id),
+      getOpportunityDeletionBlockers(supabase, id),
+    ]);
 
   const initialValues = buildOpportunityFormInitialValues(
     opportunity,
     collaboratorIds
   );
+  const canPermanentlyDelete = isAdminRole(profile.user_role);
 
   return (
     <AppShell {...shellProps}>
@@ -81,6 +92,16 @@ export default async function EditOpportunityPage({
           initialValues={initialValues}
           cancelHref={`/admin/opportunities/${id}`}
         />
+
+        {canPermanentlyDelete ? (
+          <DeleteOpportunitySection
+            opportunityId={id}
+            opportunityTitle={opportunity.title}
+            companyName={company?.company_name ?? "Unknown company"}
+            canDelete={deletionBlockers.canDelete}
+            blockReason={deletionBlockers.blockReason}
+          />
+        ) : null}
       </div>
     </AppShell>
   );
