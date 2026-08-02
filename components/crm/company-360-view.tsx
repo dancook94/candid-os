@@ -524,6 +524,7 @@ function CompanyContactsSection({
             contacts={contacts}
             companies={companyOptions}
             showCompanyColumn={false}
+            showQuickActions
           />
         )}
       </CardContent>

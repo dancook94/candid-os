@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { useRouter } from "next/navigation";
 
 import { QuoteBuilderLineItemCard } from "@/components/quote-builder-line-item";
+import { CompanyContactSelect } from "@/components/crm/company-contact-select";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -67,6 +68,7 @@ export type QuoteBuilderLineItem = {
 
 export type QuoteBuilderInitialValues = {
   companyId: string;
+  contactId: string | null;
   quoteRequestId: string | null;
   opportunityId: string | null;
   projectName: string;
@@ -107,6 +109,9 @@ type QuoteBuilderFormProps = {
   canEdit?: boolean;
   fallbackQuotePaymentTermsDays?: number;
   createOpportunityOnSave?: boolean;
+  lockCompany?: boolean;
+  lockContact?: boolean;
+  inheritedContactLabel?: string | null;
 };
 
 function formatSupabaseError(error: unknown) {
@@ -354,11 +359,15 @@ export function QuoteBuilderForm({
   canEdit = true,
   fallbackQuotePaymentTermsDays = 14,
   createOpportunityOnSave = false,
+  lockCompany = false,
+  lockContact = false,
+  inheritedContactLabel = null,
 }: QuoteBuilderFormProps) {
   const router = useRouter();
   const supabase = createClient();
 
   const [companyId, setCompanyId] = useState(initialValues.companyId);
+  const [contactId, setContactId] = useState(initialValues.contactId ?? "");
   const [quoteRequestId, setQuoteRequestId] = useState(
     initialValues.quoteRequestId ?? ""
   );
@@ -602,12 +611,35 @@ export function QuoteBuilderForm({
     setError("");
     setSuccess("");
 
-    const trimmedProjectName = projectName.trim();
-
     if (!companyId) {
       setError("Company is required.");
       return;
     }
+
+    if (!contactId) {
+      setError("Contact is required.");
+      return;
+    }
+
+    const validateResponse = await fetch("/api/crm/quotes/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contactId,
+        companyId,
+        opportunityId: opportunityId || null,
+        required: true,
+      }),
+    });
+
+    const validatePayload = (await validateResponse.json()) as { error?: string };
+
+    if (!validateResponse.ok) {
+      setError(validatePayload.error ?? "Contact validation failed.");
+      return;
+    }
+
+    const trimmedProjectName = projectName.trim();
 
     if (!trimmedProjectName) {
       setError("Project name is required.");
@@ -678,6 +710,7 @@ export function QuoteBuilderForm({
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 companyId,
+                contactId,
                 title: trimmedProjectName,
                 description: customerNotes.trim() || null,
               }),
@@ -703,6 +736,7 @@ export function QuoteBuilderForm({
           .insert({
             quote_number: nextQuoteNumber,
             company_id: companyId,
+            contact_id: contactId,
             quote_request_id: quoteRequestId || null,
             opportunity_id: linkedOpportunityId,
             project_name: trimmedProjectName,
@@ -833,6 +867,7 @@ export function QuoteBuilderForm({
         .from("quotes")
         .update({
           company_id: companyId,
+          contact_id: contactId,
           quote_request_id: quoteRequestId || null,
           opportunity_id: opportunityId || null,
           project_name: trimmedProjectName,
@@ -992,10 +1027,11 @@ export function QuoteBuilderForm({
                 onChange={(event) => {
                   const nextCompanyId = event.target.value;
                   setCompanyId(nextCompanyId);
+                  setContactId("");
                   setQuoteRequestId("");
                   applyCompanyPaymentTerms(nextCompanyId);
                 }}
-                disabled={isBusy || isReadOnly}
+                disabled={isBusy || isReadOnly || lockCompany}
                 className="h-8 w-full rounded-lg border border-neutral-300 bg-white px-2.5 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
                 required
               >
@@ -1006,6 +1042,33 @@ export function QuoteBuilderForm({
                   </option>
                 ))}
               </select>
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              {inheritedContactLabel && lockContact ? (
+                <div className="space-y-1">
+                  <Label>Contact</Label>
+                  <p className="text-sm font-medium text-neutral-950">
+                    {inheritedContactLabel}
+                  </p>
+                  <p className="text-xs text-neutral-500">
+                    Inherited from the linked opportunity.
+                  </p>
+                </div>
+              ) : (
+                <CompanyContactSelect
+                  companyId={companyId}
+                  value={contactId}
+                  onChange={setContactId}
+                  companies={companies.map((company) => ({
+                    id: company.id,
+                    company_name: company.company_name,
+                  }))}
+                  required
+                  disabled={isBusy || isReadOnly}
+                  lockContact={lockContact}
+                />
+              )}
             </div>
 
             <div className="space-y-2">

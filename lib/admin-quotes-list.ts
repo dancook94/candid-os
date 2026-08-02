@@ -62,6 +62,8 @@ export type AdminQuoteListRow = {
   updated_at: string;
   company_name: string;
   customer_name: string | null;
+  contact_name: string | null;
+  contact_email: string | null;
   current_version_total: number;
   sent_at: string | null;
   opportunity_id: string | null;
@@ -189,6 +191,7 @@ type QuoteRecord = {
   id: string;
   quote_number: number;
   company_id: string;
+  contact_id: string | null;
   quote_request_id: string | null;
   opportunity_id: string | null;
   project_name: string;
@@ -328,6 +331,22 @@ async function resolveSearchMatchingQuoteIds(
     quotesByOpportunity?.forEach((quote) => matchingIds.add(quote.id));
   }
 
+  const { data: contactsByNameOrEmail } = await supabase
+    .from("contacts")
+    .select("id")
+    .or(`full_name.ilike.${ilikePattern},email.ilike.${ilikePattern}`);
+
+  const contactIds = (contactsByNameOrEmail ?? []).map((contact) => contact.id);
+
+  if (contactIds.length > 0) {
+    const { data: quotesByContact } = await supabase
+      .from("quotes")
+      .select("id")
+      .in("contact_id", contactIds);
+
+    quotesByContact?.forEach((quote) => matchingIds.add(quote.id));
+  }
+
   return [...matchingIds];
 }
 
@@ -415,7 +434,7 @@ export async function fetchAdminQuotesList(
   let quotesQuery = supabase
     .from("quotes")
     .select(
-      "id, quote_number, company_id, quote_request_id, opportunity_id, project_name, status, current_version, created_at, updated_at"
+      "id, quote_number, company_id, contact_id, quote_request_id, opportunity_id, project_name, status, current_version, created_at, updated_at"
     );
 
   if (searchMatchingIds) {
@@ -488,12 +507,20 @@ export async function fetchAdminQuotesList(
         .filter((id): id is string => Boolean(id))
     ),
   ];
+  const contactIds = [
+    ...new Set(
+      quotes
+        .map((quote) => quote.contact_id)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
 
   const [
     { data: versions, error: versionsError },
     { data: companies, error: companiesError },
     { data: quoteRequests, error: quoteRequestsError },
     { data: opportunities, error: opportunitiesError },
+    { data: contacts, error: contactsError },
   ] = await Promise.all([
     supabase
       .from("quote_versions")
@@ -521,6 +548,15 @@ export async function fetchAdminQuotesList(
           data: [] as { id: string; title: string; stage: string }[],
           error: null,
         }),
+    contactIds.length > 0
+      ? supabase
+          .from("contacts")
+          .select("id, full_name, email")
+          .in("id", contactIds)
+      : Promise.resolve({
+          data: [] as { id: string; full_name: string; email: string | null }[],
+          error: null,
+        }),
   ]);
 
   const relatedErrors = [
@@ -528,6 +564,7 @@ export async function fetchAdminQuotesList(
     companiesError?.message,
     quoteRequestsError?.message,
     opportunitiesError?.message,
+    contactsError?.message,
   ].filter(Boolean);
 
   const requesterIds = [
@@ -576,6 +613,10 @@ export async function fetchAdminQuotesList(
     ])
   );
 
+  const contactById = new Map(
+    (contacts ?? []).map((contact) => [contact.id, contact])
+  );
+
   const rows: AdminQuoteListRow[] = quotes.map((quote) => {
     const quoteVersions = versionsByQuoteId.get(quote.id) ?? [];
     const currentVersion = quoteVersions.find(
@@ -588,13 +629,19 @@ export async function fetchAdminQuotesList(
     const linkedOpportunity = quote.opportunity_id
       ? opportunityById.get(quote.opportunity_id)
       : null;
+    const linkedContact = quote.contact_id
+      ? contactById.get(quote.contact_id)
+      : null;
 
     return {
       ...quote,
       company_name: companyNameById.get(quote.company_id) ?? "Unknown company",
-      customer_name: requesterId
-        ? (requesterNameById.get(requesterId) ?? null)
-        : null,
+      customer_name: linkedContact?.full_name
+        ?? (requesterId
+          ? (requesterNameById.get(requesterId) ?? null)
+          : null),
+      contact_name: linkedContact?.full_name ?? null,
+      contact_email: linkedContact?.email ?? null,
       current_version_total: Number(currentVersion?.total ?? 0),
       sent_at: resolveSentDate(quote.status, currentVersion),
       opportunity_id: quote.opportunity_id,

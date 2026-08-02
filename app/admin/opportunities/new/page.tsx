@@ -8,7 +8,13 @@ import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewOpportunityPage() {
+export default async function NewOpportunityPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ companyId?: string; contactId?: string }>;
+}) {
+  const { companyId: prefilledCompanyId, contactId: prefilledContactId } =
+    await searchParams;
   const supabase = await createClient();
   const profile = await requireCrmPageAccess(
     supabase,
@@ -44,6 +50,10 @@ export default async function NewOpportunityPage() {
           companies={companies ?? []}
           crmStaff={crmStaff}
           currentUserId={currentUserId}
+          initialValues={{
+            companyId: prefilledCompanyId ?? "",
+            contactId: prefilledContactId ?? "",
+          }}
           cancelHref="/admin/opportunities"
         />
       </div>

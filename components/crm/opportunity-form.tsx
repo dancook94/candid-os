@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { CompanyContactSelect } from "@/components/crm/company-contact-select";
 import {
   StaffMultiSelect,
   StaffOwnerSelect,
@@ -17,10 +18,6 @@ import { OPPORTUNITY_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
 import type { CrmStaffProfile } from "@/lib/crm/crm-staff";
 import { getOpportunityStageOptions } from "@/lib/crm/opportunity-stages";
 import { getOpportunitySourceOptions } from "@/lib/crm/source-labels";
-import {
-  parseDateInputValue,
-  parseDateTimeLocalValue,
-} from "@/lib/crm/format-datetime";
 import type { OpportunityFormValues } from "@/lib/crm/opportunity-form-values";
 import type { OpportunityStage, OpportunitySource } from "@/lib/crm/types";
 import { createClient } from "@/lib/supabase/client";
@@ -115,6 +112,7 @@ export function OpportunityForm({
   const [companyId, setCompanyId] = useState(
     initialValues?.companyId ?? companies[0]?.id ?? ""
   );
+  const [contactId, setContactId] = useState(initialValues?.contactId ?? "");
   const [title, setTitle] = useState(initialValues?.title ?? "");
   const [description, setDescription] = useState(
     initialValues?.description ?? ""
@@ -181,6 +179,11 @@ export function OpportunityForm({
       return;
     }
 
+    if (!contactId) {
+      setError("Contact is required.");
+      return;
+    }
+
     if (!ownerId) {
       setError("Owner is required.");
       return;
@@ -202,53 +205,37 @@ export function OpportunityForm({
 
     try {
       if (mode === "create") {
-        const timestamps = buildStageTimestamps(stage);
-        const { data: created, error: insertError } = await supabase
-          .from("opportunities")
-          .insert({
-            company_id: companyId,
+        const createResponse = await fetch("/api/crm/opportunities", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            companyId,
+            contactId,
             title: trimmedTitle,
             description: description.trim() || null,
-            estimated_value: parsedEstimatedValue,
-            currency: "GBP",
+            estimatedValue: estimatedValue.trim() || null,
             stage,
-            owner_profile_id: ownerId,
-            expected_close_date: parseDateInputValue(expectedCloseDate),
-            next_follow_up_at: parseDateTimeLocalValue(nextFollowUpAt),
+            ownerProfileId: ownerId,
+            collaboratorProfileIds: collaboratorIds,
             source,
-            lost_reason: stage === "lost" ? lostReason.trim() : null,
-            created_by: currentUserId,
-            ...timestamps,
-          })
-          .select("id")
-          .single();
+            expectedCloseDate: expectedCloseDate || null,
+            nextFollowUpAt: nextFollowUpAt || null,
+            lostReason: stage === "lost" ? lostReason.trim() : null,
+          }),
+        });
 
-        if (insertError || !created) {
-          throw new Error(insertError?.message ?? "Unable to create opportunity.");
+        const createPayload = (await createResponse.json()) as {
+          opportunityId?: string;
+          error?: string;
+        };
+
+        if (!createResponse.ok || !createPayload.opportunityId) {
+          throw new Error(
+            createPayload.error ?? "Unable to create opportunity."
+          );
         }
 
-        if (collaboratorIds.length > 0) {
-          const { error: membersError } = await supabase
-            .from("opportunity_members")
-            .insert(
-              collaboratorIds.map((profileId) => ({
-                opportunity_id: created.id,
-                profile_id: profileId,
-              }))
-            );
-
-          if (membersError) {
-            throw new Error(membersError.message);
-          }
-        }
-
-        await logActivity(
-          created.id,
-          OPPORTUNITY_ACTIVITY_TYPES.opportunityCreated,
-          `Opportunity "${trimmedTitle}" created.`
-        );
-
-        router.push(`/admin/opportunities/${created.id}`);
+        router.push(`/admin/opportunities/${createPayload.opportunityId}`);
         router.refresh();
         return;
       }
@@ -261,23 +248,30 @@ export function OpportunityForm({
       const previousEstimatedValue = initialValues?.estimatedValue ?? "";
       const timestamps = buildStageTimestamps(stage, previousStage);
 
-      const { error: updateError } = await supabase
-        .from("opportunities")
-        .update({
-          title: trimmedTitle,
-          description: description.trim() || null,
-          estimated_value: parsedEstimatedValue,
-          stage,
-          expected_close_date: parseDateInputValue(expectedCloseDate),
-          next_follow_up_at: parseDateTimeLocalValue(nextFollowUpAt),
-          source,
-          lost_reason: stage === "lost" ? lostReason.trim() : null,
-          ...timestamps,
-        })
-        .eq("id", opportunityId);
+      const updateResponse = await fetch(
+        `/api/crm/opportunities/${opportunityId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contactId,
+            title: trimmedTitle,
+            description: description.trim() || null,
+            estimatedValue: estimatedValue.trim() || null,
+            stage,
+            source,
+            expectedCloseDate: expectedCloseDate || null,
+            nextFollowUpAt: nextFollowUpAt || null,
+            lostReason: stage === "lost" ? lostReason.trim() : null,
+            timestamps,
+          }),
+        }
+      );
 
-      if (updateError) {
-        throw new Error(updateError.message);
+      const updatePayload = (await updateResponse.json()) as { error?: string };
+
+      if (!updateResponse.ok) {
+        throw new Error(updatePayload.error ?? "Unable to update opportunity.");
       }
 
       const assignmentResponse = await fetch(
@@ -351,7 +345,10 @@ export function OpportunityForm({
               <Select
                 id="company"
                 value={companyId}
-                onChange={(event) => setCompanyId(event.target.value)}
+                onChange={(event) => {
+                  setCompanyId(event.target.value);
+                  setContactId("");
+                }}
                 disabled={mode === "edit"}
                 required
               >
@@ -362,6 +359,16 @@ export function OpportunityForm({
                   </option>
                 ))}
               </Select>
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <CompanyContactSelect
+                companyId={companyId}
+                value={contactId}
+                onChange={setContactId}
+                companies={companies}
+                required
+              />
             </div>
 
             <div className="space-y-2 md:col-span-2">

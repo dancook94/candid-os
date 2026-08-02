@@ -449,6 +449,7 @@ export default async function AdminOpportunitiesPage({
                       <tr>
                         <th className="px-6 py-3 font-medium">Opportunity</th>
                         <th className="px-6 py-3 font-medium">Company</th>
+                        <th className="px-6 py-3 font-medium">Contact</th>
                         <th className="px-6 py-3 font-medium">Stage</th>
                         <th className="px-6 py-3 font-medium">Estimated</th>
                         <th className="px-6 py-3 font-medium">Quote value</th>
@@ -469,6 +470,13 @@ export default async function AdminOpportunitiesPage({
                             {opportunity.title}
                           </td>
                           <td className="px-6 py-4">{opportunity.company_name}</td>
+                          <td className="px-6 py-4 text-muted-foreground">
+                            {opportunity.contact_name ? (
+                              opportunity.contact_name
+                            ) : (
+                              <span className="text-amber-700">No contact</span>
+                            )}
+                          </td>
                           <td className="px-6 py-4">
                             <OpportunityStageBadge stage={opportunity.stage} />
                           </td>

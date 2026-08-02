@@ -14,6 +14,7 @@ export const OPPORTUNITY_ACTIVITY_TYPES = {
   noteAdded: "note_added",
   quoteCreated: "quote_created",
   quoteLinked: "quote_linked",
+  contactChanged: "contact_changed",
 } as const;
 
 export function formatActivityTypeLabel(activityType: string) {

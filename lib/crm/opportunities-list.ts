@@ -63,6 +63,8 @@ export type OpportunityListRow = {
   title: string;
   company_id: string;
   company_name: string;
+  contact_id: string | null;
+  contact_name: string | null;
   stage: OpportunityStage;
   estimated_value: number | null;
   current_quote_value: number | null;
@@ -192,6 +194,7 @@ export function buildOpportunitiesListHref(
 type OpportunityRecord = {
   id: string;
   company_id: string;
+  contact_id: string | null;
   title: string;
   description: string | null;
   estimated_value: number | string | null;
@@ -246,6 +249,22 @@ async function resolveSearchMatchingOpportunityIds(
       .in("company_id", companyIds);
 
     byCompany?.forEach((row) => matchingIds.add(row.id));
+  }
+
+  const { data: contacts } = await supabase
+    .from("contacts")
+    .select("id")
+    .or(`full_name.ilike.${ilikePattern},email.ilike.${ilikePattern}`);
+
+  const contactIds = (contacts ?? []).map((contact) => contact.id);
+
+  if (contactIds.length > 0) {
+    const { data: byContact } = await supabase
+      .from("opportunities")
+      .select("id")
+      .in("contact_id", contactIds);
+
+    byContact?.forEach((row) => matchingIds.add(row.id));
   }
 
   return [...matchingIds];
@@ -401,17 +420,30 @@ export async function fetchOpportunitiesList(
 
   const opportunityIds = records.map((record) => record.id);
   const companyIds = [...new Set(records.map((record) => record.company_id))];
+  const contactIds = [
+    ...new Set(
+      records
+        .map((record) => record.contact_id)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
   const ownerIds = [
     ...new Set(records.map((record) => record.owner_profile_id)),
   ];
 
   const [
     { data: companies },
+    { data: contacts },
     { data: owners },
     { data: members },
     { data: quotes },
   ] = await Promise.all([
     supabase.from("companies").select("id, company_name").in("id", companyIds),
+    contactIds.length > 0
+      ? supabase.from("contacts").select("id, full_name").in("id", contactIds)
+      : Promise.resolve({
+          data: [] as { id: string; full_name: string }[],
+        }),
     supabase
       .from("profiles")
       .select("id, full_name")
@@ -428,6 +460,9 @@ export async function fetchOpportunitiesList(
 
   const companyNameById = new Map(
     (companies ?? []).map((company) => [company.id, company.company_name])
+  );
+  const contactNameById = new Map(
+    (contacts ?? []).map((contact) => [contact.id, contact.full_name])
   );
   const ownerNameById = new Map(
     (owners ?? []).map((owner) => [
@@ -514,6 +549,10 @@ export async function fetchOpportunitiesList(
     title: record.title,
     company_id: record.company_id,
     company_name: companyNameById.get(record.company_id) ?? "Unknown company",
+    contact_id: record.contact_id,
+    contact_name: record.contact_id
+      ? (contactNameById.get(record.contact_id) ?? null)
+      : null,
     stage: record.stage,
     estimated_value: parseNumericValue(record.estimated_value),
     current_quote_value: quoteValueByOpportunity.get(record.id) ?? null,

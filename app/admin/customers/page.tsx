@@ -13,12 +13,17 @@ import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminContactsPage() {
+export default async function AdminContactsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ search?: string }>;
+}) {
+  const { search } = await searchParams;
   const supabase = await createClient();
   const profile = await requireAdminPageAccess(supabase, "/admin/customers");
 
   const [{ contacts, queryError }, { data: companies }] = await Promise.all([
-    fetchContactsList(supabase),
+    fetchContactsList(supabase, { search }),
     supabase
       .from("companies")
       .select("id, company_name")

@@ -10,6 +10,7 @@ type OpportunityOption = {
   id: string;
   title: string;
   company_id: string;
+  contact_id: string | null;
 };
 
 type QuoteLinkSetupProps = {
@@ -29,6 +30,10 @@ export function QuoteLinkSetup({
     opportunities[0]?.id ?? ""
   );
   const [confirmedNone, setConfirmedNone] = useState(false);
+
+  const selectedOpportunity = opportunities.find(
+    (entry) => entry.id === selectedOpportunityId
+  );
 
   return (
     <div className="portal-surface mb-6 rounded-xl border border-border p-6">
@@ -62,6 +67,11 @@ export function QuoteLinkSetup({
                 </option>
               ))}
             </Select>
+            {selectedOpportunity && !selectedOpportunity.contact_id ? (
+              <p className="text-sm text-amber-700">
+                Add a contact to this opportunity before creating a quote.
+              </p>
+            ) : null}
           </div>
         ) : null}
 
@@ -104,7 +114,12 @@ export function QuoteLinkSetup({
       <div className="mt-6">
         <Button
           type="button"
-          disabled={mode === "none" && !confirmedNone}
+          disabled={
+            (mode === "none" && !confirmedNone) ||
+            (mode === "existing" &&
+              (!selectedOpportunityId ||
+                !selectedOpportunity?.contact_id))
+          }
           onClick={() =>
             onContinue({
               mode,

@@ -24,6 +24,7 @@ type OpportunityOption = {
   id: string;
   title: string;
   company_id: string;
+  contact_id: string | null;
 };
 
 type NewQuoteBuilderShellProps = {
@@ -53,6 +54,25 @@ export function NewQuoteBuilderShell({
   );
   const [createOpportunityOnSave, setCreateOpportunityOnSave] = useState(false);
 
+  const linkedOpportunity =
+    linkedOpportunityId
+      ? opportunities.find((entry) => entry.id === linkedOpportunityId) ?? null
+      : null;
+
+  const builderInitialValues: QuoteBuilderInitialValues = {
+    ...initialValues,
+    opportunityId:
+      linkMode === "none"
+        ? null
+        : linkedOpportunityId || initialValues.opportunityId,
+    companyId:
+      linkedOpportunity?.company_id ??
+      initialValues.companyId,
+    contactId:
+      linkedOpportunity?.contact_id ??
+      initialValues.contactId,
+  };
+
   if (!linkMode) {
     return (
       <QuoteLinkSetup
@@ -72,15 +92,11 @@ export function NewQuoteBuilderShell({
       createdBy={createdBy}
       companies={companies}
       quoteRequests={quoteRequests}
-      initialValues={{
-        ...initialValues,
-        opportunityId:
-          linkMode === "none"
-            ? null
-            : linkedOpportunityId || initialValues.opportunityId,
-      }}
+      initialValues={builderInitialValues}
       fallbackQuotePaymentTermsDays={fallbackQuotePaymentTermsDays}
       createOpportunityOnSave={createOpportunityOnSave}
+      lockCompany={Boolean(linkedOpportunity)}
+      lockContact={Boolean(linkedOpportunity?.contact_id)}
     />
   );
 }

@@ -38,6 +38,7 @@ export type TaskPriority = (typeof TASK_PRIORITIES)[number];
 export type OpportunityRecord = {
   id: string;
   company_id: string;
+  contact_id: string | null;
   title: string;
   description: string | null;
   estimated_value: number | null;

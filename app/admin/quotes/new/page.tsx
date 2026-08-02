@@ -8,12 +8,14 @@ import {
   type QuoteBuilderInitialValues,
 } from "@/components/quote-builder-form";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   parsePaymentTermsDays,
   resolveQuotePaymentTermsDays,
 } from "@/lib/payment-terms";
 import { computeDefaultQuoteExpiryDate } from "@/lib/app-settings";
 import { loadAppSettings } from "@/lib/app-settings-server";
+import { loadQuoteContactDisplay } from "@/lib/crm/quote-contact-display";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { createClient } from "@/lib/supabase/server";
@@ -22,6 +24,8 @@ type NewQuotePageProps = {
   searchParams: Promise<{
     quoteRequestId?: string;
     opportunityId?: string;
+    companyId?: string;
+    contactId?: string;
   }>;
 };
 
@@ -30,7 +34,8 @@ function buildCustomerNotes(description: string, notes: string | null) {
 }
 
 export default async function NewQuotePage({ searchParams }: NewQuotePageProps) {
-  const { quoteRequestId, opportunityId } = await searchParams;
+  const { quoteRequestId, opportunityId, companyId: prefilledCompanyId, contactId: prefilledContactId } =
+    await searchParams;
   const supabase = await createClient();
   const loginPath = opportunityId
     ? `/admin/quotes/new?opportunityId=${encodeURIComponent(opportunityId)}`
@@ -56,7 +61,7 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
         .order("created_at", { ascending: false }),
       supabase
         .from("opportunities")
-        .select("id, title, company_id")
+        .select("id, title, company_id, contact_id")
         .not("stage", "in", '("won","lost")')
         .order("updated_at", { ascending: false })
         .limit(200),
@@ -67,6 +72,7 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
 
   let initialValues: QuoteBuilderInitialValues = {
     companyId: "",
+    contactId: null,
     quoteRequestId: null,
     opportunityId: null,
     projectName: "",
@@ -96,6 +102,7 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
 
       initialValues = {
         companyId: quoteRequest.company_id,
+        contactId: null,
         quoteRequestId: quoteRequest.id,
         opportunityId: quoteRequest.opportunity_id,
         projectName: quoteRequest.project_name,
@@ -119,18 +126,49 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
   if (opportunityId) {
     const { data: opportunity } = await supabase
       .from("opportunities")
-      .select("id, company_id, title, description")
+      .select("id, company_id, contact_id, title, description")
       .eq("id", opportunityId)
       .maybeSingle();
 
     if (opportunity) {
+      if (!opportunity.contact_id) {
+        return (
+          <AppShell {...(await buildAdminAppShellProps(supabase, profile))}>
+            <div className="mx-auto max-w-3xl">
+              <PageHeader
+                eyebrow="Administration"
+                title="Contact required"
+                description="This opportunity needs a contact before a quote can be created."
+                actions={
+                  <Link href={`/admin/opportunities/${opportunityId}`}>
+                    <Button variant="outline">Back to opportunity</Button>
+                  </Link>
+                }
+              />
+              <Card className="portal-surface border-amber-400/50 bg-amber-50">
+                <CardContent className="pt-6">
+                  <p className="text-sm text-amber-800">
+                    Add a contact to this opportunity before creating a quote.
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          </AppShell>
+        );
+      }
+
       const linkedCompany = (companies ?? []).find(
         (company) => company.id === opportunity.company_id
+      );
+      const contact = await loadQuoteContactDisplay(
+        supabase,
+        opportunity.contact_id
       );
 
       initialValues = {
         ...initialValues,
         companyId: opportunity.company_id,
+        contactId: opportunity.contact_id,
         opportunityId: opportunity.id,
         projectName: opportunity.title,
         paymentTermsDays: resolveQuotePaymentTermsDays(
@@ -142,11 +180,104 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
           initialValues.customerNotes
         ),
       };
+
+      const shellProps = await buildAdminAppShellProps(supabase, profile);
+
+      return (
+        <AppShell {...shellProps}>
+          <div className="mx-auto max-w-5xl">
+            <PageHeader
+              eyebrow="Administration"
+              title="New quote"
+              description="Build a draft quote for a customer."
+              actions={
+                <Link href={`/admin/opportunities/${opportunityId}`}>
+                  <Button variant="outline">Back to opportunity</Button>
+                </Link>
+              }
+            />
+
+            <QuoteBuilderForm
+              mode="create"
+              createdBy={user!.id}
+              companies={companies ?? []}
+              quoteRequests={quoteRequests ?? []}
+              initialValues={initialValues}
+              fallbackQuotePaymentTermsDays={appSettings.default_payment_terms_days}
+              lockCompany
+              lockContact
+              inheritedContactLabel={
+                contact
+                  ? [contact.full_name, contact.job_title, contact.email]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : null
+              }
+            />
+          </div>
+        </AppShell>
+      );
     }
   }
 
   const shellProps = await buildAdminAppShellProps(supabase, profile);
-  const useDirectBuilder = Boolean(opportunityId || quoteRequestId);
+  const useDirectBuilder = Boolean(
+    opportunityId || quoteRequestId || (prefilledCompanyId && prefilledContactId)
+  );
+
+  if (prefilledCompanyId && prefilledContactId && !opportunityId && !quoteRequestId) {
+    const linkedCompany = (companies ?? []).find(
+      (company) => company.id === prefilledCompanyId
+    );
+    const contact = await loadQuoteContactDisplay(
+      supabase,
+      prefilledContactId
+    );
+
+    initialValues = {
+      ...initialValues,
+      companyId: prefilledCompanyId,
+      contactId: prefilledContactId,
+      paymentTermsDays: resolveQuotePaymentTermsDays(
+        linkedCompany?.payment_terms_days,
+        appSettings.default_payment_terms_days
+      ),
+    };
+
+    return (
+      <AppShell {...shellProps}>
+        <div className="mx-auto max-w-5xl">
+          <PageHeader
+            eyebrow="Administration"
+            title="New quote"
+            description="Build a draft quote for a customer."
+            actions={
+              <Link href={`/admin/companies/${prefilledCompanyId}`}>
+                <Button variant="outline">Back to company</Button>
+              </Link>
+            }
+          />
+
+          <QuoteBuilderForm
+            mode="create"
+            createdBy={user!.id}
+            companies={companies ?? []}
+            quoteRequests={quoteRequests ?? []}
+            initialValues={initialValues}
+            fallbackQuotePaymentTermsDays={appSettings.default_payment_terms_days}
+            lockCompany
+            inheritedContactLabel={
+              contact
+                ? [contact.full_name, contact.job_title, contact.email]
+                    .filter(Boolean)
+                    .join(" · ")
+                : null
+            }
+          />
+        </div>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell {...shellProps}>

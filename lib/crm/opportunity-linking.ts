@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { OPPORTUNITY_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
+import { validateActiveContactForCompany } from "@/lib/crm/contact-validation";
 import { logOpportunityActivity } from "@/lib/crm/opportunity-stage-sync";
 import type { OpportunitySource } from "@/lib/crm/types";
 
@@ -146,11 +147,13 @@ export async function createOpportunityForQuote(
   supabase: SupabaseClient,
   {
     companyId,
+    contactId,
     title,
     description,
     createdBy,
   }: {
     companyId: string;
+    contactId: string;
     title: string;
     description?: string | null;
     createdBy: string;
@@ -161,10 +164,22 @@ export async function createOpportunityForQuote(
     createdBy
   );
 
+  const contactValidation = await validateActiveContactForCompany(
+    supabase,
+    contactId,
+    companyId,
+    { required: true }
+  );
+
+  if (!contactValidation.ok) {
+    throw new Error(contactValidation.message);
+  }
+
   const { data: opportunity, error } = await supabase
     .from("opportunities")
     .insert({
       company_id: companyId,
+      contact_id: contactId,
       title,
       description: description?.trim() || null,
       stage: "quote_in_progress",

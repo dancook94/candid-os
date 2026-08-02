@@ -6,6 +6,7 @@ import type { OpportunitySource, OpportunityStage } from "@/lib/crm/types";
 
 export type OpportunityFormValues = {
   companyId: string;
+  contactId: string;
   title: string;
   description: string;
   estimatedValue: string;
@@ -21,6 +22,7 @@ export type OpportunityFormValues = {
 export function buildOpportunityFormInitialValues(
   opportunity: {
     company_id: string;
+    contact_id: string | null;
     title: string;
     description: string | null;
     estimated_value: number | string | null;
@@ -41,6 +43,7 @@ export function buildOpportunityFormInitialValues(
 
   return {
     companyId: opportunity.company_id,
+    contactId: opportunity.contact_id ?? "",
     title: opportunity.title,
     description: opportunity.description ?? "",
     estimatedValue: estimated,

@@ -343,6 +343,10 @@ export default async function AdminQuotesPage({
                               {quote.customer_name ? (
                                 <span className="mt-0.5 block text-xs">
                                   {quote.customer_name}
+                                  {quote.contact_email &&
+                                  quote.contact_email !== quote.customer_name
+                                    ? ` · ${quote.contact_email}`
+                                    : null}
                                 </span>
                               ) : null}
                             </Link>

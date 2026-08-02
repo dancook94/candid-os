@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { AppShell } from "@/components/app-shell";
 import { CreateQuoteButton } from "@/components/crm/create-quote-button";
 import { OpportunityAssignmentEditor } from "@/components/crm/opportunity-assignment-editor";
+import { OpportunityContactEditor } from "@/components/crm/opportunity-contact-editor";
 import { OpportunityNoteForm } from "@/components/crm/opportunity-note-form";
 import { OpportunityQuickActions } from "@/components/crm/opportunity-quick-actions";
 import { OpportunityStageBadge } from "@/components/crm/opportunity-stage-badge";
@@ -27,6 +28,7 @@ import {
 import { loadOpportunityCollaboratorIds, loadOpportunityDetail } from "@/lib/crm/opportunity-detail";
 import { formatOpportunitySourceLabel } from "@/lib/crm/source-labels";
 import { getActiveQuotesForOpportunity } from "@/lib/crm/opportunity-linking";
+import { loadQuoteContactDisplay } from "@/lib/crm/quote-contact-display";
 import { OPEN_TASK_STATUSES } from "@/lib/crm/task-config";
 import { formatGbp } from "@/lib/format-currency";
 import { createClient } from "@/lib/supabase/server";
@@ -63,10 +65,17 @@ export default async function OpportunityDetailPage({
     notFound();
   }
 
-  const [activeQuotes, crmStaff, collaboratorIds] = await Promise.all([
+  const [activeQuotes, crmStaff, collaboratorIds, contact, { data: companies }] =
+    await Promise.all([
     getActiveQuotesForOpportunity(supabase, id),
     loadCrmStaffProfiles(supabase),
     loadOpportunityCollaboratorIds(supabase, id),
+    loadQuoteContactDisplay(supabase, detail.opportunity.contact_id),
+    supabase
+      .from("companies")
+      .select("id, company_name")
+      .eq("is_active", true)
+      .order("company_name"),
   ]);
 
   const { opportunity } = detail;
@@ -93,6 +102,7 @@ export default async function OpportunityDetailPage({
               </Link>
               <CreateQuoteButton
                 opportunityId={id}
+                hasContact={Boolean(detail.opportunity.contact_id)}
                 activeQuotes={activeQuotes}
               />
               <Link
@@ -171,6 +181,19 @@ export default async function OpportunityDetailPage({
                   </p>
                 </Link>
               ))}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {!detail.opportunity.contact_id ? (
+          <Card className="portal-surface mb-6 border-amber-400/50 bg-amber-50">
+            <CardContent className="pt-6">
+              <p className="text-sm font-medium text-amber-800">
+                No contact linked
+              </p>
+              <p className="mt-1 text-sm text-amber-700">
+                Add a contact to this opportunity before creating a linked quote.
+              </p>
             </CardContent>
           </Card>
         ) : null}
@@ -315,6 +338,13 @@ export default async function OpportunityDetailPage({
               />
             </CardContent>
           </Card>
+
+          <OpportunityContactEditor
+            opportunityId={id}
+            companyId={opportunity.company_id}
+            companies={companies ?? []}
+            contact={contact}
+          />
 
           <OpportunityAssignmentEditor
             opportunityId={id}

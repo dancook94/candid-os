@@ -18,12 +18,14 @@ type ContactsTableProps = {
   contacts: ContactListRow[];
   companies: CompanyOption[];
   showCompanyColumn?: boolean;
+  showQuickActions?: boolean;
 };
 
 export function ContactsTable({
   contacts,
   companies,
   showCompanyColumn = true,
+  showQuickActions = false,
 }: ContactsTableProps) {
   const router = useRouter();
   const [editingContact, setEditingContact] = useState<ContactListRow | null>(
@@ -157,6 +159,32 @@ export function ContactsTable({
                             View portal user
                           </Button>
                         </Link>
+                      ) : null}
+
+                      {showQuickActions ? (
+                        <>
+                          <Link
+                            href={`/admin/opportunities/new?companyId=${encodeURIComponent(contact.company_id)}&contactId=${encodeURIComponent(contact.id)}`}
+                          >
+                            <Button type="button" variant="outline" size="sm">
+                              New opportunity
+                            </Button>
+                          </Link>
+                          <Link
+                            href={`/admin/quotes/new?companyId=${encodeURIComponent(contact.company_id)}&contactId=${encodeURIComponent(contact.id)}`}
+                          >
+                            <Button type="button" variant="outline" size="sm">
+                              New quote
+                            </Button>
+                          </Link>
+                          <Link
+                            href={`/admin/tasks/new?companyId=${encodeURIComponent(contact.company_id)}&contactId=${encodeURIComponent(contact.id)}`}
+                          >
+                            <Button type="button" variant="outline" size="sm">
+                              Add task
+                            </Button>
+                          </Link>
+                        </>
                       ) : null}
 
                       <Button

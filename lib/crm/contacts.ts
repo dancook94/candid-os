@@ -131,7 +131,7 @@ export const CONTACT_LIST_SELECT = `
 
 export async function fetchContactsList(
   supabase: SupabaseClient,
-  options: { companyId?: string | null } = {}
+  options: { companyId?: string | null; search?: string | null } = {}
 ) {
   let query = supabase
     .from("contacts")
@@ -140,6 +140,15 @@ export async function fetchContactsList(
 
   if (options.companyId) {
     query = query.eq("company_id", options.companyId);
+  }
+
+  if (options.search?.trim()) {
+    const term = options.search.trim().replace(/[%_,]/g, " ");
+    if (term) {
+      query = query.or(
+        `full_name.ilike.%${term}%,email.ilike.%${term}%`
+      );
+    }
   }
 
   const { data, error } = await query;

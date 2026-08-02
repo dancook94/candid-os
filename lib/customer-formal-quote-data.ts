@@ -62,13 +62,35 @@ export async function fetchCustomerFormalQuote(
   const { data: formalQuote } = await supabase
     .from("quotes")
     .select(
-      "id, quote_number, project_name, status, current_version, quote_request_id, company_id"
+      "id, quote_number, project_name, status, current_version, quote_request_id, company_id, contact_id"
     )
     .eq("id", quoteId)
     .maybeSingle();
 
   if (!formalQuote) {
     return null;
+  }
+
+  let resolvedContactName = customerContactName;
+  let resolvedContactEmail = customerEmail;
+  let resolvedCompanyName = fallbackCompanyName;
+
+  if (formalQuote.contact_id) {
+    const { data: contact } = await supabase
+      .from("contacts")
+      .select("full_name, email, company_id, companies ( company_name )")
+      .eq("id", formalQuote.contact_id)
+      .maybeSingle();
+
+    if (contact) {
+      resolvedContactName = contact.full_name;
+      resolvedContactEmail = contact.email ?? resolvedContactEmail;
+      const company = Array.isArray(contact.companies)
+        ? contact.companies[0]
+        : contact.companies;
+      resolvedCompanyName =
+        company?.company_name ?? resolvedCompanyName;
+    }
   }
 
   const [{ data: quoteVersions }, { data: customerCompany }] = await Promise.all([
@@ -151,8 +173,8 @@ export async function fetchCustomerFormalQuote(
     lineItems,
     linkedRequestId: formalQuote.quote_request_id,
     customerCompanyName:
-      customerCompany?.company_name ?? fallbackCompanyName ?? null,
-    customerContactName,
-    customerEmail,
+      customerCompany?.company_name ?? resolvedCompanyName ?? null,
+    customerContactName: resolvedContactName,
+    customerEmail: resolvedContactEmail,
   };
 }

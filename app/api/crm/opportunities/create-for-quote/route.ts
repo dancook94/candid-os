@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 
 type CreateBody = {
   companyId?: string;
+  contactId?: string;
   title?: string;
   description?: string | null;
 };
@@ -33,9 +34,14 @@ export async function POST(request: Request) {
     );
   }
 
+  if (!body.contactId?.trim()) {
+    return NextResponse.json({ error: "Contact is required." }, { status: 400 });
+  }
+
   try {
     const opportunityId = await createOpportunityForQuote(supabase, {
       companyId: body.companyId,
+      contactId: body.contactId.trim(),
       title: body.title.trim(),
       description: body.description,
       createdBy: auth.userId,

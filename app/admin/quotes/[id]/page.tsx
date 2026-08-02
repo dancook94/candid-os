@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { AdminQuoteManagementActions } from "@/components/admin-quote-management-actions";
 import { CreateQuoteVersionButton } from "@/components/create-quote-version-button";
+import { QuoteContactSummary } from "@/components/crm/quote-contact-summary";
 import {
   loadLinkableOpportunitiesForCompany,
   loadLinkedOpportunityForQuote,
@@ -22,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
+import { loadQuoteContactDisplay } from "@/lib/crm/quote-contact-display";
 import { createClient } from "@/lib/supabase/server";
 import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
 import { isQuoteAwaitingDecision } from "@/lib/quote-status-response";
@@ -53,7 +55,7 @@ export default async function QuoteDetailPage({
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, quote_number, company_id, quote_request_id, opportunity_id, project_name, status, current_version, created_by, updated_at"
+      "id, quote_number, company_id, contact_id, quote_request_id, opportunity_id, project_name, status, current_version, created_by, updated_at"
     )
     .eq("id", id)
     .maybeSingle();
@@ -116,7 +118,7 @@ export default async function QuoteDetailPage({
     }))
   );
 
-  const [{ data: companies }, { data: quoteRequests }, linkedOpportunity, linkableOpportunities] =
+  const [{ data: companies }, { data: quoteRequests }, linkedOpportunity, linkableOpportunities, quoteContact] =
     await Promise.all([
     supabase
       .from("companies")
@@ -129,10 +131,12 @@ export default async function QuoteDetailPage({
       .order("created_at", { ascending: false }),
     loadLinkedOpportunityForQuote(supabase, quote.opportunity_id),
     loadLinkableOpportunitiesForCompany(supabase, quote.company_id),
+    loadQuoteContactDisplay(supabase, quote.contact_id),
   ]);
 
   const initialValues: QuoteBuilderInitialValues = {
     companyId: quote.company_id,
+    contactId: quote.contact_id,
     quoteRequestId: quote.quote_request_id,
     opportunityId: quote.opportunity_id,
     projectName: quote.project_name,
@@ -255,6 +259,8 @@ export default async function QuoteDetailPage({
           linkedOpportunity={linkedOpportunity}
         />
 
+        <QuoteContactSummary contact={quoteContact} />
+
         <QuoteBuilderForm
           key={quoteVersion.id}
           mode="edit"
@@ -270,6 +276,7 @@ export default async function QuoteDetailPage({
           selectedVersionNumber={selectedVersionNumber}
           currentVersionNumber={quote.current_version}
           canEdit={canEdit}
+          lockContact={Boolean(quote.opportunity_id && quote.contact_id)}
         />
       </div>
     </AppShell>
