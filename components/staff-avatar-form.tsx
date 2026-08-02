@@ -108,6 +108,7 @@ export function StaffAvatarForm({
       const payload = (await response.json()) as {
         error?: string;
         previewUrl?: string;
+        avatar?: StaffAvatarMetadata;
       };
 
       if (!response.ok) {
@@ -116,12 +117,14 @@ export function StaffAvatarForm({
       }
 
       setPreviewUrl(payload.previewUrl ?? pendingPreviewUrl);
-      setAvatarMetadata({
-        avatar_storage_path: avatarMetadata.avatar_storage_path,
-        avatar_file_name: pendingFile.name,
-        avatar_file_type: pendingFile.type,
-        avatar_file_size: pendingFile.size,
-      });
+      setAvatarMetadata(
+        payload.avatar ?? {
+          avatar_storage_path: avatarMetadata.avatar_storage_path,
+          avatar_file_name: pendingFile.name,
+          avatar_file_type: pendingFile.type,
+          avatar_file_size: pendingFile.size,
+        }
+      );
       clearPendingSelection();
       setSuccess("Avatar uploaded.");
       router.refresh();

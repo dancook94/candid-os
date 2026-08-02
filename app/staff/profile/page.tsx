@@ -12,9 +12,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { buildLoginUrl } from "@/lib/auth-redirect";
+import { buildPortalAppShellProps } from "@/lib/admin-shell-props";
 import { getStaffPortalRedirect } from "@/lib/portal-access";
 import { loadStaffAvatarSignedUrl } from "@/lib/staff-avatar-server";
-import { isAdminRole } from "@/lib/staff-roles";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -53,17 +53,13 @@ export default async function StaffProfilePage() {
     redirect(access);
   }
 
-  const avatarPreviewUrl = await loadStaffAvatarSignedUrl(supabase, profile!);
-  const userRole = isAdminRole(profile!.user_role) ? "admin" : "staff";
+  const userAvatarUrl = await loadStaffAvatarSignedUrl(supabase, profile!);
+  const shellProps = await buildPortalAppShellProps(supabase, profile!, {
+    avatarSignedUrl: userAvatarUrl,
+  });
 
   return (
-    <AppShell
-      userRole={userRole}
-      showStaffNav={profile!.user_role === "super_admin"}
-      userName={profile!.full_name || "Candid team member"}
-      companyName="Candid Creative"
-      userAvatarUrl={avatarPreviewUrl}
-    >
+    <AppShell {...shellProps}>
       <div className="mx-auto max-w-3xl">
         <PageHeader
           eyebrow="Account"
@@ -88,7 +84,7 @@ export default async function StaffProfilePage() {
                 avatar_file_type: profile!.avatar_file_type,
                 avatar_file_size: profile!.avatar_file_size,
               }}
-              initialPreviewUrl={avatarPreviewUrl}
+              initialPreviewUrl={userAvatarUrl}
               uploadUrl="/api/staff/avatar"
               removeUrl="/api/staff/avatar"
             />
@@ -96,7 +92,10 @@ export default async function StaffProfilePage() {
         </Card>
 
         <p className="mt-4 text-sm text-muted-foreground">
-          <Link href={userRole === "admin" ? "/admin" : "/staff"} className="underline-offset-4 hover:underline">
+          <Link
+            href={shellProps.userRole === "admin" ? "/admin" : "/staff"}
+            className="underline-offset-4 hover:underline"
+          >
             Back to workspace
           </Link>
         </p>

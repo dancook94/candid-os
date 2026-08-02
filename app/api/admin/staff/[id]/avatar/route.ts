@@ -1,6 +1,8 @@
 import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 
+import { revalidateStaffAvatarSurfaces } from "@/lib/staff-avatar-revalidation";
+
 import {
   removeStaffAvatar,
   replaceStaffAvatar,
@@ -73,10 +75,14 @@ export async function POST(request: Request, context: RouteContext) {
         )
       : null;
 
-    revalidatePath("/admin/staff");
+    revalidateStaffAvatarSurfaces();
     revalidatePath(`/admin/staff/${staffId}`);
 
-    return NextResponse.json({ success: true, previewUrl });
+    return NextResponse.json({
+      success: true,
+      previewUrl,
+      avatar: metadata,
+    });
   } catch (error) {
     return NextResponse.json(
       { error: formatStaffAvatarStorageError(error) },
@@ -119,7 +125,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
       previousStoragePath: authResult.targetProfile.avatar_storage_path,
     });
 
-    revalidatePath("/admin/staff");
+    revalidateStaffAvatarSurfaces();
     revalidatePath(`/admin/staff/${staffId}`);
 
     return NextResponse.json({ success: true });

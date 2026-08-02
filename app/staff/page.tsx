@@ -50,8 +50,10 @@ export default async function StaffWorkspacePage() {
     redirect(access);
   }
 
-  const shellProps = await buildStaffAppShellProps(supabase, profile!);
-  const avatarPreviewUrl = await loadStaffAvatarSignedUrl(supabase, profile!);
+  const userAvatarUrl = await loadStaffAvatarSignedUrl(supabase, profile!);
+  const shellProps = await buildStaffAppShellProps(supabase, profile!, {
+    avatarSignedUrl: userAvatarUrl,
+  });
 
   return (
     <AppShell {...shellProps}>
@@ -65,7 +67,7 @@ export default async function StaffWorkspacePage() {
 
           <StaffAvatarDisplay
             fullName={profile!.full_name || "Candid team member"}
-            avatarUrl={avatarPreviewUrl}
+            avatarUrl={userAvatarUrl}
             size="lg"
           />
         </div>

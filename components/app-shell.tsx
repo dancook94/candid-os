@@ -211,14 +211,14 @@ export function AppShell({
                   <StaffAvatarDisplay
                     fullName={displayName}
                     avatarUrl={userAvatarUrl}
-                    size="sm"
+                    size="md"
                   />
                 </Link>
               ) : (
                 <StaffAvatarDisplay
                   fullName={displayName}
                   avatarUrl={userAvatarUrl}
-                  size="sm"
+                  size="md"
                 />
               )
             ) : (

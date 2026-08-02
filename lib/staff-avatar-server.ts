@@ -10,6 +10,7 @@ import {
   type StaffAvatarMetadata,
 } from "@/lib/staff-avatars";
 import { isStaffRole } from "@/lib/staff-roles";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export async function loadStaffAvatarSignedUrl(
   supabase: SupabaseClient,
@@ -20,6 +21,22 @@ export async function loadStaffAvatarSignedUrl(
 ) {
   if (!isStaffRole(profile.user_role) || !profile.avatar_storage_path) {
     return null;
+  }
+
+  try {
+    const adminClient = createAdminClient();
+    const signedUrl = await createStaffAvatarSignedUrl(
+      adminClient,
+      profile.avatar_storage_path
+    );
+
+    if (signedUrl) {
+      return signedUrl;
+    }
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[staff-avatar] admin signed URL failed:", error);
+    }
   }
 
   return createStaffAvatarSignedUrl(supabase, profile.avatar_storage_path);
