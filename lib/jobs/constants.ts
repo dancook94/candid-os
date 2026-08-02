@@ -75,4 +75,7 @@ export const JOB_ACTIVITY_TYPES = {
   artworkApproved: "artwork_approved",
   artworkUploadFailed: "artwork_upload_failed",
   jobStatusReconciled: "job_status_reconciled",
+  jobArtworkSourceChanged: "job_artwork_source_changed",
+  artworkReceivedManually: "artwork_received_manually",
+  candidArtworkCreationStarted: "candid_artwork_creation_started",
 } as const;

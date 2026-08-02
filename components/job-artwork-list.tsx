@@ -29,6 +29,7 @@ type JobArtworkListProps = {
   files: CustomerJobFileView[];
   dropboxConfigured: boolean;
   showArtworkRequired?: boolean;
+  customerArtworkMessage?: string | null;
   onChanged?: () => void;
 };
 
@@ -37,6 +38,7 @@ export function JobArtworkList({
   files,
   dropboxConfigured,
   showArtworkRequired = false,
+  customerArtworkMessage = null,
   onChanged,
 }: JobArtworkListProps) {
   const [replaceFileId, setReplaceFileId] = useState<string | null>(null);
@@ -49,6 +51,12 @@ export function JobArtworkList({
           <p className="mt-1 text-sm text-amber-900">
             Please upload the artwork required for this job.
           </p>
+        </div>
+      ) : null}
+
+      {customerArtworkMessage ? (
+        <div className="rounded-xl border border-border bg-muted/30 px-5 py-4">
+          <p className="text-sm text-neutral-900">{customerArtworkMessage}</p>
         </div>
       ) : null}
 

@@ -9,6 +9,7 @@ import {
 } from "@/lib/dropbox/upload-session";
 import { ensureDropboxOnExistingJob } from "@/lib/jobs/create-from-quote";
 import { resolveArtworkUploadedAtIso } from "@/lib/jobs/artwork-display";
+import { isCustomerArtworkUploadEnabled } from "@/lib/jobs/artwork-source";
 import {
   JOB_ACTIVITY_TYPES,
   logJobActivity,
@@ -24,6 +25,7 @@ import {
 } from "@/lib/jobs/file-validation";
 import type { JobFileRecord } from "@/lib/jobs/types";
 import { syncJobStatusAfterArtworkUpload } from "@/lib/jobs/job-status-sync";
+import { maybeSetPortalUploadArtworkSource } from "@/lib/jobs/update-artwork-source";
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -126,6 +128,10 @@ export async function createArtworkUploadSession(
   }
 ) {
   const { jobId, userId, companyId } = getUploadContextIds(context);
+
+  if (!isCustomerArtworkUploadEnabled(context.job)) {
+    throw new JobError("Artwork uploads are not available for this job.", 409);
+  }
 
   if (!isDropboxConfigured()) {
     throw new JobError("Dropbox integration is not configured.", 503);
@@ -583,6 +589,19 @@ export async function finishArtworkUpload(
         jobStatusError instanceof Error
           ? jobStatusError.message
           : "Job status update failed.",
+    });
+  }
+
+  try {
+    await maybeSetPortalUploadArtworkSource(adminClient, jobId);
+  } catch (sourceUpdateError) {
+    logArtworkUploadStep("artwork_source_update_failed", {
+      jobId,
+      uploadRecordId: file.id,
+      message:
+        sourceUpdateError instanceof Error
+          ? sourceUpdateError.message
+          : "Artwork source update failed.",
     });
   }
 

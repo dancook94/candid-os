@@ -12,7 +12,9 @@ import {
   resolveArtworkUploadedAt,
 } from "@/lib/jobs/artwork-display";
 import {
+  getCustomerArtworkSourceMessage,
   getCustomerChangesRequiredComment,
+  isCustomerArtworkUploadEnabled,
   jobNeedsArtworkUpload,
   resolveCustomerJobStatus,
 } from "@/lib/jobs/customer-status";
@@ -258,6 +260,9 @@ export async function loadCustomerJobDetail(
     quoteId: typedJob.quote_id,
     quoteNumber: quote?.quote_number ? `Q-${quote.quote_number}` : null,
     artworkRequired: typedJob.artwork_required,
+    artworkSource: typedJob.artwork_source,
+    customerArtworkMessage: getCustomerArtworkSourceMessage(typedJob.artwork_source),
+    uploadEnabled: isCustomerArtworkUploadEnabled(typedJob),
     needsArtworkUpload: jobNeedsArtworkUpload(typedJob, typedFiles),
     changesRequiredComment: getCustomerChangesRequiredComment(typedFiles),
     dropboxConfigured: isDropboxConfigured(),

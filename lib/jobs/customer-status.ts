@@ -1,3 +1,8 @@
+import {
+  getCustomerArtworkSourceMessage,
+  isCustomerArtworkUploadEnabled,
+  resolveCustomerStatusLabelForArtworkSource,
+} from "@/lib/jobs/artwork-source";
 import { JOB_STATUS_LABELS } from "@/lib/jobs/constants";
 import type { JobFileRecord, JobRecord } from "@/lib/jobs/types";
 import {
@@ -12,10 +17,14 @@ export type CustomerJobStatusView = JobStatusView;
 export { getCurrentArtworkFile, jobHasCompletedArtworkUpload, resolveJobStatusView };
 
 export function jobNeedsArtworkUpload(
-  job: Pick<JobRecord, "artwork_required" | "status">,
+  job: Pick<JobRecord, "artwork_required" | "status" | "artwork_source">,
   files: JobFileRecord[]
 ) {
   if (!job.artwork_required) {
+    return false;
+  }
+
+  if (job.artwork_source === "candid_creating" || job.artwork_source === "manual_receipt") {
     return false;
   }
 
@@ -37,8 +46,34 @@ export function resolveCustomerJobStatus(
   job: JobRecord,
   files: JobFileRecord[] = []
 ): CustomerJobStatusView {
-  return resolveJobStatusView(job, files);
+  const baseView = resolveJobStatusView(job, files);
+  const currentFile = getCurrentArtworkFile(files);
+
+  if (
+    currentFile &&
+    (currentFile.artwork_status === "under_review" ||
+      currentFile.artwork_status === "changes_required" ||
+      currentFile.artwork_status === "approved")
+  ) {
+    return baseView;
+  }
+
+  const sourceLabel = resolveCustomerStatusLabelForArtworkSource(job);
+
+  if (sourceLabel) {
+    return {
+      status: job.status,
+      statusLabel: sourceLabel,
+    };
+  }
+
+  return baseView;
 }
+
+export {
+  getCustomerArtworkSourceMessage,
+  isCustomerArtworkUploadEnabled,
+};
 
 export function getCustomerChangesRequiredComment(files: JobFileRecord[]) {
   const currentFile = getCurrentArtworkFile(files);

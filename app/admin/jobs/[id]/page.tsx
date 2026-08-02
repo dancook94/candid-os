@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AdminJobArtworkPanel } from "@/components/admin-job-artwork-panel";
+import { AdminJobArtworkSourcePanel } from "@/components/admin-job-artwork-source-panel";
 import { AdminJobDropboxPanel } from "@/components/admin-job-dropbox-panel";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
@@ -18,6 +19,7 @@ import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { isMissingJobsSchemaError } from "@/lib/jobs/errors";
 import { loadAdminJobDetail } from "@/lib/jobs/loaders";
 import { JOB_STATUS_LABELS } from "@/lib/jobs/constants";
+import { getAdminArtworkSourceLabel } from "@/lib/jobs/artwork-source";
 import { isDropboxConfigured } from "@/lib/dropbox/client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -110,6 +112,12 @@ export default async function AdminJobDetailPage({
               <p className="mt-2 font-medium text-neutral-950">{detail.companyName}</p>
             </div>
             <div>
+              <p className="text-muted-foreground">Artwork source</p>
+              <p className="mt-2 font-medium text-neutral-950">
+                {getAdminArtworkSourceLabel(detail.job.artwork_source)}
+              </p>
+            </div>
+            <div>
               <p className="text-muted-foreground">Artwork required</p>
               <p className="mt-2 font-medium text-neutral-950">
                 {detail.job.artwork_required ? "Yes" : "No"}
@@ -163,6 +171,15 @@ export default async function AdminJobDetailPage({
           dropboxSetupStatus={detail.job.dropbox_setup_status}
           dropboxConfigured={isDropboxConfigured()}
         />
+
+        <Card className="portal-surface mb-6 overflow-hidden">
+          <CardContent className="pt-6">
+            <AdminJobArtworkSourcePanel
+              jobId={detail.job.id}
+              artworkSource={detail.job.artwork_source}
+            />
+          </CardContent>
+        </Card>
 
         <Card className="portal-surface overflow-hidden">
           <CardContent className="pt-6">

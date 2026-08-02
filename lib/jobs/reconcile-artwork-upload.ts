@@ -13,6 +13,7 @@ import { JOB_ACTIVITY_TYPES, logJobActivity } from "@/lib/jobs/activity";
 import { JobError } from "@/lib/jobs/errors";
 import { JOB_LIST_COLUMNS } from "@/lib/jobs/job-select";
 import { syncJobStatusAfterArtworkUpload } from "@/lib/jobs/job-status-sync";
+import { maybeSetPortalUploadArtworkSource } from "@/lib/jobs/update-artwork-source";
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
 import type { JobFileRecord, JobRecord } from "@/lib/jobs/types";
 
@@ -266,6 +267,19 @@ export async function reconcileArtworkUploadRecord(
         jobStatusError instanceof Error
           ? jobStatusError.message
           : "Job status update failed.",
+    });
+  }
+
+  try {
+    await maybeSetPortalUploadArtworkSource(adminClient, typedJob.id);
+  } catch (sourceUpdateError) {
+    logReconcileStep("artwork_source_update_failed", {
+      jobFileId: file.id,
+      jobId: typedJob.id,
+      message:
+        sourceUpdateError instanceof Error
+          ? sourceUpdateError.message
+          : "Artwork source update failed.",
     });
   }
 

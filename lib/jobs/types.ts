@@ -9,6 +9,15 @@ export const JOB_STATUSES = [
 
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
+export const JOB_ARTWORK_SOURCES = [
+  "customer_pending",
+  "portal_upload",
+  "manual_receipt",
+  "candid_creating",
+] as const;
+
+export type JobArtworkSource = (typeof JOB_ARTWORK_SOURCES)[number];
+
 export const JOB_UPLOAD_STATUSES = [
   "pending",
   "uploading",
@@ -48,6 +57,7 @@ export type JobRecord = {
   fulfilment_method: string | null;
   required_date: string | null;
   artwork_required: boolean;
+  artwork_source: JobArtworkSource;
   customer_visible: boolean;
   accepted_at: string | null;
   accepted_by: string | null;
@@ -118,6 +128,9 @@ export type CustomerJobDetail = {
   quoteId: string;
   quoteNumber: string | null;
   artworkRequired: boolean;
+  artworkSource: JobArtworkSource;
+  customerArtworkMessage: string | null;
+  uploadEnabled: boolean;
   needsArtworkUpload: boolean;
   changesRequiredComment: string | null;
   dropboxConfigured: boolean;

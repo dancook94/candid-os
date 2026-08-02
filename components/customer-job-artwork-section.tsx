@@ -16,12 +16,21 @@ export function CustomerJobArtworkSection({ job }: { job: CustomerJobDetail }) {
     );
   }
 
+  if (!job.uploadEnabled) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Artwork uploads are no longer available for this job.
+      </p>
+    );
+  }
+
   return (
     <JobArtworkList
       jobId={job.id}
       files={job.files}
       dropboxConfigured={job.dropboxConfigured}
       showArtworkRequired={job.needsArtworkUpload}
+      customerArtworkMessage={job.customerArtworkMessage}
       onChanged={() => router.refresh()}
     />
   );

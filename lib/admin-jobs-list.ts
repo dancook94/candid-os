@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { getAdminArtworkSourceShortLabel } from "@/lib/jobs/artwork-source";
 import { isMissingJobsSchemaError } from "@/lib/jobs/errors";
 import { JOB_LIST_COLUMNS } from "@/lib/jobs/job-select";
 import { resolveJobStatusView } from "@/lib/jobs/status";
@@ -17,6 +18,8 @@ export type AdminJobListRow = {
   quoteId: string;
   quoteNumber: string | null;
   artworkRequired: boolean;
+  artworkSource: string;
+  artworkSourceLabel: string;
   dropboxSetupStatus: string;
   updatedAt: string;
 };
@@ -82,6 +85,8 @@ export async function fetchAdminJobsList(
           ? `Q-${quoteNumberById.get(job.quote_id)}`
           : null,
         artworkRequired: job.artwork_required,
+        artworkSource: job.artwork_source,
+        artworkSourceLabel: getAdminArtworkSourceShortLabel(job.artwork_source),
         dropboxSetupStatus: job.dropbox_setup_status,
         updatedAt: job.updated_at,
       };

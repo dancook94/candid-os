@@ -91,6 +91,7 @@ export default async function AdminJobsPage() {
                       <th>Project</th>
                       <th>Company</th>
                       <th>Status</th>
+                      <th>Artwork source</th>
                       <th>Quote</th>
                       <th>Artwork</th>
                       <th>Dropbox</th>
@@ -115,6 +116,9 @@ export default async function AdminJobsPage() {
                             status={mapJobStatusToBadge(job.status)}
                             label={job.statusLabel}
                           />
+                        </td>
+                        <td className="p-4 text-muted-foreground">
+                          {job.artworkRequired ? job.artworkSourceLabel : "—"}
                         </td>
                         <td className="p-4 text-muted-foreground">
                           {job.quoteNumber ? (
