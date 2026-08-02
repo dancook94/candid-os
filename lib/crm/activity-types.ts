@@ -48,6 +48,7 @@ export const CRM_ACTIVITY_TYPES = {
   companyAddressUpdated: "company_address_updated",
   companyAddressDeactivated: "company_address_deactivated",
   notificationPreferencesUpdated: "notification_preferences_updated",
+  quoteRequestCreated: "quote_request_created",
 } as const;
 
 /** @deprecated Use CRM_ACTIVITY_TYPES */

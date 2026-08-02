@@ -17,6 +17,7 @@ import type { QuoteRequestAttachmentRecord } from "@/lib/quote-request-attachmen
 import { formatAdminQuoteStatusLabel } from "@/lib/admin-quote-status";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
+import { formatCountryLabel } from "@/lib/quote-request/normalize-address";
 import { createClient } from "@/lib/supabase/server";
 
 type QuoteRequestDetail = {
@@ -35,12 +36,33 @@ type QuoteRequestDetail = {
   delivery_postcode: string | null;
   delivery_contact_name: string | null;
   delivery_contact_phone: string | null;
+  delivery_country: string | null;
+  delivery_instructions: string | null;
+  delivery_address_label: string | null;
+  selected_company_address_id: string | null;
+  delivery_address_source: string | null;
   purchase_order_number: string | null;
   notes: string | null;
   deadline_status: string;
   request_status: string;
   created_at: string;
 };
+
+const QUOTE_REQUEST_DETAIL_SELECT =
+  "id, company_id, requested_by, project_name, description, fulfilment_method, requested_date, requested_time, delivery_address_line_1, delivery_address_line_2, delivery_city, delivery_county, delivery_postcode, delivery_contact_name, delivery_contact_phone, delivery_country, delivery_instructions, delivery_address_label, selected_company_address_id, delivery_address_source, purchase_order_number, notes, deadline_status, request_status, created_at";
+
+function formatDeliveryAddressSource(source: string | null | undefined) {
+  switch (source) {
+    case "saved":
+      return "Selected from saved addresses";
+    case "new_saved":
+      return "Newly entered and saved";
+    case "new":
+      return "Newly entered (one-off)";
+    default:
+      return "Submitted snapshot";
+  }
+}
 
 type BadgeStatus =
   | "pending"
@@ -139,6 +161,9 @@ function formatDeliveryAddress(quoteRequest: QuoteRequestDetail) {
     quoteRequest.delivery_city,
     quoteRequest.delivery_county,
     quoteRequest.delivery_postcode,
+    quoteRequest.delivery_country
+      ? formatCountryLabel(quoteRequest.delivery_country)
+      : null,
   ]
     .filter(Boolean)
     .join(", ");
@@ -175,9 +200,7 @@ export default async function AdminQuoteRequestDetailPage({
 
   const { data: quoteRequest, error } = await supabase
     .from("quote_requests")
-    .select(
-      "id, company_id, requested_by, project_name, description, fulfilment_method, requested_date, requested_time, delivery_address_line_1, delivery_address_line_2, delivery_city, delivery_county, delivery_postcode, delivery_contact_name, delivery_contact_phone, purchase_order_number, notes, deadline_status, request_status, created_at"
-    )
+    .select(QUOTE_REQUEST_DETAIL_SELECT)
     .eq("id", id)
     .maybeSingle();
 
@@ -185,7 +208,7 @@ export default async function AdminQuoteRequestDetailPage({
     notFound();
   }
 
-  const [{ data: company }, { data: requester }, { data: attachments }, { data: linkedQuote }] =
+  const [{ data: company }, { data: requester }, { data: attachments }, { data: linkedQuote }, { data: linkedAddress }] =
     await Promise.all([
       supabase
         .from("companies")
@@ -209,6 +232,13 @@ export default async function AdminQuoteRequestDetailPage({
         .order("updated_at", { ascending: false })
         .limit(1)
         .maybeSingle(),
+      quoteRequest.selected_company_address_id
+        ? supabase
+            .from("company_addresses")
+            .select("id, label, is_active")
+            .eq("id", quoteRequest.selected_company_address_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
     ]);
 
   const quoteAttachments: QuoteRequestAttachmentRecord[] = attachments ?? [];
@@ -334,7 +364,32 @@ export default async function AdminQuoteRequestDetailPage({
               {isDelivery && (
                 <>
                   <div>
-                    <dt className="text-neutral-500">Delivery address</dt>
+                    <dt className="text-neutral-500">Delivery details</dt>
+                    <dd className="mt-1 text-neutral-950">
+                      {formatDeliveryAddressSource(
+                        quoteRequest.delivery_address_source
+                      )}
+                    </dd>
+                  </div>
+
+                  {quoteRequest.delivery_address_label ? (
+                    <div>
+                      <dt className="text-neutral-500">Address label</dt>
+                      <dd className="mt-1 text-neutral-950">
+                        {quoteRequest.delivery_address_label}
+                      </dd>
+                    </div>
+                  ) : null}
+
+                  <div>
+                    <dt className="text-neutral-500">Recipient</dt>
+                    <dd className="mt-1 text-neutral-950">
+                      {quoteRequest.delivery_contact_name || "—"}
+                    </dd>
+                  </div>
+
+                  <div>
+                    <dt className="text-neutral-500">Submitted address</dt>
                     <dd className="mt-1 text-neutral-950">
                       {formatDeliveryAddress(quoteRequest)}
                     </dd>
@@ -346,6 +401,30 @@ export default async function AdminQuoteRequestDetailPage({
                       {formatDeliveryContact(quoteRequest)}
                     </dd>
                   </div>
+
+                  {quoteRequest.delivery_instructions ? (
+                    <div>
+                      <dt className="text-neutral-500">Delivery instructions</dt>
+                      <dd className="mt-1 text-neutral-950">
+                        {quoteRequest.delivery_instructions}
+                      </dd>
+                    </div>
+                  ) : null}
+
+                  {linkedAddress ? (
+                    <div>
+                      <dt className="text-neutral-500">Saved address link</dt>
+                      <dd className="mt-1 text-neutral-950">
+                        <Link
+                          href={`/admin/companies/${quoteRequest.company_id}`}
+                          className="underline-offset-4 hover:underline"
+                        >
+                          {linkedAddress.label || "Saved address"}
+                          {!linkedAddress.is_active ? " (inactive)" : ""}
+                        </Link>
+                      </dd>
+                    </div>
+                  ) : null}
                 </>
               )}
 

@@ -12,6 +12,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { loadQuoteRequestSavedAddresses } from "@/lib/quote-request/submit-customer-quote-request";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
   buildCustomerAppShellProps,
@@ -40,6 +42,13 @@ export default async function QuoteRequestPage() {
   const canSubmit =
     profile?.account_status === "approved" && Boolean(profile.company_id);
 
+  const savedAddresses = canSubmit
+    ? await loadQuoteRequestSavedAddresses(
+        createAdminClient(),
+        profile!.company_id!
+      )
+    : { available: false, addresses: [] };
+
   return (
     <AppShell {...shellProps}>
       <div className="mx-auto max-w-3xl">
@@ -50,11 +59,14 @@ export default async function QuoteRequestPage() {
 
         {canSubmit ? (
           <QuoteRequestForm
-            companyId={profile.company_id}
+            companyId={profile!.company_id!}
             requestedBy={user.id}
+            companyName={shellProps.companyName}
             defaultDeadlineStatus={
               appSettingsResult.settings.default_deadline_status
             }
+            savedAddresses={savedAddresses.addresses}
+            savedAddressesAvailable={savedAddresses.available}
           />
         ) : (
           <Card className="portal-surface">

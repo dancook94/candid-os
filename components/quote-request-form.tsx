@@ -14,37 +14,30 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { QuoteRequestFilePicker } from "@/components/quote-request-file-picker";
+import {
+  formatCountryLabel,
+  formatSavedAddressOption,
+  toSavedAddressSnapshot,
+} from "@/lib/quote-request/format-address";
+import {
+  formatAddressOneLine,
+  type DeliveryAddressSnapshot,
+} from "@/lib/quote-request/normalize-address";
+import type { SavedAddressOption } from "@/lib/quote-request/types";
 import { cn } from "@/lib/utils";
 import { uploadQuoteRequestAttachments } from "@/lib/quote-request-attachments";
 import { createClient } from "@/lib/supabase/client";
 
 type FulfilmentMethod = "delivery" | "collection";
-
-type QuoteRequestInsert = {
-  company_id: string;
-  requested_by: string;
-  project_name: string;
-  description: string;
-  fulfilment_method: FulfilmentMethod;
-  requested_date: string;
-  requested_time: string | null;
-  delivery_address_line_1: string | null;
-  delivery_address_line_2: string | null;
-  delivery_city: string | null;
-  delivery_county: string | null;
-  delivery_postcode: string | null;
-  delivery_contact_name: string | null;
-  delivery_contact_phone: string | null;
-  purchase_order_number: string | null;
-  notes: string | null;
-  deadline_status: string;
-  request_status: "submitted";
-};
+type AddressSelection = "saved" | "new" | "";
 
 type QuoteRequestFormProps = {
   companyId: string;
   requestedBy: string;
+  companyName: string;
   defaultDeadlineStatus?: string;
+  savedAddresses: SavedAddressOption[];
+  savedAddressesAvailable: boolean;
 };
 
 type FieldErrors = Record<string, string>;
@@ -69,27 +62,60 @@ function formatReviewDate(dateString: string) {
   });
 }
 
-function formatDeliveryAddress(
-  line1: string,
-  line2: string,
-  city: string,
-  county: string,
-  postcode: string
-) {
-  return [line1, line2, city, county, postcode].filter(Boolean).join(", ");
+function formatAddressOption(address: SavedAddressOption) {
+  return formatSavedAddressOption(address);
+}
+
+function buildNewAddressSnapshot(
+  companyName: string,
+  values: {
+    label: string;
+    recipientName: string;
+    addressLine1: string;
+    addressLine2: string;
+    city: string;
+    county: string;
+    postcode: string;
+    country: string;
+    phone: string;
+    deliveryInstructions: string;
+  }
+): DeliveryAddressSnapshot {
+  return {
+    label: values.label.trim() || null,
+    recipientName: values.recipientName.trim(),
+    addressLine1: values.addressLine1.trim(),
+    addressLine2: values.addressLine2.trim() || null,
+    city: values.city.trim(),
+    county: values.county.trim() || null,
+    postcode: values.postcode.trim(),
+    country: values.country.trim() || "GB",
+    phone: values.phone.trim() || null,
+    deliveryInstructions: values.deliveryInstructions.trim() || null,
+  };
 }
 
 export function QuoteRequestForm({
   companyId,
   requestedBy,
-  defaultDeadlineStatus = "pending",
+  companyName,
+  savedAddresses,
+  savedAddressesAvailable,
 }: QuoteRequestFormProps) {
   const router = useRouter();
   const supabase = createClient();
 
+  const defaultSavedAddressId = savedAddresses.find(
+    (address) => address.is_default_delivery
+  )?.id;
+
+  const initialAddressSelection: AddressSelection =
+    savedAddresses.length > 0 ? "saved" : "new";
+
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [infoMessage, setInfoMessage] = useState("");
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const [projectName, setProjectName] = useState("");
@@ -98,13 +124,26 @@ export function QuoteRequestForm({
     useState<FulfilmentMethod>("delivery");
   const [requestedDate, setRequestedDate] = useState("");
   const [requestedTime, setRequestedTime] = useState("");
-  const [deliveryAddressLine1, setDeliveryAddressLine1] = useState("");
-  const [deliveryAddressLine2, setDeliveryAddressLine2] = useState("");
-  const [deliveryCity, setDeliveryCity] = useState("");
-  const [deliveryCounty, setDeliveryCounty] = useState("");
-  const [deliveryPostcode, setDeliveryPostcode] = useState("");
-  const [deliveryContactName, setDeliveryContactName] = useState("");
-  const [deliveryContactPhone, setDeliveryContactPhone] = useState("");
+
+  const [addressSelection, setAddressSelection] = useState<AddressSelection>(
+    initialAddressSelection
+  );
+  const [selectedAddressId, setSelectedAddressId] = useState(
+    defaultSavedAddressId ?? savedAddresses[0]?.id ?? ""
+  );
+  const [saveForFuture, setSaveForFuture] = useState(false);
+
+  const [addressLabel, setAddressLabel] = useState("");
+  const [recipientName, setRecipientName] = useState("");
+  const [addressLine1, setAddressLine1] = useState("");
+  const [addressLine2, setAddressLine2] = useState("");
+  const [city, setCity] = useState("");
+  const [county, setCounty] = useState("");
+  const [postcode, setPostcode] = useState("");
+  const [country, setCountry] = useState("GB");
+  const [contactPhone, setContactPhone] = useState("");
+  const [deliveryInstructions, setDeliveryInstructions] = useState("");
+
   const [purchaseOrderNumber, setPurchaseOrderNumber] = useState("");
   const [notes, setNotes] = useState("");
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
@@ -112,6 +151,53 @@ export function QuoteRequestForm({
   const [uploadProgress, setUploadProgress] = useState("");
 
   const minDate = useMemo(() => getTodayString(), []);
+
+  const selectedSavedAddress = useMemo(
+    () => savedAddresses.find((address) => address.id === selectedAddressId),
+    [savedAddresses, selectedAddressId]
+  );
+
+  const deliverySnapshot = useMemo(() => {
+    if (fulfilmentMethod !== "delivery") {
+      return null;
+    }
+
+    if (addressSelection === "saved" && selectedSavedAddress) {
+      return toSavedAddressSnapshot(selectedSavedAddress, companyName);
+    }
+
+    if (addressSelection === "new") {
+      return buildNewAddressSnapshot(companyName, {
+        label: addressLabel,
+        recipientName,
+        addressLine1,
+        addressLine2,
+        city,
+        county,
+        postcode,
+        country,
+        phone: contactPhone,
+        deliveryInstructions,
+      });
+    }
+
+    return null;
+  }, [
+    fulfilmentMethod,
+    addressSelection,
+    selectedSavedAddress,
+    companyName,
+    addressLabel,
+    recipientName,
+    addressLine1,
+    addressLine2,
+    city,
+    county,
+    postcode,
+    country,
+    contactPhone,
+    deliveryInstructions,
+  ]);
 
   function clearFieldError(field: string) {
     setFieldErrors((current) => {
@@ -146,20 +232,32 @@ export function QuoteRequestForm({
       }
 
       if (fulfilmentMethod === "delivery") {
-        if (!deliveryAddressLine1.trim()) {
-          errors.deliveryAddressLine1 = "Address line 1 is required.";
-        }
+        if (addressSelection === "saved") {
+          if (!selectedAddressId) {
+            errors.selectedAddressId = "Select a saved address.";
+          }
+        } else if (addressSelection === "new") {
+          if (!recipientName.trim()) {
+            errors.recipientName = "Recipient name is required.";
+          }
 
-        if (!deliveryPostcode.trim()) {
-          errors.deliveryPostcode = "Postcode is required.";
-        }
+          if (!addressLine1.trim()) {
+            errors.addressLine1 = "Address line 1 is required.";
+          }
 
-        if (!deliveryContactName.trim()) {
-          errors.deliveryContactName = "Contact name is required.";
-        }
+          if (!city.trim()) {
+            errors.city = "City/town is required.";
+          }
 
-        if (!deliveryContactPhone.trim()) {
-          errors.deliveryContactPhone = "Contact phone is required.";
+          if (!postcode.trim()) {
+            errors.postcode = "Postcode is required.";
+          }
+
+          if (!country.trim()) {
+            errors.country = "Country is required.";
+          }
+        } else {
+          errors.addressSelection = "Choose a delivery address option.";
         }
       }
     }
@@ -170,6 +268,7 @@ export function QuoteRequestForm({
 
   function handleNext() {
     setError("");
+    setInfoMessage("");
 
     if (!validateStep(step)) {
       return;
@@ -180,12 +279,14 @@ export function QuoteRequestForm({
 
   function handleBack() {
     setError("");
+    setInfoMessage("");
     setStep((current) => Math.max(current - 1, 1));
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    setInfoMessage("");
 
     if (step !== 3) {
       return;
@@ -199,48 +300,64 @@ export function QuoteRequestForm({
     setIsSubmitting(true);
     setUploadProgress("");
 
-    const isDelivery = fulfilmentMethod === "delivery";
-
-    const insertPayload: QuoteRequestInsert = {
-      company_id: companyId,
-      requested_by: requestedBy,
-      project_name: projectName.trim(),
+    const payload = {
+      projectName: projectName.trim(),
       description: description.trim(),
-      fulfilment_method: fulfilmentMethod,
-      requested_date: requestedDate,
-      requested_time: requestedTime.trim() || null,
-      delivery_address_line_1: isDelivery
-        ? deliveryAddressLine1.trim()
-        : null,
-      delivery_address_line_2: isDelivery
-        ? deliveryAddressLine2.trim() || null
-        : null,
-      delivery_city: isDelivery ? deliveryCity.trim() || null : null,
-      delivery_county: isDelivery ? deliveryCounty.trim() || null : null,
-      delivery_postcode: isDelivery ? deliveryPostcode.trim() : null,
-      delivery_contact_name: isDelivery ? deliveryContactName.trim() : null,
-      delivery_contact_phone: isDelivery ? deliveryContactPhone.trim() : null,
-      purchase_order_number: purchaseOrderNumber.trim() || null,
+      fulfilmentMethod,
+      requestedDate,
+      requestedTime: requestedTime.trim() || null,
+      purchaseOrderNumber: purchaseOrderNumber.trim() || null,
       notes: notes.trim() || null,
-      deadline_status: defaultDeadlineStatus,
-      request_status: "submitted",
+      delivery:
+        fulfilmentMethod === "delivery"
+          ? addressSelection === "saved"
+            ? {
+                mode: "saved" as const,
+                savedAddressId: selectedAddressId,
+              }
+            : {
+                mode: "new" as const,
+                saveForFuture,
+                label: addressLabel.trim() || null,
+                recipientName: recipientName.trim(),
+                addressLine1: addressLine1.trim(),
+                addressLine2: addressLine2.trim() || null,
+                city: city.trim(),
+                county: county.trim() || null,
+                postcode: postcode.trim(),
+                country: country.trim() || "GB",
+                phone: contactPhone.trim() || null,
+                deliveryInstructions: deliveryInstructions.trim() || null,
+              }
+          : null,
     };
 
-    const { data: createdQuote, error: insertError } = await supabase
-      .from("quote_requests")
-      .insert(insertPayload)
-      .select("id")
-      .single();
+    const response = await fetch("/api/customer/quote-requests", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
 
-    if (insertError || !createdQuote) {
+    const submitResult = (await response.json()) as {
+      error?: string;
+      quoteRequestId?: string;
+      message?: string;
+      addressReused?: boolean;
+    };
+
+    if (!response.ok || !submitResult.quoteRequestId) {
       setIsSubmitting(false);
-      setError(insertError?.message ?? "Unable to create quote request.");
+      setError(submitResult.error ?? "Unable to create quote request.");
       return;
+    }
+
+    if (submitResult.addressReused) {
+      setInfoMessage("This address is already saved.");
     }
 
     try {
       const linkResponse = await fetch(
-        `/api/crm/quote-requests/${createdQuote.id}/ensure-opportunity`,
+        `/api/crm/quote-requests/${submitResult.quoteRequestId}/ensure-opportunity`,
         { method: "POST" }
       );
 
@@ -269,7 +386,7 @@ export function QuoteRequestForm({
         await uploadQuoteRequestAttachments(supabase, {
           files: pendingFiles,
           companyId,
-          quoteRequestId: createdQuote.id,
+          quoteRequestId: submitResult.quoteRequestId,
           uploadedBy: requestedBy,
         });
       } catch (uploadError) {
@@ -334,11 +451,9 @@ export function QuoteRequestForm({
                   placeholder="Summer campaign launch"
                   aria-invalid={Boolean(fieldErrors.projectName)}
                 />
-                {fieldErrors.projectName && (
-                  <p className="text-sm text-red-600">
-                    {fieldErrors.projectName}
-                  </p>
-                )}
+                {fieldErrors.projectName ? (
+                  <p className="text-sm text-red-600">{fieldErrors.projectName}</p>
+                ) : null}
               </div>
 
               <div className="space-y-2">
@@ -355,19 +470,17 @@ export function QuoteRequestForm({
                   className={fieldClassName}
                   aria-invalid={Boolean(fieldErrors.description)}
                 />
-                {fieldErrors.description && (
-                  <p className="text-sm text-red-600">
-                    {fieldErrors.description}
-                  </p>
-                )}
+                {fieldErrors.description ? (
+                  <p className="text-sm text-red-600">{fieldErrors.description}</p>
+                ) : null}
               </div>
             </div>
           )}
 
-          {step === 2 && (
+          {step === 2 ? (
             <div className="space-y-5">
               <div className="space-y-2">
-                <Label>Fulfilment</Label>
+                <Label>Delivery method</Label>
                 <div className="grid grid-cols-2 gap-2">
                   {(["delivery", "collection"] as const).map((option) => (
                     <Button
@@ -401,11 +514,11 @@ export function QuoteRequestForm({
                     }}
                     aria-invalid={Boolean(fieldErrors.requestedDate)}
                   />
-                  {fieldErrors.requestedDate && (
+                  {fieldErrors.requestedDate ? (
                     <p className="text-sm text-red-600">
                       {fieldErrors.requestedDate}
                     </p>
-                  )}
+                  ) : null}
                 </div>
 
                 <div className="space-y-2">
@@ -419,133 +532,276 @@ export function QuoteRequestForm({
                 </div>
               </div>
 
-              {fulfilmentMethod === "delivery" && (
+              {fulfilmentMethod === "delivery" ? (
                 <div className="space-y-5 rounded-xl border border-border bg-muted/35 p-4">
                   <div className="space-y-2">
-                    <Label htmlFor="deliveryAddressLine1">Address line 1</Label>
-                    <Input
-                      id="deliveryAddressLine1"
-                      value={deliveryAddressLine1}
-                      onChange={(event) => {
-                        setDeliveryAddressLine1(event.target.value);
-                        clearFieldError("deliveryAddressLine1");
-                      }}
-                      aria-invalid={Boolean(fieldErrors.deliveryAddressLine1)}
-                    />
-                    {fieldErrors.deliveryAddressLine1 && (
-                      <p className="text-sm text-red-600">
-                        {fieldErrors.deliveryAddressLine1}
+                    <Label htmlFor="deliveryAddress">Delivery address</Label>
+
+                    {!savedAddressesAvailable ? (
+                      <p className="text-sm text-muted-foreground">
+                        Saved addresses require the proposed database migration.
+                        Enter an address below.
                       </p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="deliveryAddressLine2">
-                      Address line 2
-                    </Label>
-                    <Input
-                      id="deliveryAddressLine2"
-                      value={deliveryAddressLine2}
-                      onChange={(event) =>
-                        setDeliveryAddressLine2(event.target.value)
-                      }
-                      placeholder="Optional"
-                    />
-                  </div>
-
-                  <div className="grid gap-5 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="deliveryCity">City</Label>
-                      <Input
-                        id="deliveryCity"
-                        value={deliveryCity}
-                        onChange={(event) => setDeliveryCity(event.target.value)}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="deliveryCounty">County</Label>
-                      <Input
-                        id="deliveryCounty"
-                        value={deliveryCounty}
-                        onChange={(event) =>
-                          setDeliveryCounty(event.target.value)
+                    ) : savedAddresses.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No saved addresses yet. Enter an address below.
+                      </p>
+                    ) : (
+                      <select
+                        id="deliveryAddress"
+                        className={fieldClassName}
+                        value={
+                          addressSelection === "new"
+                            ? "new"
+                            : selectedAddressId || ""
                         }
-                      />
-                    </div>
-                  </div>
+                        onChange={(event) => {
+                          const value = event.target.value;
 
-                  <div className="space-y-2">
-                    <Label htmlFor="deliveryPostcode">Postcode</Label>
-                    <Input
-                      id="deliveryPostcode"
-                      value={deliveryPostcode}
-                      onChange={(event) => {
-                        setDeliveryPostcode(event.target.value);
-                        clearFieldError("deliveryPostcode");
-                      }}
-                      aria-invalid={Boolean(fieldErrors.deliveryPostcode)}
-                    />
-                    {fieldErrors.deliveryPostcode && (
-                      <p className="text-sm text-red-600">
-                        {fieldErrors.deliveryPostcode}
-                      </p>
+                          if (value === "new") {
+                            setAddressSelection("new");
+                            clearFieldError("selectedAddressId");
+                            return;
+                          }
+
+                          setAddressSelection("saved");
+                          setSelectedAddressId(value);
+                          clearFieldError("selectedAddressId");
+                        }}
+                      >
+                        <option value="">Select a saved address</option>
+                        {savedAddresses.map((address) => (
+                          <option key={address.id} value={address.id}>
+                            {formatAddressOption(address)}
+                            {address.is_default_delivery ? " (Default)" : ""}
+                          </option>
+                        ))}
+                        <option value="new">Enter a new address</option>
+                      </select>
                     )}
+
+                    {fieldErrors.selectedAddressId ? (
+                      <p className="text-sm text-red-600">
+                        {fieldErrors.selectedAddressId}
+                      </p>
+                    ) : null}
+                    {fieldErrors.addressSelection ? (
+                      <p className="text-sm text-red-600">
+                        {fieldErrors.addressSelection}
+                      </p>
+                    ) : null}
                   </div>
 
-                  <div className="grid gap-5 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="deliveryContactName">Contact name</Label>
-                      <Input
-                        id="deliveryContactName"
-                        value={deliveryContactName}
-                        onChange={(event) => {
-                          setDeliveryContactName(event.target.value);
-                          clearFieldError("deliveryContactName");
-                        }}
-                        aria-invalid={Boolean(fieldErrors.deliveryContactName)}
-                      />
-                      {fieldErrors.deliveryContactName && (
-                        <p className="text-sm text-red-600">
-                          {fieldErrors.deliveryContactName}
-                        </p>
-                      )}
+                  {addressSelection === "saved" && deliverySnapshot ? (
+                    <div className="rounded-xl border border-border bg-background p-4 text-sm">
+                      <p className="font-medium text-foreground">
+                        {deliverySnapshot.label || "Saved address"}
+                        {selectedSavedAddress?.is_default_delivery
+                          ? " · Default"
+                          : ""}
+                      </p>
+                      <p className="mt-2 whitespace-pre-line text-muted-foreground">
+                        {[
+                          deliverySnapshot.recipientName,
+                          companyName,
+                          deliverySnapshot.addressLine1,
+                          deliverySnapshot.addressLine2,
+                          deliverySnapshot.city,
+                          deliverySnapshot.county,
+                          deliverySnapshot.postcode,
+                          formatCountryLabel(deliverySnapshot.country),
+                          deliverySnapshot.phone,
+                          deliverySnapshot.deliveryInstructions,
+                        ]
+                          .filter(Boolean)
+                          .join("\n")}
+                      </p>
                     </div>
+                  ) : null}
 
-                    <div className="space-y-2">
-                      <Label htmlFor="deliveryContactPhone">Contact phone</Label>
-                      <Input
-                        id="deliveryContactPhone"
-                        type="tel"
-                        value={deliveryContactPhone}
-                        onChange={(event) => {
-                          setDeliveryContactPhone(event.target.value);
-                          clearFieldError("deliveryContactPhone");
-                        }}
-                        aria-invalid={Boolean(fieldErrors.deliveryContactPhone)}
-                      />
-                      {fieldErrors.deliveryContactPhone && (
-                        <p className="text-sm text-red-600">
-                          {fieldErrors.deliveryContactPhone}
-                        </p>
-                      )}
+                  {addressSelection === "new" ||
+                  !savedAddressesAvailable ||
+                  savedAddresses.length === 0 ? (
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="addressLabel">Address label</Label>
+                        <Input
+                          id="addressLabel"
+                          value={addressLabel}
+                          onChange={(event) => setAddressLabel(event.target.value)}
+                          placeholder="Head office"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="recipientName">Recipient name</Label>
+                        <Input
+                          id="recipientName"
+                          value={recipientName}
+                          onChange={(event) => {
+                            setRecipientName(event.target.value);
+                            clearFieldError("recipientName");
+                          }}
+                          aria-invalid={Boolean(fieldErrors.recipientName)}
+                        />
+                        {fieldErrors.recipientName ? (
+                          <p className="text-sm text-red-600">
+                            {fieldErrors.recipientName}
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="addressLine1">Address line 1</Label>
+                        <Input
+                          id="addressLine1"
+                          value={addressLine1}
+                          onChange={(event) => {
+                            setAddressLine1(event.target.value);
+                            clearFieldError("addressLine1");
+                          }}
+                          aria-invalid={Boolean(fieldErrors.addressLine1)}
+                        />
+                        {fieldErrors.addressLine1 ? (
+                          <p className="text-sm text-red-600">
+                            {fieldErrors.addressLine1}
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="addressLine2">Address line 2</Label>
+                        <Input
+                          id="addressLine2"
+                          value={addressLine2}
+                          onChange={(event) => setAddressLine2(event.target.value)}
+                          placeholder="Optional"
+                        />
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor="city">City/town</Label>
+                          <Input
+                            id="city"
+                            value={city}
+                            onChange={(event) => {
+                              setCity(event.target.value);
+                              clearFieldError("city");
+                            }}
+                            aria-invalid={Boolean(fieldErrors.city)}
+                          />
+                          {fieldErrors.city ? (
+                            <p className="text-sm text-red-600">{fieldErrors.city}</p>
+                          ) : null}
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="county">County</Label>
+                          <Input
+                            id="county"
+                            value={county}
+                            onChange={(event) => setCounty(event.target.value)}
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label htmlFor="postcode">Postcode</Label>
+                          <Input
+                            id="postcode"
+                            value={postcode}
+                            onChange={(event) => {
+                              setPostcode(event.target.value);
+                              clearFieldError("postcode");
+                            }}
+                            aria-invalid={Boolean(fieldErrors.postcode)}
+                          />
+                          {fieldErrors.postcode ? (
+                            <p className="text-sm text-red-600">
+                              {fieldErrors.postcode}
+                            </p>
+                          ) : null}
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label htmlFor="country">Country</Label>
+                          <Input
+                            id="country"
+                            value={country === "GB" ? "United Kingdom" : country}
+                            onChange={(event) => {
+                              const value = event.target.value;
+
+                              setCountry(
+                                value.toLowerCase().includes("united kingdom")
+                                  ? "GB"
+                                  : value
+                              );
+                              clearFieldError("country");
+                            }}
+                            aria-invalid={Boolean(fieldErrors.country)}
+                          />
+                          {fieldErrors.country ? (
+                            <p className="text-sm text-red-600">
+                              {fieldErrors.country}
+                            </p>
+                          ) : null}
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="contactPhone">Contact phone</Label>
+                        <Input
+                          id="contactPhone"
+                          type="tel"
+                          value={contactPhone}
+                          onChange={(event) => setContactPhone(event.target.value)}
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="deliveryInstructions">
+                          Delivery instructions
+                        </Label>
+                        <textarea
+                          id="deliveryInstructions"
+                          value={deliveryInstructions}
+                          onChange={(event) =>
+                            setDeliveryInstructions(event.target.value)
+                          }
+                          rows={3}
+                          className={fieldClassName}
+                        />
+                      </div>
+
+                      {savedAddressesAvailable ? (
+                        <label className="flex items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={saveForFuture}
+                            onChange={(event) =>
+                              setSaveForFuture(event.target.checked)
+                            }
+                          />
+                          Save this address for future quote requests
+                        </label>
+                      ) : null}
                     </div>
-                  </div>
+                  ) : null}
                 </div>
-              )}
+              ) : null}
             </div>
-          )}
+          ) : null}
 
-          {step === 3 && (
+          {step === 3 ? (
             <div className="space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="purchaseOrderNumber">Purchase order</Label>
                 <Input
                   id="purchaseOrderNumber"
                   value={purchaseOrderNumber}
-                  onChange={(event) =>
-                    setPurchaseOrderNumber(event.target.value)
-                  }
+                  onChange={(event) => setPurchaseOrderNumber(event.target.value)}
                   placeholder="Optional"
                 />
               </div>
@@ -557,7 +813,7 @@ export function QuoteRequestForm({
                   value={notes}
                   onChange={(event) => setNotes(event.target.value)}
                   rows={4}
-                  placeholder="Optional delivery instructions or project notes"
+                  placeholder="Optional project notes"
                   className={fieldClassName}
                 />
               </div>
@@ -569,9 +825,9 @@ export function QuoteRequestForm({
                 onValidationError={setAttachmentValidationError}
               />
 
-              {attachmentValidationError && (
+              {attachmentValidationError ? (
                 <p className="text-sm text-red-600">{attachmentValidationError}</p>
-              )}
+              ) : null}
 
               <div className="rounded-xl border border-border bg-muted/35 p-4">
                 <h3 className="text-sm font-medium text-neutral-950">
@@ -581,9 +837,7 @@ export function QuoteRequestForm({
                 <dl className="mt-4 space-y-3 text-sm">
                   <div>
                     <dt className="text-neutral-500">Project name</dt>
-                    <dd className="font-medium text-neutral-950">
-                      {projectName}
-                    </dd>
+                    <dd className="font-medium text-neutral-950">{projectName}</dd>
                   </div>
 
                   <div>
@@ -592,11 +846,9 @@ export function QuoteRequestForm({
                   </div>
 
                   <div>
-                    <dt className="text-neutral-500">Fulfilment</dt>
+                    <dt className="text-neutral-500">Delivery method</dt>
                     <dd className="font-medium text-neutral-950">
-                      {fulfilmentMethod === "delivery"
-                        ? "Delivery"
-                        : "Collection"}
+                      {fulfilmentMethod === "delivery" ? "Delivery" : "Collection"}
                     </dd>
                   </div>
 
@@ -608,47 +860,57 @@ export function QuoteRequestForm({
                     </dd>
                   </div>
 
-                  {fulfilmentMethod === "delivery" && (
+                  {fulfilmentMethod === "delivery" && deliverySnapshot ? (
                     <>
                       <div>
                         <dt className="text-neutral-500">Delivery address</dt>
-                        <dd className="text-neutral-950">
-                          {formatDeliveryAddress(
-                            deliveryAddressLine1,
-                            deliveryAddressLine2,
-                            deliveryCity,
-                            deliveryCounty,
-                            deliveryPostcode
-                          )}
+                        <dd className="whitespace-pre-line text-neutral-950">
+                          {[
+                            deliverySnapshot.label,
+                            deliverySnapshot.recipientName,
+                            formatAddressOneLine(deliverySnapshot),
+                            formatCountryLabel(deliverySnapshot.country),
+                          ]
+                            .filter(Boolean)
+                            .join("\n")}
                         </dd>
                       </div>
 
-                      <div>
-                        <dt className="text-neutral-500">Contact</dt>
-                        <dd className="text-neutral-950">
-                          {deliveryContactName} · {deliveryContactPhone}
-                        </dd>
-                      </div>
+                      {deliverySnapshot.phone ? (
+                        <div>
+                          <dt className="text-neutral-500">Contact phone</dt>
+                          <dd className="text-neutral-950">
+                            {deliverySnapshot.phone}
+                          </dd>
+                        </div>
+                      ) : null}
+
+                      {addressSelection === "new" && saveForFuture ? (
+                        <div>
+                          <dt className="text-neutral-500">Saved address</dt>
+                          <dd className="text-neutral-950">
+                            Will be saved for future quote requests
+                          </dd>
+                        </div>
+                      ) : null}
                     </>
-                  )}
+                  ) : null}
 
-                  {purchaseOrderNumber && (
+                  {purchaseOrderNumber ? (
                     <div>
                       <dt className="text-neutral-500">Purchase order</dt>
-                      <dd className="text-neutral-950">
-                        {purchaseOrderNumber}
-                      </dd>
+                      <dd className="text-neutral-950">{purchaseOrderNumber}</dd>
                     </div>
-                  )}
+                  ) : null}
 
-                  {notes && (
+                  {notes ? (
                     <div>
                       <dt className="text-neutral-500">Additional notes</dt>
                       <dd className="text-neutral-950">{notes}</dd>
                     </div>
-                  )}
+                  ) : null}
 
-                  {pendingFiles.length > 0 && (
+                  {pendingFiles.length > 0 ? (
                     <div>
                       <dt className="text-neutral-500">Attachments</dt>
                       <dd className="text-neutral-950">
@@ -656,24 +918,30 @@ export function QuoteRequestForm({
                         {pendingFiles.length === 1 ? "" : "s"} ready to upload
                       </dd>
                     </div>
-                  )}
+                  ) : null}
                 </dl>
               </div>
             </div>
-          )}
+          ) : null}
 
-          {error && (
+          {infoMessage ? (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+              <p className="text-sm text-emerald-800">{infoMessage}</p>
+            </div>
+          ) : null}
+
+          {error ? (
             <div className="rounded-lg border border-red-200 bg-red-50 p-4">
               <p className="text-sm font-medium text-red-800">
                 Unable to submit quote request
               </p>
               <p className="mt-1 text-sm text-red-700">{error}</p>
             </div>
-          )}
+          ) : null}
 
-          {uploadProgress && (
+          {uploadProgress ? (
             <p className="text-sm text-neutral-600">{uploadProgress}</p>
-          )}
+          ) : null}
 
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
             {step > 1 ? (
