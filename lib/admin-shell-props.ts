@@ -36,6 +36,7 @@ export async function buildAdminAppShellProps(
   return {
     userRole: "admin" as const,
     showStaffNav: isSuperAdminRole(profile.user_role),
+    showCrmNav: isAdminRole(profile.user_role),
     userName: profile.full_name || "Candid administrator",
     companyName: "Candid Creative",
     userAvatarUrl: await resolveAvatarSignedUrl(

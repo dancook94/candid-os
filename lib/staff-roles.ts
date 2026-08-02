@@ -15,9 +15,12 @@ export const INVITEABLE_STAFF_ROLES = [
   "accounts",
 ] as const;
 
+export const CRM_ROLES = ["super_admin", "admin", "sales"] as const;
+
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 export type StaffRole = (typeof STAFF_ROLES)[number];
 export type InviteableStaffRole = (typeof INVITEABLE_STAFF_ROLES)[number];
+export type CrmRole = (typeof CRM_ROLES)[number];
 
 export function isAdminRole(role: string): role is AdminRole {
   return (ADMIN_ROLES as readonly string[]).includes(role);
@@ -41,6 +44,10 @@ export function isStaffRole(role: string): role is StaffRole {
 
 export function isInviteableStaffRole(role: string): role is InviteableStaffRole {
   return (INVITEABLE_STAFF_ROLES as readonly string[]).includes(role);
+}
+
+export function isCrmRole(role: string): role is CrmRole {
+  return (CRM_ROLES as readonly string[]).includes(role);
 }
 
 export function formatRoleLabel(role: string) {

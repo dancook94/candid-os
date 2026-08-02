@@ -5,12 +5,14 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
   Building2,
+  CheckSquare,
   ClipboardList,
   FileText,
   Gauge,
   LogOut,
   Package,
   Settings,
+  Target,
   UserCog,
   Users,
 } from "lucide-react";
@@ -24,6 +26,7 @@ type AppShellProps = {
   children: React.ReactNode;
   userRole?: "customer" | "admin" | "staff";
   showStaffNav?: boolean;
+  showCrmNav?: boolean;
   userName?: string;
   companyName?: string;
   companyLogoUrl?: string | null;
@@ -81,6 +84,19 @@ const adminLinks = [
   },
 ];
 
+const crmLinks = [
+  {
+    href: "/admin/opportunities",
+    label: "Opportunities",
+    icon: Target,
+  },
+  {
+    href: "/admin/tasks",
+    label: "Tasks",
+    icon: CheckSquare,
+  },
+];
+
 const staffManagementLink = {
   href: "/admin/staff",
   label: "Staff",
@@ -113,6 +129,7 @@ export function AppShell({
   children,
   userRole = "customer",
   showStaffNav = false,
+  showCrmNav = false,
   userName,
   companyName,
   companyLogoUrl = null,
@@ -124,9 +141,12 @@ export function AppShell({
 
   const links =
     userRole === "admin"
-      ? showStaffNav
-        ? [...adminLinks, staffManagementLink]
-        : adminLinks
+      ? [
+          ...adminLinks.slice(0, 5),
+          ...(showCrmNav ? crmLinks : []),
+          ...adminLinks.slice(5),
+          ...(showStaffNav ? [staffManagementLink] : []),
+        ]
       : userRole === "staff"
         ? staffLinks
         : customerLinks;
