@@ -1,3 +1,5 @@
+import { DROPBOX_DEFAULT_ROOT_FOLDER } from "@/lib/dropbox/oauth";
+
 type DropboxTokenResponse = {
   access_token: string;
   expires_in: number;
@@ -17,12 +19,12 @@ export function isDropboxConfigured() {
     process.env.DROPBOX_APP_KEY?.trim() &&
       process.env.DROPBOX_APP_SECRET?.trim() &&
       process.env.DROPBOX_REFRESH_TOKEN?.trim() &&
-      process.env.DROPBOX_ROOT_FOLDER?.trim()
+      (process.env.DROPBOX_ROOT_FOLDER?.trim() || DROPBOX_DEFAULT_ROOT_FOLDER)
   );
 }
 
 export function getDropboxRootFolder() {
-  const root = process.env.DROPBOX_ROOT_FOLDER?.trim() || "/Candid OS Jobs";
+  const root = process.env.DROPBOX_ROOT_FOLDER?.trim() || DROPBOX_DEFAULT_ROOT_FOLDER;
   return root.startsWith("/") ? root.replace(/\/+$/, "") : `/${root.replace(/\/+$/, "")}`;
 }
 

@@ -672,44 +672,70 @@ export function AdminSettingsPanel({
       ) : null}
 
       {activeTab === "email" ? (
-        <Card className="portal-surface overflow-hidden rounded-2xl shadow-sm ring-0">
-          <CardHeader className="border-b border-border">
-            <CardTitle className="text-lg font-semibold">Email settings</CardTitle>
-            <CardDescription>
-              Environment configuration for quotation email delivery. Secret values are never shown.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4 pt-6">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-xl border border-border p-4">
-                <p className="text-sm font-medium text-foreground">RESEND_API_KEY</p>
-                <div className="mt-2">
-                  <ConfigStatus configured={emailConfig.resendConfigured} />
+        <div className="space-y-6">
+          <Card className="portal-surface overflow-hidden rounded-2xl shadow-sm ring-0">
+            <CardHeader className="border-b border-border">
+              <CardTitle className="text-lg font-semibold">Email settings</CardTitle>
+              <CardDescription>
+                Environment configuration for quotation email delivery. Secret values are never shown.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-xl border border-border p-4">
+                  <p className="text-sm font-medium text-foreground">RESEND_API_KEY</p>
+                  <div className="mt-2">
+                    <ConfigStatus configured={emailConfig.resendConfigured} />
+                  </div>
+                </div>
+                <div className="rounded-xl border border-border p-4">
+                  <p className="text-sm font-medium text-foreground">NEXT_PUBLIC_APP_URL</p>
+                  <div className="mt-2">
+                    <ConfigStatus configured={emailConfig.appUrlConfigured} />
+                  </div>
                 </div>
               </div>
+
               <div className="rounded-xl border border-border p-4">
-                <p className="text-sm font-medium text-foreground">NEXT_PUBLIC_APP_URL</p>
-                <div className="mt-2">
-                  <ConfigStatus configured={emailConfig.appUrlConfigured} />
-                </div>
+                <p className="text-sm font-medium text-foreground">Quotation sender address</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {emailConfig.senderAddress}
+                </p>
               </div>
-            </div>
 
-            <div className="rounded-xl border border-border p-4">
-              <p className="text-sm font-medium text-foreground">Quotation sender address</p>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {emailConfig.senderAddress}
-              </p>
-            </div>
+              <div className="rounded-xl border border-border p-4">
+                <p className="text-sm font-medium text-foreground">Reply-to address</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {emailConfig.replyToAddress}
+                </p>
+              </div>
+            </CardContent>
+          </Card>
 
-            <div className="rounded-xl border border-border p-4">
-              <p className="text-sm font-medium text-foreground">Reply-to address</p>
-              <p className="mt-2 text-sm text-muted-foreground">
-                {emailConfig.replyToAddress}
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+          <Card className="portal-surface overflow-hidden rounded-2xl shadow-sm ring-0">
+            <CardHeader className="border-b border-border">
+              <CardTitle className="text-lg font-semibold">Integrations</CardTitle>
+              <CardDescription>
+                Connect third-party services used by Candid OS.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-6">
+              <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border p-4">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Dropbox</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Customer artwork uploads and job folder provisioning.
+                  </p>
+                </div>
+                <Link href="/admin/settings/integrations/dropbox">
+                  <Button type="button" variant="outline">
+                    Manage Dropbox
+                  </Button>
+                </Link>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       ) : null}
 
       {activeTab === "customers" ? (
