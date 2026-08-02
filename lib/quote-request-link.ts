@@ -1,6 +1,14 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { formatOpportunityStageLabel } from "@/lib/crm/opportunity-stages";
 import { normalizeSupabaseQueryError } from "@/lib/customer-settings/query-errors";
+
+export type LinkedOpportunitySummary = {
+  id: string;
+  title: string;
+  stage: string;
+  stageLabel: string;
+};
 
 export type LinkedQuoteSummary = {
   id: string;
@@ -12,12 +20,24 @@ export type LinkedQuoteSummary = {
   hasCurrentVersion: boolean;
 };
 
+export type QuoteRequestContext = {
+  id: string;
+  opportunityId: string | null;
+};
+
 export type QuoteRequestQuoteDisplayState =
   | {
       kind: "awaiting";
-      label: "Awaiting quote";
-      adminLabel: "Awaiting quote";
-      customerLabel: "No quote yet";
+      label: "Awaiting review";
+      adminLabel: "Awaiting review";
+      customerLabel: "Awaiting review";
+    }
+  | {
+      kind: "opportunity_no_quote";
+      label: "Quote not started";
+      adminLabel: "Quote not started";
+      customerLabel: "Preparing quote";
+      opportunity: LinkedOpportunitySummary;
     }
   | {
       kind: "in_progress";
@@ -25,6 +45,7 @@ export type QuoteRequestQuoteDisplayState =
       adminLabel: "Quote in progress";
       customerLabel: "Preparing quote";
       quote: LinkedQuoteSummary;
+      opportunity: LinkedOpportunitySummary | null;
     }
   | {
       kind: "sent";
@@ -32,6 +53,7 @@ export type QuoteRequestQuoteDisplayState =
       adminLabel: "Quote sent";
       customerLabel: "Quote received";
       quote: LinkedQuoteSummary;
+      opportunity: LinkedOpportunitySummary | null;
     }
   | {
       kind: "accepted";
@@ -39,6 +61,7 @@ export type QuoteRequestQuoteDisplayState =
       adminLabel: "Accepted";
       customerLabel: "Accepted";
       quote: LinkedQuoteSummary;
+      opportunity: LinkedOpportunitySummary | null;
     }
   | {
       kind: "declined";
@@ -46,6 +69,7 @@ export type QuoteRequestQuoteDisplayState =
       adminLabel: "Declined";
       customerLabel: "Declined";
       quote: LinkedQuoteSummary;
+      opportunity: LinkedOpportunitySummary | null;
     }
   | {
       kind: "load_error";
@@ -61,14 +85,17 @@ export type QuoteRequestQuoteDisplayState =
       customerLabel: "Quote data issue";
       message: string;
       quote: LinkedQuoteSummary;
+      opportunity: LinkedOpportunitySummary | null;
     };
 
 type QuoteRowForLink = {
   id: string;
   quote_request_id: string | null;
+  opportunity_id: string | null;
   quote_number: number;
   status: string;
   current_version: number;
+  updated_at?: string | null;
 };
 
 type VersionRowForLink = {
@@ -76,6 +103,15 @@ type VersionRowForLink = {
   version_status: string;
   total: number | null;
   sent_at: string | null;
+};
+
+const QUOTE_STATUS_PRIORITY: Record<string, number> = {
+  accepted: 100,
+  sent: 80,
+  draft: 60,
+  declined: 40,
+  expired: 30,
+  superseded: 20,
 };
 
 function mapQuoteStatusToDisplayKind(
@@ -95,8 +131,36 @@ function mapQuoteStatusToDisplayKind(
   }
 }
 
+export function selectPrimaryQuoteForRequest(
+  quotes: QuoteRowForLink[]
+): QuoteRowForLink | null {
+  if (quotes.length === 0) {
+    return null;
+  }
+
+  if (quotes.length === 1) {
+    return quotes[0] ?? null;
+  }
+
+  return [...quotes].sort((left, right) => {
+    const priorityDiff =
+      (QUOTE_STATUS_PRIORITY[right.status.toLowerCase()] ?? 0) -
+      (QUOTE_STATUS_PRIORITY[left.status.toLowerCase()] ?? 0);
+
+    if (priorityDiff !== 0) {
+      return priorityDiff;
+    }
+
+    const leftUpdated = left.updated_at ? Date.parse(left.updated_at) : 0;
+    const rightUpdated = right.updated_at ? Date.parse(right.updated_at) : 0;
+
+    return rightUpdated - leftUpdated;
+  })[0] ?? null;
+}
+
 export function buildQuoteRequestDisplayState(input: {
   linkedQuote: LinkedQuoteSummary | null;
+  linkedOpportunity: LinkedOpportunitySummary | null;
   loadError?: string | null;
 }): QuoteRequestQuoteDisplayState {
   if (input.loadError) {
@@ -109,12 +173,31 @@ export function buildQuoteRequestDisplayState(input: {
     };
   }
 
+  if (!input.linkedOpportunity && !input.linkedQuote) {
+    return {
+      kind: "awaiting",
+      label: "Awaiting review",
+      adminLabel: "Awaiting review",
+      customerLabel: "Awaiting review",
+    };
+  }
+
+  if (input.linkedOpportunity && !input.linkedQuote) {
+    return {
+      kind: "opportunity_no_quote",
+      label: "Quote not started",
+      adminLabel: "Quote not started",
+      customerLabel: "Preparing quote",
+      opportunity: input.linkedOpportunity,
+    };
+  }
+
   if (!input.linkedQuote) {
     return {
       kind: "awaiting",
-      label: "Awaiting quote",
-      adminLabel: "Awaiting quote",
-      customerLabel: "No quote yet",
+      label: "Awaiting review",
+      adminLabel: "Awaiting review",
+      customerLabel: "Awaiting review",
     };
   }
 
@@ -126,10 +209,12 @@ export function buildQuoteRequestDisplayState(input: {
       customerLabel: "Quote data issue",
       message: "Linked quote is missing its current version.",
       quote: input.linkedQuote,
+      opportunity: input.linkedOpportunity,
     };
   }
 
   const kind = mapQuoteStatusToDisplayKind(input.linkedQuote.status);
+  const opportunity = input.linkedOpportunity;
 
   if (kind === "in_progress") {
     return {
@@ -138,6 +223,7 @@ export function buildQuoteRequestDisplayState(input: {
       adminLabel: "Quote in progress",
       customerLabel: "Preparing quote",
       quote: input.linkedQuote,
+      opportunity,
     };
   }
 
@@ -148,6 +234,7 @@ export function buildQuoteRequestDisplayState(input: {
       adminLabel: "Accepted",
       customerLabel: "Accepted",
       quote: input.linkedQuote,
+      opportunity,
     };
   }
 
@@ -158,6 +245,7 @@ export function buildQuoteRequestDisplayState(input: {
       adminLabel: "Declined",
       customerLabel: "Declined",
       quote: input.linkedQuote,
+      opportunity,
     };
   }
 
@@ -167,6 +255,7 @@ export function buildQuoteRequestDisplayState(input: {
     adminLabel: "Quote sent",
     customerLabel: "Quote received",
     quote: input.linkedQuote,
+    opportunity,
   };
 }
 
@@ -227,50 +316,179 @@ export async function loadLinkedQuoteSummary(
   };
 }
 
-export async function loadLinkedQuoteForRequest(
+function mapOpportunityRow(row: {
+  id: string;
+  title: string;
+  stage: string;
+}): LinkedOpportunitySummary {
+  return {
+    id: row.id,
+    title: row.title,
+    stage: row.stage,
+    stageLabel: formatOpportunityStageLabel(row.stage),
+  };
+}
+
+export async function loadLinkedOpportunity(
   supabase: SupabaseClient,
-  quoteRequestId: string
+  opportunityId: string | null
 ): Promise<{
-  quote: LinkedQuoteSummary | null;
+  opportunity: LinkedOpportunitySummary | null;
   loadError: string | null;
 }> {
-  const { data: linkedQuote, error } = await supabase
-    .from("quotes")
-    .select("id, quote_request_id, quote_number, status, current_version")
-    .eq("quote_request_id", quoteRequestId)
-    .order("updated_at", { ascending: false })
-    .limit(1)
+  if (!opportunityId) {
+    return { opportunity: null, loadError: null };
+  }
+
+  const { data, error } = await supabase
+    .from("opportunities")
+    .select("id, title, stage")
+    .eq("id", opportunityId)
     .maybeSingle();
 
   if (error) {
     const normalized = normalizeSupabaseQueryError(error);
 
     if (process.env.NODE_ENV === "development") {
-      console.error("[quote-request-link] linked quote query failed", {
-        quoteRequestId,
+      console.error("[quote-request-link] linked opportunity query failed", {
+        opportunityId,
         code: normalized.code ?? null,
         message: normalized.message ?? String(error),
       });
     }
 
     return {
-      quote: null,
-      loadError: normalized.message ?? "Linked quote could not be loaded.",
+      opportunity: null,
+      loadError: normalized.message ?? "Linked opportunity could not be loaded.",
     };
   }
 
-  if (!linkedQuote) {
-    return { quote: null, loadError: null };
+  return {
+    opportunity: data ? mapOpportunityRow(data) : null,
+    loadError: null,
+  };
+}
+
+async function loadQuotesForRequestContext(
+  supabase: SupabaseClient,
+  context: QuoteRequestContext
+): Promise<QuoteRowForLink[]> {
+  const filters: string[] = [];
+
+  if (context.opportunityId) {
+    filters.push(`opportunity_id.eq.${context.opportunityId}`);
+  }
+
+  filters.push(`quote_request_id.eq.${context.id}`);
+
+  const { data, error } = await supabase
+    .from("quotes")
+    .select(
+      "id, quote_request_id, opportunity_id, quote_number, status, current_version, updated_at"
+    )
+    .or(filters.join(","))
+    .order("updated_at", { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  const uniqueQuotes = new Map<string, QuoteRowForLink>();
+
+  for (const quote of data ?? []) {
+    uniqueQuotes.set(quote.id, quote);
+  }
+
+  return [...uniqueQuotes.values()];
+}
+
+export async function loadLinkedQuoteForRequest(
+  supabase: SupabaseClient,
+  context: QuoteRequestContext | string
+): Promise<{
+  quote: LinkedQuoteSummary | null;
+  opportunity: LinkedOpportunitySummary | null;
+  loadError: string | null;
+}> {
+  const requestContext: QuoteRequestContext =
+    typeof context === "string"
+      ? { id: context, opportunityId: null }
+      : context;
+
+  if (
+    typeof context === "string" &&
+    !requestContext.opportunityId
+  ) {
+    const { data: requestRow, error: requestError } = await supabase
+      .from("quote_requests")
+      .select("id, opportunity_id")
+      .eq("id", requestContext.id)
+      .maybeSingle();
+
+    if (requestError) {
+      const normalized = normalizeSupabaseQueryError(requestError);
+      return {
+        quote: null,
+        opportunity: null,
+        loadError: normalized.message ?? "Quote request could not be loaded.",
+      };
+    }
+
+    requestContext.opportunityId = requestRow?.opportunity_id ?? null;
+  }
+
+  const [opportunityLoad, quoteRowsResult] = await Promise.all([
+    loadLinkedOpportunity(supabase, requestContext.opportunityId),
+    loadQuotesForRequestContext(supabase, requestContext).catch((error) => ({
+      error,
+      quotes: [] as QuoteRowForLink[],
+    })),
+  ]);
+
+  if ("error" in quoteRowsResult && quoteRowsResult.error) {
+    const normalized = normalizeSupabaseQueryError(quoteRowsResult.error);
+
+    if (process.env.NODE_ENV === "development") {
+      console.error("[quote-request-link] linked quote query failed", {
+        quoteRequestId: requestContext.id,
+        opportunityId: requestContext.opportunityId,
+        code: normalized.code ?? null,
+        message: normalized.message ?? String(quoteRowsResult.error),
+      });
+    }
+
+    return {
+      quote: null,
+      opportunity: opportunityLoad.opportunity,
+      loadError:
+        opportunityLoad.loadError ??
+        normalized.message ??
+        "Linked quote could not be loaded.",
+    };
+  }
+
+  const quoteRows =
+    "error" in quoteRowsResult ? [] : quoteRowsResult;
+  const primaryQuote = selectPrimaryQuoteForRequest(quoteRows);
+
+  if (!primaryQuote) {
+    return {
+      quote: null,
+      opportunity: opportunityLoad.opportunity,
+      loadError: opportunityLoad.loadError,
+    };
   }
 
   try {
     return {
-      quote: await loadLinkedQuoteSummary(supabase, linkedQuote),
-      loadError: null,
+      quote: await loadLinkedQuoteSummary(supabase, primaryQuote),
+      opportunity: opportunityLoad.opportunity,
+      loadError: opportunityLoad.loadError,
     };
   } catch (loadError) {
     return {
       quote: null,
+      opportunity: opportunityLoad.opportunity,
       loadError:
         loadError instanceof Error
           ? loadError.message
@@ -281,29 +499,57 @@ export async function loadLinkedQuoteForRequest(
 
 export async function loadLinkedQuotesByRequestIds(
   supabase: SupabaseClient,
-  quoteRequestIds: string[]
+  requests: QuoteRequestContext[]
 ): Promise<{
   quotesByRequestId: Map<string, LinkedQuoteSummary>;
+  opportunitiesByRequestId: Map<string, LinkedOpportunitySummary>;
   loadError: string | null;
 }> {
   const quotesByRequestId = new Map<string, LinkedQuoteSummary>();
+  const opportunitiesByRequestId = new Map<string, LinkedOpportunitySummary>();
 
-  if (quoteRequestIds.length === 0) {
-    return { quotesByRequestId, loadError: null };
+  if (requests.length === 0) {
+    return { quotesByRequestId, opportunitiesByRequestId, loadError: null };
   }
 
-  const { data: linkedQuotes, error } = await supabase
-    .from("quotes")
-    .select("id, quote_request_id, quote_number, status, current_version, updated_at")
-    .in("quote_request_id", quoteRequestIds)
-    .order("updated_at", { ascending: false });
+  const requestIds = requests.map((request) => request.id);
+  const opportunityIds = [
+    ...new Set(
+      requests
+        .map((request) => request.opportunityId)
+        .filter((value): value is string => Boolean(value))
+    ),
+  ];
+
+  const filters = [`quote_request_id.in.(${requestIds.join(",")})`];
+
+  if (opportunityIds.length > 0) {
+    filters.push(`opportunity_id.in.(${opportunityIds.join(",")})`);
+  }
+
+  const [{ data: linkedQuotes, error }, { data: opportunities, error: oppError }] =
+    await Promise.all([
+      supabase
+        .from("quotes")
+        .select(
+          "id, quote_request_id, opportunity_id, quote_number, status, current_version, updated_at"
+        )
+        .or(filters.join(","))
+        .order("updated_at", { ascending: false }),
+      opportunityIds.length > 0
+        ? supabase
+            .from("opportunities")
+            .select("id, title, stage")
+            .in("id", opportunityIds)
+        : Promise.resolve({ data: [] as { id: string; title: string; stage: string }[], error: null }),
+    ]);
 
   if (error) {
     const normalized = normalizeSupabaseQueryError(error);
 
     if (process.env.NODE_ENV === "development") {
       console.error("[quote-request-link] batch linked quote query failed", {
-        quoteRequestIds,
+        requestIds,
         code: normalized.code ?? null,
         message: normalized.message ?? String(error),
       });
@@ -311,32 +557,59 @@ export async function loadLinkedQuotesByRequestIds(
 
     return {
       quotesByRequestId,
+      opportunitiesByRequestId,
       loadError: normalized.message ?? "Linked quotes could not be loaded.",
     };
   }
 
-  const latestQuoteByRequestId = new Map<string, QuoteRowForLink>();
+  if (oppError) {
+    const normalized = normalizeSupabaseQueryError(oppError);
 
-  for (const quote of linkedQuotes ?? []) {
-    if (
-      quote.quote_request_id &&
-      !latestQuoteByRequestId.has(quote.quote_request_id)
-    ) {
-      latestQuoteByRequestId.set(quote.quote_request_id, quote);
+    if (process.env.NODE_ENV === "development") {
+      console.error("[quote-request-link] batch opportunity query failed", {
+        opportunityIds,
+        code: normalized.code ?? null,
+        message: normalized.message ?? String(oppError),
+      });
     }
   }
 
-  for (const [requestId, quote] of latestQuoteByRequestId) {
+  const opportunityById = new Map(
+    (opportunities ?? []).map((row) => [row.id, mapOpportunityRow(row)])
+  );
+
+  for (const request of requests) {
+    if (request.opportunityId) {
+      const opportunity = opportunityById.get(request.opportunityId);
+
+      if (opportunity) {
+        opportunitiesByRequestId.set(request.id, opportunity);
+      }
+    }
+
+    const candidateQuotes = (linkedQuotes ?? []).filter(
+      (quote) =>
+        quote.quote_request_id === request.id ||
+        (request.opportunityId &&
+          quote.opportunity_id === request.opportunityId)
+    );
+
+    const primaryQuote = selectPrimaryQuoteForRequest(candidateQuotes);
+
+    if (!primaryQuote) {
+      continue;
+    }
+
     try {
       quotesByRequestId.set(
-        requestId,
-        await loadLinkedQuoteSummary(supabase, quote)
+        request.id,
+        await loadLinkedQuoteSummary(supabase, primaryQuote)
       );
     } catch (loadError) {
       if (process.env.NODE_ENV === "development") {
         console.error("[quote-request-link] linked quote version load failed", {
-          quoteRequestId: requestId,
-          quoteId: quote.id,
+          quoteRequestId: request.id,
+          quoteId: primaryQuote.id,
           message:
             loadError instanceof Error ? loadError.message : String(loadError),
         });
@@ -344,7 +617,7 @@ export async function loadLinkedQuotesByRequestIds(
     }
   }
 
-  return { quotesByRequestId, loadError: null };
+  return { quotesByRequestId, opportunitiesByRequestId, loadError: null };
 }
 
 export async function resolveQuoteRequestIdForQuote(
@@ -397,64 +670,7 @@ export async function resolveQuoteRequestIdForQuote(
     return null;
   }
 
-  const candidateRequestId = candidateRequests[0]!.id;
-
-  let existingQuoteQuery = supabase
-    .from("quotes")
-    .select("id")
-    .eq("quote_request_id", candidateRequestId);
-
-  if (excludeQuoteId) {
-    existingQuoteQuery = existingQuoteQuery.neq("id", excludeQuoteId);
-  }
-
-  const { data: existingLinkedQuote, error: existingQuoteError } =
-    await existingQuoteQuery.maybeSingle();
-
-  if (existingQuoteError) {
-    throw new Error(existingQuoteError.message);
-  }
-
-  if (existingLinkedQuote) {
-    return null;
-  }
-
-  return candidateRequestId;
-}
-
-export async function syncQuoteRequestStatusFromQuote(
-  supabase: SupabaseClient,
-  {
-    quoteRequestId,
-    quoteStatus,
-  }: {
-    quoteRequestId: string;
-    quoteStatus: string;
-  }
-) {
-  const nextRequestStatus =
-    quoteStatus === "draft"
-      ? "reviewing"
-      : quoteStatus === "sent" ||
-          quoteStatus === "accepted" ||
-          quoteStatus === "declined" ||
-          quoteStatus === "expired" ||
-          quoteStatus === "superseded"
-        ? "quoted"
-        : null;
-
-  if (!nextRequestStatus) {
-    return;
-  }
-
-  const { error } = await supabase
-    .from("quote_requests")
-    .update({ request_status: nextRequestStatus })
-    .eq("id", quoteRequestId);
-
-  if (error) {
-    throw new Error(error.message);
-  }
+  return candidateRequests[0]!.id;
 }
 
 export async function findQuoteRequestIdForOpportunity(
@@ -472,4 +688,91 @@ export async function findQuoteRequestIdForOpportunity(
     opportunityId,
     companyId,
   });
+}
+
+export async function resolveQuoteRequestIdFromQuote(
+  supabase: SupabaseClient,
+  quoteId: string
+): Promise<string | null> {
+  const { data: quote, error: quoteError } = await supabase
+    .from("quotes")
+    .select("quote_request_id, opportunity_id, company_id")
+    .eq("id", quoteId)
+    .maybeSingle();
+
+  if (quoteError || !quote) {
+    return null;
+  }
+
+  if (quote.quote_request_id) {
+    return quote.quote_request_id;
+  }
+
+  if (!quote.opportunity_id) {
+    return null;
+  }
+
+  return resolveQuoteRequestIdForQuote(supabase, {
+    quoteRequestId: null,
+    opportunityId: quote.opportunity_id,
+    companyId: quote.company_id,
+  });
+}
+
+export type CustomerCompanyQuoteRow = {
+  id: string;
+  quoteNumber: number;
+  projectName: string;
+  status: string;
+  updatedAt: string;
+};
+
+const CUSTOMER_VISIBLE_QUOTE_STATUSES = [
+  "sent",
+  "accepted",
+  "declined",
+  "expired",
+  "superseded",
+] as const;
+
+export async function loadCustomerCompanyQuotes(
+  supabase: SupabaseClient,
+  { limit = 20 }: { limit?: number } = {}
+): Promise<{
+  quotes: CustomerCompanyQuoteRow[];
+  loadError: string | null;
+}> {
+  const { data, error } = await supabase
+    .from("quotes")
+    .select("id, quote_number, project_name, status, updated_at")
+    .in("status", [...CUSTOMER_VISIBLE_QUOTE_STATUSES])
+    .order("updated_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    const normalized = normalizeSupabaseQueryError(error);
+
+    if (process.env.NODE_ENV === "development") {
+      console.error("[quote-request-link] customer company quotes failed", {
+        code: normalized.code ?? null,
+        message: normalized.message ?? String(error),
+      });
+    }
+
+    return {
+      quotes: [],
+      loadError: normalized.message ?? "Company quotes could not be loaded.",
+    };
+  }
+
+  return {
+    quotes: (data ?? []).map((quote) => ({
+      id: quote.id,
+      quoteNumber: quote.quote_number,
+      projectName: quote.project_name,
+      status: quote.status,
+      updatedAt: quote.updated_at,
+    })),
+    loadError: null,
+  };
 }

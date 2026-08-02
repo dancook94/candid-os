@@ -152,6 +152,8 @@ function quoteDisplayBadgeStatus(display: QuoteRequestQuoteDisplayState): BadgeS
   switch (display.kind) {
     case "awaiting":
       return "pending";
+    case "opportunity_no_quote":
+      return "pending";
     case "in_progress":
       return "draft";
     case "sent":
@@ -264,6 +266,7 @@ export default async function AdminQuoteRequestDetailPage({
   const isDelivery = quoteRequest.fulfilment_method === "delivery";
   const quoteDisplay = related.linkedQuoteDisplay;
   const linkedQuote = related.linkedQuote;
+  const linkedOpportunity = related.linkedOpportunity;
 
   return (
     <AppShell {...shellProps}>
@@ -273,11 +276,22 @@ export default async function AdminQuoteRequestDetailPage({
           description="Admin quote request review"
           actions={
             <div className="flex flex-wrap gap-2">
+              {linkedOpportunity ? (
+                <Link href={`/admin/opportunities/${linkedOpportunity.id}`}>
+                  <Button variant="outline">View opportunity</Button>
+                </Link>
+              ) : null}
               {linkedQuote ? (
                 <Link href={`/admin/quotes/${linkedQuote.id}`}>
                   <Button>
                     View quote Q-{linkedQuote.quoteNumber}
                   </Button>
+                </Link>
+              ) : linkedOpportunity ? (
+                <Link
+                  href={`/admin/quotes/new?opportunityId=${encodeURIComponent(linkedOpportunity.id)}`}
+                >
+                  <Button>Create quote</Button>
                 </Link>
               ) : quoteDisplay.kind === "awaiting" ? (
                 <Link href={`/admin/quotes/new?quoteRequestId=${quoteRequest.id}`}>
@@ -350,6 +364,30 @@ export default async function AdminQuoteRequestDetailPage({
           <CardContent className="space-y-5 pt-6">
             {related.linkedQuoteWarning ? (
               <SectionWarning message={related.linkedQuoteWarning} />
+            ) : null}
+
+            {related.linkedOpportunityWarning ? (
+              <SectionWarning message={related.linkedOpportunityWarning} />
+            ) : null}
+
+            {linkedOpportunity ? (
+              <div className="rounded-xl border border-border bg-muted/20 px-4 py-4 text-sm">
+                <p className="font-medium text-neutral-950">Linked opportunity</p>
+                <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <dt className="text-neutral-500">Title</dt>
+                    <dd className="mt-1 font-medium text-neutral-950">
+                      {linkedOpportunity.title}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-neutral-500">Stage</dt>
+                    <dd className="mt-1 font-medium text-neutral-950">
+                      {linkedOpportunity.stageLabel}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
             ) : null}
 
             {linkedQuote ? (

@@ -20,6 +20,7 @@ import {
 } from "@/lib/customer-quote-request";
 import {
   buildQuoteRequestDisplayState,
+  loadCustomerCompanyQuotes,
   loadLinkedQuotesByRequestIds,
 } from "@/lib/quote-request-link";
 import { resolveCustomerQuoteStatuses } from "@/lib/quote-customer-status";
@@ -35,6 +36,7 @@ type QuoteRequest = {
   requested_time: string | null;
   deadline_status: string;
   request_status: string;
+  opportunity_id: string | null;
   created_at: string;
 };
 
@@ -133,7 +135,7 @@ export default async function QuotesPage() {
   const { data, error } = await supabase
     .from("quote_requests")
     .select(
-      "id, company_id, requested_by, project_name, description, fulfilment_method, requested_date, requested_time, deadline_status, request_status, created_at"
+      "id, company_id, requested_by, project_name, description, fulfilment_method, requested_date, requested_time, deadline_status, request_status, opportunity_id, created_at"
     )
     .order("created_at", { ascending: false });
 
@@ -141,10 +143,22 @@ export default async function QuotesPage() {
   const queryError = error?.message ?? null;
   const isDevelopment = process.env.NODE_ENV === "development";
 
-  const requestIds = quoteRequests.map((request) => request.id);
+  const requestContexts = quoteRequests.map((request) => ({
+    id: request.id,
+    opportunityId: request.opportunity_id,
+  }));
 
-  const { quotesByRequestId, loadError: linkedQuotesLoadError } =
-    await loadLinkedQuotesByRequestIds(supabase, requestIds);
+  const [
+    {
+      quotesByRequestId,
+      opportunitiesByRequestId,
+      loadError: linkedQuotesLoadError,
+    },
+    { quotes: companyQuotes, loadError: companyQuotesLoadError },
+  ] = await Promise.all([
+    loadLinkedQuotesByRequestIds(supabase, requestContexts),
+    loadCustomerCompanyQuotes(supabase),
+  ]);
 
   const customerQuoteStatuses = await resolveCustomerQuoteStatuses(
     supabase,
@@ -169,18 +183,85 @@ export default async function QuotesPage() {
           actions={requestQuoteButton}
         />
 
-        {isDevelopment && (queryError || linkedQuotesLoadError) ? (
+        {isDevelopment && (queryError || linkedQuotesLoadError || companyQuotesLoadError) ? (
           <Card className="rounded-2xl border-red-200 bg-red-50 shadow-sm ring-0">
             <CardContent className="p-6">
               <p className="text-sm font-medium text-red-800">
                 Supabase query error
               </p>
               <p className="mt-2 text-sm text-red-700">
-                {queryError ?? linkedQuotesLoadError}
+                {queryError ?? linkedQuotesLoadError ?? companyQuotesLoadError}
               </p>
             </CardContent>
           </Card>
-        ) : quoteRequests.length === 0 ? (
+        ) : null}
+
+        {companyQuotes.length > 0 ? (
+          <Card className="portal-surface mb-6 overflow-hidden">
+            <CardContent className="p-0">
+              <div className="border-b border-border px-4 py-4">
+                <h2 className="text-base font-semibold text-foreground">
+                  Your quotes
+                </h2>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Formal quotes sent to your company.
+                </p>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="portal-table">
+                  <thead>
+                    <tr>
+                      <th>Quote</th>
+                      <th>Project</th>
+                      <th>Updated</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {companyQuotes.map((quote) => (
+                      <tr key={quote.id} className="hover:bg-muted/35">
+                        <td className="p-0">
+                          <Link
+                            href={`/quotes/${quote.id}`}
+                            className="block p-4 font-medium text-foreground"
+                          >
+                            Q-{quote.quoteNumber}
+                          </Link>
+                        </td>
+                        <td className="p-0">
+                          <Link
+                            href={`/quotes/${quote.id}`}
+                            className="block p-4 text-muted-foreground"
+                          >
+                            {quote.projectName}
+                          </Link>
+                        </td>
+                        <td className="p-0">
+                          <Link
+                            href={`/quotes/${quote.id}`}
+                            className="block p-4 text-muted-foreground"
+                          >
+                            {formatDate(quote.updatedAt)}
+                          </Link>
+                        </td>
+                        <td className="p-4">
+                          <Link href={`/quotes/${quote.id}`} className="inline-flex">
+                            <StatusBadge
+                              status={mapCustomerQuoteStatusToBadge(quote.status)}
+                              label={getFormalQuoteStatusLabel(quote.status)}
+                            />
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {quoteRequests.length === 0 ? (
           <EmptyState
             title="No quote requests yet"
             description="Submit your first quote request to get started."
@@ -206,8 +287,11 @@ export default async function QuotesPage() {
                   <tbody>
                     {quoteRequests.map((request) => {
                       const linkedQuote = quotesByRequestId.get(request.id) ?? null;
+                      const linkedOpportunity =
+                        opportunitiesByRequestId.get(request.id) ?? null;
                       const quoteDisplay = buildQuoteRequestDisplayState({
                         linkedQuote,
+                        linkedOpportunity,
                         loadError: linkedQuotesLoadError,
                       });
                       const customerQuoteStatus = linkedQuote

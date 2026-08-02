@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { resolveQuoteRequestIdFromQuote } from "@/lib/quote-request-link";
+
 export type LinkedQuoteRequestRow = {
   id: string;
   requested_date: string | null;
@@ -71,10 +73,16 @@ export async function loadLinkedQuoteRequestDeadline(
     quoteRequestId: string | null;
   }
 ): Promise<LinkedQuoteRequestDeadlineLoadResult> {
-  if (!quoteRequestId) {
-    const diagnostic = `Quote ${quoteId} is not linked to a quote request (quotes.quote_request_id is null). Update the quote row in Supabase: UPDATE quotes SET quote_request_id = '<request-id>' WHERE id = '${quoteId}';`;
+  const resolvedQuoteRequestId =
+    quoteRequestId ?? (await resolveQuoteRequestIdFromQuote(supabase, quoteId));
 
-    if (process.env.NODE_ENV === "development") {
+  if (!resolvedQuoteRequestId) {
+    const diagnostic =
+      process.env.NODE_ENV === "development"
+        ? `Quote ${quoteId} is not linked to a quote request through quote_request_id or opportunity_id.`
+        : null;
+
+    if (process.env.NODE_ENV === "development" && diagnostic) {
       console.warn("[approved-deadline]", diagnostic);
     }
 
@@ -92,21 +100,21 @@ export async function loadLinkedQuoteRequestDeadline(
     .select(
       "id, requested_date, requested_time, fulfilment_method, deadline_status"
     )
-    .eq("id", quoteRequestId)
+    .eq("id", resolvedQuoteRequestId)
     .maybeSingle();
 
   if (error) {
-    const diagnostic = `Failed to load linked quote request ${quoteRequestId}: ${error.message}`;
+    const diagnostic = `Failed to load linked quote request ${resolvedQuoteRequestId}: ${error.message}`;
 
     console.error("[approved-deadline]", {
       quoteId,
-      quoteRequestId,
+      quoteRequestId: resolvedQuoteRequestId,
       error,
     });
 
     return {
       approvedDeadline: null,
-      quoteRequestId,
+      quoteRequestId: resolvedQuoteRequestId,
       loadError: error.message,
       diagnostic,
       linkedQuoteRequest: null,
@@ -116,13 +124,13 @@ export async function loadLinkedQuoteRequestDeadline(
   if (process.env.NODE_ENV === "development") {
     console.log("[approved-deadline] linked quote request", {
       quoteId,
-      quoteRequestId,
+      quoteRequestId: resolvedQuoteRequestId,
       linkedQuoteRequest: data,
     });
   }
 
   if (!data) {
-    const diagnostic = `Linked quote request ${quoteRequestId} was not found or is not visible through RLS.`;
+    const diagnostic = `Linked quote request ${resolvedQuoteRequestId} was not found or is not visible through RLS.`;
 
     if (process.env.NODE_ENV === "development") {
       console.warn("[approved-deadline]", diagnostic);
@@ -130,7 +138,7 @@ export async function loadLinkedQuoteRequestDeadline(
 
     return {
       approvedDeadline: null,
-      quoteRequestId,
+      quoteRequestId: resolvedQuoteRequestId,
       loadError: null,
       diagnostic,
       linkedQuoteRequest: null,
@@ -140,9 +148,9 @@ export async function loadLinkedQuoteRequestDeadline(
   if (!data.requested_date) {
     return {
       approvedDeadline: null,
-      quoteRequestId,
+      quoteRequestId: resolvedQuoteRequestId,
       loadError: null,
-      diagnostic: `Linked quote request ${quoteRequestId} has no requested_date.`,
+      diagnostic: `Linked quote request ${resolvedQuoteRequestId} has no requested_date.`,
       linkedQuoteRequest: data,
     };
   }
@@ -150,7 +158,7 @@ export async function loadLinkedQuoteRequestDeadline(
   if (data.deadline_status?.toLowerCase() !== "approved") {
     return {
       approvedDeadline: null,
-      quoteRequestId,
+      quoteRequestId: resolvedQuoteRequestId,
       loadError: null,
       diagnostic: `Linked quote request deadline_status is "${data.deadline_status}" (expected "approved").`,
       linkedQuoteRequest: data,
@@ -159,7 +167,7 @@ export async function loadLinkedQuoteRequestDeadline(
 
   return {
     approvedDeadline: formatApprovedQuoteDeadline(data),
-    quoteRequestId,
+    quoteRequestId: resolvedQuoteRequestId,
     loadError: null,
     diagnostic: null,
     linkedQuoteRequest: data,

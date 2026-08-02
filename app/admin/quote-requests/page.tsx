@@ -27,6 +27,7 @@ type QuoteRequestRow = {
   requested_time: string | null;
   deadline_status: string;
   request_status: string;
+  opportunity_id: string | null;
   created_at: string;
 };
 
@@ -167,7 +168,7 @@ export default async function AdminQuoteRequestsPage({
   let query = supabase
     .from("quote_requests")
     .select(
-      "id, company_id, requested_by, project_name, fulfilment_method, requested_date, requested_time, deadline_status, request_status, created_at"
+      "id, company_id, requested_by, project_name, fulfilment_method, requested_date, requested_time, deadline_status, request_status, opportunity_id, created_at"
     )
     .order("created_at", { ascending: false });
 
@@ -214,10 +215,16 @@ export default async function AdminQuoteRequestsPage({
     ])
   );
 
-  const requestIds = quoteRequests.map((request) => request.id);
+  const requestContexts = quoteRequests.map((request) => ({
+    id: request.id,
+    opportunityId: request.opportunity_id,
+  }));
 
-  const { quotesByRequestId, loadError: linkedQuotesLoadError } =
-    await loadLinkedQuotesByRequestIds(supabase, requestIds);
+  const {
+    quotesByRequestId,
+    opportunitiesByRequestId,
+    loadError: linkedQuotesLoadError,
+  } = await loadLinkedQuotesByRequestIds(supabase, requestContexts);
 
   const searchQuery = q?.trim().toLowerCase() ?? "";
 
@@ -345,8 +352,11 @@ export default async function AdminQuoteRequestsPage({
                   <tbody>
                     {filteredQuoteRequests.map((request) => {
                       const linkedQuote = quotesByRequestId.get(request.id) ?? null;
+                      const linkedOpportunity =
+                        opportunitiesByRequestId.get(request.id) ?? null;
                       const quoteDisplay = buildQuoteRequestDisplayState({
                         linkedQuote,
+                        linkedOpportunity,
                         loadError: linkedQuotesLoadError,
                       });
 

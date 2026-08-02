@@ -9,7 +9,9 @@ import {
 import type { QuoteRequestAttachmentRecord } from "@/lib/quote-request-attachments";
 import {
   buildQuoteRequestDisplayState,
+  loadLinkedOpportunity,
   loadLinkedQuoteForRequest,
+  type LinkedOpportunitySummary,
   type LinkedQuoteSummary,
   type QuoteRequestQuoteDisplayState,
 } from "@/lib/quote-request-link";
@@ -19,7 +21,7 @@ import {
  * Snapshot delivery fields live here; optional metadata columns are loaded separately.
  */
 export const QUOTE_REQUEST_CORE_SELECT =
-  "id, company_id, requested_by, project_name, description, fulfilment_method, requested_date, requested_time, delivery_address_line_1, delivery_address_line_2, delivery_city, delivery_county, delivery_postcode, delivery_contact_name, delivery_contact_phone, purchase_order_number, notes, deadline_status, request_status, created_at";
+  "id, company_id, requested_by, project_name, description, fulfilment_method, requested_date, requested_time, delivery_address_line_1, delivery_address_line_2, delivery_city, delivery_county, delivery_postcode, delivery_contact_name, delivery_contact_phone, purchase_order_number, notes, deadline_status, request_status, opportunity_id, created_at";
 
 const QUOTE_REQUEST_OPTIONAL_METADATA_COLUMNS = [
   "delivery_country",
@@ -54,6 +56,7 @@ export type AdminQuoteRequestDetail = {
   notes: string | null;
   deadline_status: string;
   request_status: string;
+  opportunity_id: string | null;
   created_at: string;
 };
 
@@ -65,6 +68,8 @@ export type AdminQuoteRequestRelatedData = {
   attachments: QuoteRequestAttachmentRecord[];
   attachmentsWarning: string | null;
   linkedQuote: LinkedQuoteSummary | null;
+  linkedOpportunity: LinkedOpportunitySummary | null;
+  linkedOpportunityWarning: string | null;
   linkedQuoteDisplay: QuoteRequestQuoteDisplayState;
   linkedQuoteWarning: string | null;
   linkedAddress: { id: string; label: string | null; is_active: boolean } | null;
@@ -315,7 +320,12 @@ export async function loadAdminQuoteRequestDetail(
     attachments: [],
     attachmentsWarning: null,
     linkedQuote: null,
-    linkedQuoteDisplay: buildQuoteRequestDisplayState({ linkedQuote: null }),
+    linkedOpportunity: null,
+    linkedOpportunityWarning: null,
+    linkedQuoteDisplay: buildQuoteRequestDisplayState({
+      linkedQuote: null,
+      linkedOpportunity: null,
+    }),
     linkedQuoteWarning: null,
     linkedAddress: null,
     linkedAddressWarning: null,
@@ -366,10 +376,15 @@ export async function loadAdminQuoteRequestDetail(
     related.attachments = attachments ?? [];
   }
 
-  const linkedQuoteLoad = await loadLinkedQuoteForRequest(supabase, routeId);
+  const linkedQuoteLoad = await loadLinkedQuoteForRequest(supabase, {
+    id: routeId,
+    opportunityId: quoteRequest.opportunity_id,
+  });
   related.linkedQuote = linkedQuoteLoad.quote;
+  related.linkedOpportunity = linkedQuoteLoad.opportunity;
   related.linkedQuoteDisplay = buildQuoteRequestDisplayState({
     linkedQuote: linkedQuoteLoad.quote,
+    linkedOpportunity: linkedQuoteLoad.opportunity,
     loadError: linkedQuoteLoad.loadError,
   });
 
@@ -379,6 +394,20 @@ export async function loadAdminQuoteRequestDetail(
       new Error(linkedQuoteLoad.loadError)
     );
     related.linkedQuoteWarning = linkedQuoteLoad.loadError;
+  }
+
+  if (!related.linkedOpportunity && quoteRequest.opportunity_id) {
+    const opportunityLoad = await loadLinkedOpportunity(
+      supabase,
+      quoteRequest.opportunity_id
+    );
+    related.linkedOpportunity = opportunityLoad.opportunity;
+    related.linkedOpportunityWarning = opportunityLoad.loadError;
+    related.linkedQuoteDisplay = buildQuoteRequestDisplayState({
+      linkedQuote: related.linkedQuote,
+      linkedOpportunity: related.linkedOpportunity,
+      loadError: linkedQuoteLoad.loadError ?? opportunityLoad.loadError,
+    });
   }
 
   if (quoteRequest.selected_company_address_id) {

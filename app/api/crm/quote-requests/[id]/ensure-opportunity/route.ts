@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { verifyApprovedCrmStaff } from "@/lib/crm-auth";
 import { createOpportunityFromQuoteRequest } from "@/lib/crm/opportunity-linking";
+import { revalidateQuoteWorkflowRoutes } from "@/lib/quote-route-revalidation";
 import {
   requireCustomerQuoteRequestContext,
 } from "@/lib/customer-settings/auth";
@@ -107,6 +108,8 @@ export async function POST(
       actorProfileId: access.actorProfileId,
       contactId: access.contactId,
     });
+
+    revalidateQuoteWorkflowRoutes({ quoteRequestId });
 
     return NextResponse.json({
       ok: true,

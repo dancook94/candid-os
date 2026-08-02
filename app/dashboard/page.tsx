@@ -27,6 +27,11 @@ import {
   getCustomerPortalStatusSubtitle,
 } from "@/lib/customer-portal-status";
 import { createClient } from "@/lib/supabase/server";
+import { loadCustomerCompanyQuotes } from "@/lib/quote-request-link";
+import {
+  getFormalQuoteStatusLabel,
+  mapCustomerQuoteStatusToBadge,
+} from "@/lib/customer-quote-request";
 
 export const dynamic = "force-dynamic";
 
@@ -73,6 +78,7 @@ export default async function DashboardPage() {
   const [
     { count: formalQuotesCount, error: quotesError },
     { count: quoteRequestsCount, error: quoteRequestsError },
+    { quotes: recentQuotes, loadError: recentQuotesError },
   ] = await Promise.all([
     supabase
       .from("quotes")
@@ -81,6 +87,7 @@ export default async function DashboardPage() {
     supabase
       .from("quote_requests")
       .select("*", { count: "exact", head: true }),
+    loadCustomerCompanyQuotes(supabase, { limit: 5 }),
   ]);
 
   const queryErrors = [
@@ -88,6 +95,7 @@ export default async function DashboardPage() {
     quoteRequestsError
       ? `Quote requests count: ${quoteRequestsError.message}`
       : null,
+    recentQuotesError ? `Recent quotes: ${recentQuotesError}` : null,
   ].filter(Boolean) as string[];
 
   const quotesValue =
@@ -182,6 +190,46 @@ export default async function DashboardPage() {
             </Link>
           </CardContent>
         </Card>
+
+        {recentQuotes.length > 0 ? (
+          <Card className="portal-surface mt-8 overflow-hidden">
+            <CardHeader className="border-b border-border">
+              <CardTitle className="text-xl font-semibold">Recent quotes</CardTitle>
+              <CardDescription>
+                Formal quotes sent to your company.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="divide-y divide-border">
+                {recentQuotes.map((quote) => (
+                  <Link
+                    key={quote.id}
+                    href={`/quotes/${quote.id}`}
+                    className="flex items-center justify-between gap-4 px-6 py-4 hover:bg-muted/35"
+                  >
+                    <div>
+                      <p className="font-medium text-foreground">
+                        Q-{quote.quoteNumber} · {quote.projectName}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        Updated{" "}
+                        {new Date(quote.updatedAt).toLocaleDateString("en-GB", {
+                          day: "numeric",
+                          month: "short",
+                          year: "numeric",
+                        })}
+                      </p>
+                    </div>
+                    <StatusBadge
+                      status={mapCustomerQuoteStatusToBadge(quote.status)}
+                      label={getFormalQuoteStatusLabel(quote.status)}
+                    />
+                  </Link>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
     </AppShell>
   );

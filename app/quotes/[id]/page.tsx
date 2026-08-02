@@ -63,6 +63,7 @@ type QuoteRequestDetail = {
   notes: string | null;
   deadline_status: string;
   request_status: string;
+  opportunity_id: string | null;
   created_at: string;
 };
 
@@ -282,7 +283,7 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
   const { data: quoteRequest, error } = await supabase
     .from("quote_requests")
     .select(
-      "id, company_id, requested_by, project_name, description, fulfilment_method, requested_date, requested_time, delivery_address_line_1, delivery_address_line_2, delivery_city, delivery_county, delivery_postcode, delivery_contact_name, delivery_contact_phone, purchase_order_number, notes, deadline_status, request_status, created_at"
+      "id, company_id, requested_by, project_name, description, fulfilment_method, requested_date, requested_time, delivery_address_line_1, delivery_address_line_2, delivery_city, delivery_county, delivery_postcode, delivery_contact_name, delivery_contact_phone, purchase_order_number, notes, deadline_status, request_status, opportunity_id, created_at"
     )
     .eq("id", id)
     .maybeSingle();
@@ -297,12 +298,16 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
     .eq("quote_request_id", id)
     .order("created_at", { ascending: false });
 
-  const linkedQuoteLoad = await loadLinkedQuoteForRequest(supabase, id);
+  const linkedQuoteLoad = await loadLinkedQuoteForRequest(supabase, {
+    id,
+    opportunityId: quoteRequest.opportunity_id,
+  });
   const linkedQuote = linkedQuoteLoad.quote
     ? { id: linkedQuoteLoad.quote.id, status: linkedQuoteLoad.quote.status }
     : null;
   const quoteDisplay = buildQuoteRequestDisplayState({
     linkedQuote: linkedQuoteLoad.quote,
+    linkedOpportunity: linkedQuoteLoad.opportunity,
     loadError: linkedQuoteLoad.loadError,
   });
 
