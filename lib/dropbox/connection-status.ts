@@ -4,6 +4,7 @@ import {
   getDropboxCurrentAccount,
   getDropboxOAuthConfig,
   getDropboxRedirectUri,
+  usersGetCurrentAccount,
 } from "@/lib/dropbox/oauth";
 
 export type DropboxEnvVarStatus = {
@@ -147,5 +148,5 @@ export async function testDropboxConnectionWithRefreshToken(refreshToken: string
   }
 
   const payload = (await response.json()) as { access_token: string };
-  return getDropboxCurrentAccount(payload.access_token);
+  return usersGetCurrentAccount(payload.access_token);
 }

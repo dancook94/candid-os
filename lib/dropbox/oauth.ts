@@ -15,7 +15,7 @@ type DropboxOAuthConfig = {
   redirectUri: string;
 };
 
-type DropboxTokenExchangeResponse = {
+export type DropboxTokenExchangeResponse = {
   access_token: string;
   token_type: string;
   expires_in: number;
@@ -33,13 +33,35 @@ type DropboxAccountResponse = {
   };
 };
 
+type DropboxOAuthErrorBody = {
+  error?: string;
+  error_description?: string;
+};
+
+type DropboxRpcErrorBody = {
+  error_summary?: string;
+  error?: { ".tag"?: string } | string;
+};
+
+export type DropboxOperationFailure = {
+  operation: string;
+  httpStatus: number;
+  errorSummary: string | null;
+  errorTag: string | null;
+  message: string;
+  accessTokenReturned?: boolean;
+  refreshTokenReturned?: boolean;
+};
+
 export class DropboxOAuthError extends Error {
   status: number;
+  details: DropboxOperationFailure | null;
 
-  constructor(message: string, status = 400) {
+  constructor(message: string, status = 400, details: DropboxOperationFailure | null = null) {
     super(message);
     this.name = "DropboxOAuthError";
     this.status = status;
+    this.details = details;
   }
 }
 
@@ -143,13 +165,98 @@ export function buildDropboxAuthorizeUrl(state: string) {
   return `https://www.dropbox.com/oauth2/authorize?${params.toString()}`;
 }
 
-async function parseDropboxOAuthError(response: Response) {
-  try {
-    const payload = (await response.json()) as { error_description?: string; error?: string };
-    return payload.error_description ?? payload.error ?? response.statusText;
-  } catch {
-    return response.statusText;
+function extractDropboxErrorTag(error: DropboxRpcErrorBody["error"]) {
+  if (typeof error === "string") {
+    return error;
   }
+
+  if (error && typeof error === "object" && ".tag" in error) {
+    return error[".tag"] ?? null;
+  }
+
+  return null;
+}
+
+async function readDropboxResponseBody(response: Response) {
+  const text = await response.text();
+
+  if (!text) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}
+
+export function logDropboxOperationFailure(failure: DropboxOperationFailure) {
+  if (process.env.NODE_ENV !== "development") {
+    return;
+  }
+
+  console.error("[dropbox]", {
+    operation: failure.operation,
+    httpStatus: failure.httpStatus,
+    errorSummary: failure.errorSummary,
+    errorTag: failure.errorTag,
+    message: failure.message,
+    accessTokenReturned: failure.accessTokenReturned ?? null,
+    refreshTokenReturned: failure.refreshTokenReturned ?? null,
+  });
+}
+
+function buildOAuthTokenExchangeFailure(
+  response: Response,
+  body: unknown
+): DropboxOperationFailure {
+  const oauthBody = (body ?? {}) as DropboxOAuthErrorBody;
+  const message =
+    oauthBody.error_description ??
+    oauthBody.error ??
+    `Dropbox token exchange failed with HTTP ${response.status}.`;
+
+  return {
+    operation: "oauth_token_exchange",
+    httpStatus: response.status,
+    errorSummary: oauthBody.error_description ?? oauthBody.error ?? null,
+    errorTag: oauthBody.error ?? null,
+    message,
+    accessTokenReturned: false,
+    refreshTokenReturned: false,
+  };
+}
+
+function buildAccountLookupFailure(
+  response: Response,
+  body: unknown
+): DropboxOperationFailure {
+  const rpcBody = (body ?? {}) as DropboxRpcErrorBody;
+  const errorSummary = rpcBody.error_summary ?? null;
+  const errorTag = extractDropboxErrorTag(rpcBody.error);
+
+  let message = errorSummary;
+
+  if (errorTag === "missing_scope") {
+    message = "missing account_info.read permission";
+  } else if (response.status === 401) {
+    message = "access token was rejected";
+  } else if (!message) {
+    message = `HTTP ${response.status}`;
+  }
+
+  return {
+    operation: "users_get_current_account",
+    httpStatus: response.status,
+    errorSummary,
+    errorTag,
+    message,
+  };
+}
+
+function toAdminSafeDropboxError(prefix: string, failure: DropboxOperationFailure) {
+  return `${prefix}: ${failure.message}`;
 }
 
 export async function exchangeDropboxAuthorizationCode(code: string) {
@@ -173,38 +280,97 @@ export async function exchangeDropboxAuthorizationCode(code: string) {
     }),
   });
 
+  const body = await readDropboxResponseBody(response);
+
   if (!response.ok) {
-    const message = await parseDropboxOAuthError(response);
-    throw new DropboxOAuthError(`Dropbox authorization failed: ${message}`, 502);
+    const failure = buildOAuthTokenExchangeFailure(response, body);
+    logDropboxOperationFailure(failure);
+    throw new DropboxOAuthError(
+      toAdminSafeDropboxError("Dropbox token exchange failed", failure),
+      502,
+      failure
+    );
   }
 
-  const payload = (await response.json()) as DropboxTokenExchangeResponse;
+  const payload = body as DropboxTokenExchangeResponse;
+  const accessTokenReturned = Boolean(payload?.access_token);
+  const refreshTokenReturned = Boolean(payload?.refresh_token);
 
-  if (!payload.refresh_token) {
-    throw new DropboxOAuthError(
-      "Dropbox did not return a refresh token. Re-authorize with offline access enabled.",
-      502
-    );
+  if (!accessTokenReturned) {
+    const failure: DropboxOperationFailure = {
+      operation: "oauth_token_exchange",
+      httpStatus: response.status,
+      errorSummary: "missing access_token",
+      errorTag: "missing_access_token",
+      message: "Dropbox token exchange did not return an access token.",
+      accessTokenReturned,
+      refreshTokenReturned,
+    };
+    logDropboxOperationFailure(failure);
+    throw new DropboxOAuthError(failure.message, 502, failure);
+  }
+
+  if (!refreshTokenReturned) {
+    const failure: DropboxOperationFailure = {
+      operation: "oauth_token_exchange",
+      httpStatus: response.status,
+      errorSummary: "missing refresh_token",
+      errorTag: "missing_refresh_token",
+      message:
+        "Dropbox did not return a refresh token. Confirm token_access_type=offline is enabled and re-authorize.",
+      accessTokenReturned,
+      refreshTokenReturned,
+    };
+    logDropboxOperationFailure(failure);
+    throw new DropboxOAuthError(failure.message, 502, failure);
+  }
+
+  if (process.env.NODE_ENV === "development") {
+    console.info("[dropbox]", {
+      operation: "oauth_token_exchange",
+      httpStatus: response.status,
+      accessTokenReturned,
+      refreshTokenReturned,
+      redirectUri: config.redirectUri,
+    });
   }
 
   return payload;
 }
 
-export async function getDropboxCurrentAccount(accessToken: string) {
+export async function usersGetCurrentAccount(accessToken: string) {
   const response = await fetch("https://api.dropboxapi.com/2/users/get_current_account", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
+    body: "null",
   });
 
+  const body = await readDropboxResponseBody(response);
+
   if (!response.ok) {
-    const message = await parseDropboxOAuthError(response);
-    throw new DropboxOAuthError(`Unable to load Dropbox account: ${message}`, 502);
+    const failure = buildAccountLookupFailure(response, body);
+    logDropboxOperationFailure(failure);
+    throw new DropboxOAuthError(
+      toAdminSafeDropboxError("Dropbox account lookup failed", failure),
+      502,
+      failure
+    );
   }
 
-  return (await response.json()) as DropboxAccountResponse;
+  return body as DropboxAccountResponse;
+}
+
+export const getDropboxCurrentAccount = usersGetCurrentAccount;
+
+export function maskDropboxRefreshToken(token: string) {
+  if (token.length <= 12) {
+    return "••••••••";
+  }
+
+  return `${token.slice(0, 8)}${"•".repeat(Math.min(24, token.length - 12))}${token.slice(-4)}`;
 }
 
 export type DropboxPendingOAuthResult = {

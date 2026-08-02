@@ -13,7 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { DropboxConnectionStatus } from "@/lib/dropbox/connection-status";
-import type { DropboxPendingOAuthResult } from "@/lib/dropbox/oauth";
+import { maskDropboxRefreshToken, type DropboxPendingOAuthResult } from "@/lib/dropbox/oauth";
 
 type AdminDropboxIntegrationPanelProps = {
   canManage: boolean;
@@ -21,7 +21,6 @@ type AdminDropboxIntegrationPanelProps = {
   pendingSetup: DropboxPendingOAuthResult | null;
   initialError: string | null;
   initialSetupPending: boolean;
-  appUrl: string;
 };
 
 function ConfigStatus({
@@ -45,7 +44,6 @@ export function AdminDropboxIntegrationPanel({
   pendingSetup,
   initialError,
   initialSetupPending,
-  appUrl,
 }: AdminDropboxIntegrationPanelProps) {
   const [copiedField, setCopiedField] = useState<string | null>(null);
 
@@ -190,7 +188,11 @@ export function AdminDropboxIntegrationPanel({
             <div className="rounded-xl border border-border p-4">
               <p className="text-sm font-medium text-foreground">Refresh token</p>
               <p className="mt-2 break-all rounded-lg bg-muted px-3 py-2 font-mono text-xs text-foreground">
-                {pendingSetup.refreshToken}
+                {maskDropboxRefreshToken(pendingSetup.refreshToken)}
+              </p>
+              <p className="mt-2 text-sm text-muted-foreground">
+                The full refresh token is copied when you use the button below. It is
+                never shown in the URL or browser console.
               </p>
               <div className="mt-3">
                 <Button
@@ -209,11 +211,8 @@ export function AdminDropboxIntegrationPanel({
             <div className="rounded-xl border border-border p-4">
               <p className="text-sm font-medium text-foreground">Add to .env.local</p>
               <pre className="mt-3 overflow-x-auto rounded-lg bg-muted px-3 py-3 font-mono text-xs text-foreground">
-{`DROPBOX_APP_KEY=your_app_key
-DROPBOX_APP_SECRET=your_app_secret
-DROPBOX_REFRESH_TOKEN=${pendingSetup.refreshToken}
-DROPBOX_ROOT_FOLDER=${pendingSetup.rootFolder}
-NEXT_PUBLIC_APP_URL=${appUrl}`}
+{`DROPBOX_REFRESH_TOKEN=<token>
+DROPBOX_ROOT_FOLDER=${pendingSetup.rootFolder}`}
               </pre>
               <div className="mt-3">
                 <Button

@@ -7,8 +7,10 @@ import {
   DROPBOX_DEFAULT_ROOT_FOLDER,
   DROPBOX_OAUTH_PENDING_COOKIE,
   DROPBOX_OAUTH_STATE_COOKIE,
+  DropboxOAuthError,
   exchangeDropboxAuthorizationCode,
-  getDropboxCurrentAccount,
+  logDropboxOperationFailure,
+  usersGetCurrentAccount,
 } from "@/lib/dropbox/oauth";
 import { createClient } from "@/lib/supabase/server";
 
@@ -62,7 +64,7 @@ export async function GET(request: Request) {
 
   try {
     const tokenResult = await exchangeDropboxAuthorizationCode(code);
-    const account = await getDropboxCurrentAccount(tokenResult.access_token);
+    const account = await usersGetCurrentAccount(tokenResult.access_token);
     const rootFolder =
       process.env.DROPBOX_ROOT_FOLDER?.trim() || DROPBOX_DEFAULT_ROOT_FOLDER;
 
@@ -84,8 +86,30 @@ export async function GET(request: Request) {
       }
     );
 
+    if (process.env.NODE_ENV === "development") {
+      console.info("[dropbox]", {
+        operation: "oauth_callback_complete",
+        accountEmail: account.email,
+        accountName: account.name.display_name,
+        accessTokenReturned: true,
+        refreshTokenReturned: true,
+      });
+    }
+
     return redirectToSettings({ setup: "pending" }, requestUrl.origin);
   } catch (callbackError) {
+    if (callbackError instanceof DropboxOAuthError && callbackError.details) {
+      logDropboxOperationFailure(callbackError.details);
+    } else if (process.env.NODE_ENV === "development") {
+      console.error("[dropbox]", {
+        operation: "oauth_callback",
+        message:
+          callbackError instanceof Error
+            ? callbackError.message
+            : "Dropbox authorization failed.",
+      });
+    }
+
     const message =
       callbackError instanceof Error
         ? callbackError.message

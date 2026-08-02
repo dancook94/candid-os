@@ -39,8 +39,14 @@ export class DropboxError extends Error {
 }
 
 async function parseDropboxError(response: Response) {
+  const text = await response.text();
+
+  if (!text) {
+    return response.statusText;
+  }
+
   try {
-    const payload = (await response.json()) as DropboxApiError;
+    const payload = JSON.parse(text) as DropboxApiError;
     return payload.error_summary ?? response.statusText;
   } catch {
     return response.statusText;
@@ -106,7 +112,7 @@ export async function dropboxApiRequest<T>(
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body: body === undefined ? "null" : JSON.stringify(body),
   });
 
   if (!response.ok) {

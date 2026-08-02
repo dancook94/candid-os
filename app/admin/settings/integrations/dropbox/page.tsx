@@ -66,7 +66,6 @@ export default async function DropboxIntegrationPage({
           pendingSetup={pendingSetup}
           initialError={params.error ?? null}
           initialSetupPending={params.setup === "pending" && !pendingSetup}
-          appUrl={process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") ?? "http://localhost:3000"}
         />
       </div>
     </AppShell>
