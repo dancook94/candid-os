@@ -26,7 +26,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
-import { getCrmNotes, getCrmTimeline } from "@/lib/crm/get-crm-timeline";
+import { logDevQuery } from "@/lib/dev-query-log";
+import {
+  getCrmNotes,
+  getCrmTimeline,
+  type CrmNoteListItem,
+  type CrmTimelineItem,
+} from "@/lib/crm/get-crm-timeline";
 import { loadQuoteContactDisplay } from "@/lib/crm/quote-contact-display";
 import { createClient } from "@/lib/supabase/server";
 import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
@@ -37,6 +43,22 @@ export const dynamic = "force-dynamic";
 type QuoteDetailPageProps = {
   params: Promise<{ id: string }>;
   searchParams: Promise<{ version?: string }>;
+};
+
+type QuoteVersionRow = {
+  id: string;
+  version_number: number;
+  version_status: string;
+  created_at: string;
+  expiry_date: string | null;
+  payment_terms_days: number | null;
+  introduction: string | null;
+  customer_notes: string | null;
+  internal_notes: string | null;
+  subtotal: number | null;
+  vat_rate: number | null;
+  vat_amount: number | null;
+  total: number | null;
 };
 
 function formatQuotePageTitle(projectName: string) {
@@ -54,7 +76,10 @@ export default async function QuoteDetailPage({
 
   const {
     data: { user },
+    error: userError,
   } = await supabase.auth.getUser();
+
+  logDevQuery("auth.getUser", { data: user, error: userError });
 
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
@@ -64,7 +89,15 @@ export default async function QuoteDetailPage({
     .eq("id", id)
     .maybeSingle();
 
-  if (quoteError || !quote) {
+  logDevQuery("quotes.byId", { data: quote, error: quoteError });
+
+  if (quoteError) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[quote-detail] quotes.byId failed:", quoteError);
+    }
+  }
+
+  if (!quote) {
     notFound();
   }
 
@@ -76,36 +109,60 @@ export default async function QuoteDetailPage({
     .eq("quote_id", quote.id)
     .order("version_number", { ascending: false });
 
-  if (versionsError || !allVersions || allVersions.length === 0) {
-    notFound();
+  logDevQuery("quote_versions.byQuoteId", {
+    data: allVersions,
+    error: versionsError,
+  });
+
+  if (versionsError && process.env.NODE_ENV === "development") {
+    console.error("[quote-detail] quote_versions.byQuoteId failed:", versionsError);
   }
+
+  const versions = (allVersions ?? []) as QuoteVersionRow[];
 
   const parsedVersionParam = versionParam
     ? Number.parseInt(versionParam, 10)
     : quote.current_version;
 
-  const selectedVersionNumber = Number.isFinite(parsedVersionParam)
+  let selectedVersionNumber = Number.isFinite(parsedVersionParam)
     ? parsedVersionParam
     : quote.current_version;
 
-  const quoteVersion = allVersions.find(
-    (version) => version.version_number === selectedVersionNumber
-  );
+  let quoteVersion =
+    versions.find((version) => version.version_number === selectedVersionNumber) ??
+    null;
 
-  if (!quoteVersion) {
-    notFound();
+  if (!quoteVersion && versions.length > 0) {
+    quoteVersion = versions[0];
+    selectedVersionNumber = quoteVersion.version_number;
+
+    if (process.env.NODE_ENV === "development") {
+      console.warn("[quote-detail] selected version not found; falling back", {
+        requestedVersion: parsedVersionParam,
+        fallbackVersion: selectedVersionNumber,
+      });
+    }
   }
 
-  const { data: quoteItems } = await supabase
-    .from("quote_items")
-    .select(
-      "id, title, description, quantity, unit_price, is_optional, line_total, sort_order, image_storage_path, image_file_name, image_file_type, image_file_size"
-    )
-    .eq("quote_version_id", quoteVersion.id)
-    .order("sort_order", { ascending: true });
+  const quoteItemsResult = quoteVersion
+    ? await supabase
+        .from("quote_items")
+        .select(
+          "id, title, description, quantity, unit_price, is_optional, line_total, sort_order, image_storage_path, image_file_name, image_file_type, image_file_size"
+        )
+        .eq("quote_version_id", quoteVersion.id)
+        .order("sort_order", { ascending: true })
+    : { data: [], error: null };
+
+  logDevQuery("quote_items.byVersionId", {
+    data: quoteItemsResult.data,
+    error: quoteItemsResult.error,
+  });
+
+  const quoteItems = quoteItemsResult.data ?? [];
 
   const lineItemsWithImages = await Promise.all(
-    (quoteItems ?? []).map(async (item) => ({
+    quoteItems.map(async (item) => ({
       id: item.id,
       title: item.title,
       description: item.description ?? "",
@@ -122,66 +179,87 @@ export default async function QuoteDetailPage({
     }))
   );
 
-  const [{ data: companies }, { data: quoteRequests }, linkedOpportunity, linkableOpportunities, quoteContact] =
+  const [companiesResult, quoteRequestsResult, linkedOpportunity, linkableOpportunities, quoteContact] =
     await Promise.all([
-    supabase
-      .from("companies")
-      .select("id, company_name, payment_terms_days")
-      .eq("is_active", true)
-      .order("company_name"),
-    supabase
-      .from("quote_requests")
-      .select("id, company_id, project_name")
-      .order("created_at", { ascending: false }),
-    loadLinkedOpportunityForQuote(supabase, quote.opportunity_id),
-    loadLinkableOpportunitiesForCompany(supabase, quote.company_id),
-    loadQuoteContactDisplay(supabase, quote.contact_id),
-  ]);
+      supabase
+        .from("companies")
+        .select("id, company_name, payment_terms_days")
+        .eq("is_active", true)
+        .order("company_name"),
+      supabase
+        .from("quote_requests")
+        .select("id, company_id, project_name")
+        .order("created_at", { ascending: false }),
+      loadLinkedOpportunityForQuote(supabase, quote.opportunity_id),
+      loadLinkableOpportunitiesForCompany(supabase, quote.company_id),
+      loadQuoteContactDisplay(supabase, quote.contact_id),
+    ]);
 
-  const initialValues: QuoteBuilderInitialValues = {
-    companyId: quote.company_id,
-    contactId: quote.contact_id,
-    quoteRequestId: quote.quote_request_id,
-    opportunityId: quote.opportunity_id,
-    projectName: quote.project_name,
-    expiryDate: quoteVersion.expiry_date ?? "",
-    paymentTermsDays: quoteVersion.payment_terms_days ?? 14,
-    introduction: quoteVersion.introduction ?? "",
-    customerNotes: quoteVersion.customer_notes ?? "",
-    internalNotes: quoteVersion.internal_notes ?? "",
-    lineItems: lineItemsWithImages.map(
-      ({
-        imageStoragePath,
-        imageFileName,
-        imageFileType,
-        imageFileSize,
-        imagePreviewUrl,
-        ...item
-      }) => ({
-        ...item,
-        imageStoragePath,
-        imageFileName,
-        imageFileType,
-        imageFileSize,
-        imagePreviewUrl,
-      })
-    ),
-    defaultVatRate: Number(quoteVersion.vat_rate ?? 0.2),
-  };
+  logDevQuery("companies.active", {
+    data: companiesResult.data,
+    error: companiesResult.error,
+  });
+  logDevQuery("quote_requests.all", {
+    data: quoteRequestsResult.data,
+    error: quoteRequestsResult.error,
+  });
+  logDevQuery("linkedOpportunity", { data: linkedOpportunity, error: null });
+  logDevQuery("linkableOpportunities", {
+    data: linkableOpportunities,
+    error: null,
+  });
+  logDevQuery("quoteContact", { data: quoteContact, error: null });
 
-  const canEdit = quoteVersion.version_status === "draft";
+  const companies = companiesResult.data ?? [];
+  const quoteRequests = quoteRequestsResult.data ?? [];
+
+  const initialValues: QuoteBuilderInitialValues | null = quoteVersion
+    ? {
+        companyId: quote.company_id,
+        contactId: quote.contact_id,
+        quoteRequestId: quote.quote_request_id,
+        opportunityId: quote.opportunity_id,
+        projectName: quote.project_name,
+        expiryDate: quoteVersion.expiry_date ?? "",
+        paymentTermsDays: quoteVersion.payment_terms_days ?? 14,
+        introduction: quoteVersion.introduction ?? "",
+        customerNotes: quoteVersion.customer_notes ?? "",
+        internalNotes: quoteVersion.internal_notes ?? "",
+        lineItems: lineItemsWithImages.map(
+          ({
+            imageStoragePath,
+            imageFileName,
+            imageFileType,
+            imageFileSize,
+            imagePreviewUrl,
+            ...item
+          }) => ({
+            ...item,
+            imageStoragePath,
+            imageFileName,
+            imageFileType,
+            imageFileSize,
+            imagePreviewUrl,
+          })
+        ),
+        defaultVatRate: Number(quoteVersion.vat_rate ?? 0.2),
+      }
+    : null;
+
+  const canEdit = quoteVersion?.version_status === "draft";
   const companyName =
-    (companies ?? []).find((company) => company.id === quote.company_id)
-      ?.company_name ?? "Unknown company";
-  const canRespondOnBehalf =
-    selectedVersionNumber === quote.current_version &&
-    isQuoteAwaitingDecision({
-      quoteStatus: quote.status,
-      versionStatus: quoteVersion.version_status,
-      versionNumber: selectedVersionNumber,
-      currentVersion: quote.current_version,
-    });
-  const versionOptions: QuoteVersionOption[] = allVersions.map((version) => ({
+    companies.find((company) => company.id === quote.company_id)?.company_name ??
+    "Unknown company";
+  const canRespondOnBehalf = quoteVersion
+    ? selectedVersionNumber === quote.current_version &&
+      isQuoteAwaitingDecision({
+        quoteStatus: quote.status,
+        versionStatus: quoteVersion.version_status,
+        versionNumber: selectedVersionNumber,
+        currentVersion: quote.current_version,
+      })
+    : false;
+  const versionOptions: QuoteVersionOption[] = versions.map((version) => ({
     version_number: version.version_number,
     version_status: version.version_status,
     created_at: version.created_at,
@@ -196,19 +274,39 @@ export default async function QuoteDetailPage({
     opportunityId: quote.opportunity_id,
     contactId: quote.contact_id,
   };
-  const [quoteNotes, { items: quoteActivity }] = user ?
-    await Promise.all([
-      getCrmNotes(supabase, {
-        scope: quoteScope,
-        currentUserId: user.id,
-        isAdmin,
-      }),
-      getCrmTimeline(supabase, {
-        scope: quoteScope,
-        limit: 50,
-      }),
-    ])
-  : [[], { items: [] }];
+
+  let quoteNotes: CrmNoteListItem[] = [];
+  let quoteActivity: CrmTimelineItem[] = [];
+
+  if (user) {
+    try {
+      const [notes, timeline] = await Promise.all([
+        getCrmNotes(supabase, {
+          scope: quoteScope,
+          currentUserId: user.id,
+          isAdmin,
+        }),
+        getCrmTimeline(supabase, {
+          scope: quoteScope,
+          limit: 50,
+        }),
+      ]);
+
+      quoteNotes = notes;
+      quoteActivity = timeline.items;
+
+      logDevQuery("crm.notes", { data: quoteNotes, error: null });
+      logDevQuery("crm.timeline", { data: quoteActivity, error: null });
+    } catch (crmError) {
+      logDevQuery("crm.load", { data: null, error: crmError });
+
+      if (process.env.NODE_ENV === "development") {
+        console.error("[quote-detail] CRM load failed:", crmError);
+      }
+    }
+  }
+
+  const missingVersions = versions.length === 0;
 
   return (
     <AppShell {...shellProps}>
@@ -224,47 +322,57 @@ export default async function QuoteDetailPage({
           }
         />
 
-        <Card className="portal-surface mb-6">
-          <CardContent className="space-y-4 pt-6">
-            <QuoteVersionSelector
-              quoteId={quote.id}
-              versions={versionOptions}
-              selectedVersion={selectedVersionNumber}
-              selectedVersionStatus={quoteVersion.version_status}
-              currentVersion={quote.current_version}
-            />
+        {missingVersions && (
+          <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+            This quote record exists but has no versions. Quote content cannot
+            be edited until a version is restored or recreated. Permanent delete
+            may have partially completed — check server logs and CRM activity.
+          </div>
+        )}
 
-            <CreateQuoteVersionButton
-              quoteId={quote.id}
-              sourceVersion={{
-                id: quoteVersion.id,
-                version_number: quoteVersion.version_number,
-                introduction: quoteVersion.introduction,
-                customer_notes: quoteVersion.customer_notes,
-                internal_notes: quoteVersion.internal_notes,
-                expiry_date: quoteVersion.expiry_date,
-                payment_terms_days: quoteVersion.payment_terms_days,
-                subtotal: quoteVersion.subtotal,
-                vat_rate: quoteVersion.vat_rate,
-                vat_amount: quoteVersion.vat_amount,
-                total: quoteVersion.total,
-              }}
-              sourceItems={(quoteItems ?? []).map((item) => ({
-                title: item.title,
-                description: item.description,
-                quantity: Number(item.quantity),
-                unit_price: Number(item.unit_price),
-                is_optional: Boolean(item.is_optional),
-                line_total: Number(item.line_total),
-                sort_order: Number(item.sort_order),
-                image_storage_path: item.image_storage_path,
-                image_file_name: item.image_file_name,
-                image_file_type: item.image_file_type,
-                image_file_size: item.image_file_size,
-              }))}
-            />
-          </CardContent>
-        </Card>
+        {!missingVersions && quoteVersion && (
+          <Card className="portal-surface mb-6">
+            <CardContent className="space-y-4 pt-6">
+              <QuoteVersionSelector
+                quoteId={quote.id}
+                versions={versionOptions}
+                selectedVersion={selectedVersionNumber}
+                selectedVersionStatus={quoteVersion.version_status}
+                currentVersion={quote.current_version}
+              />
+
+              <CreateQuoteVersionButton
+                quoteId={quote.id}
+                sourceVersion={{
+                  id: quoteVersion.id,
+                  version_number: quoteVersion.version_number,
+                  introduction: quoteVersion.introduction,
+                  customer_notes: quoteVersion.customer_notes,
+                  internal_notes: quoteVersion.internal_notes,
+                  expiry_date: quoteVersion.expiry_date,
+                  payment_terms_days: quoteVersion.payment_terms_days,
+                  subtotal: quoteVersion.subtotal,
+                  vat_rate: quoteVersion.vat_rate,
+                  vat_amount: quoteVersion.vat_amount,
+                  total: quoteVersion.total,
+                }}
+                sourceItems={quoteItems.map((item) => ({
+                  title: item.title,
+                  description: item.description,
+                  quantity: Number(item.quantity),
+                  unit_price: Number(item.unit_price),
+                  is_optional: Boolean(item.is_optional),
+                  line_total: Number(item.line_total),
+                  sort_order: Number(item.sort_order),
+                  image_storage_path: item.image_storage_path,
+                  image_file_name: item.image_file_name,
+                  image_file_type: item.image_file_type,
+                  image_file_size: item.image_file_size,
+                }))}
+              />
+            </CardContent>
+          </Card>
+        )}
 
         <AdminQuoteManagementActions
           quoteId={quote.id}
@@ -272,7 +380,7 @@ export default async function QuoteDetailPage({
           quoteStatus={quote.status}
           versionNumber={selectedVersionNumber}
           companyName={companyName}
-          total={Number(quoteVersion.total ?? 0)}
+          total={Number(quoteVersion?.total ?? 0)}
           canRespondOnBehalf={canRespondOnBehalf}
         />
 
@@ -286,23 +394,25 @@ export default async function QuoteDetailPage({
 
         <QuoteContactSummary contact={quoteContact} />
 
-        <QuoteBuilderForm
-          key={quoteVersion.id}
-          mode="edit"
-          createdBy={user!.id}
-          companies={companies ?? []}
-          quoteRequests={quoteRequests ?? []}
-          initialValues={initialValues}
-          quoteId={quote.id}
-          selectedQuoteVersionId={quoteVersion.id}
-          quoteNumber={quote.quote_number}
-          quoteStatus={quote.status}
-          versionStatus={quoteVersion.version_status}
-          selectedVersionNumber={selectedVersionNumber}
-          currentVersionNumber={quote.current_version}
-          canEdit={canEdit}
-          lockContact={Boolean(quote.opportunity_id && quote.contact_id)}
-        />
+        {quoteVersion && initialValues && user ? (
+          <QuoteBuilderForm
+            key={quoteVersion.id}
+            mode="edit"
+            createdBy={user.id}
+            companies={companies}
+            quoteRequests={quoteRequests}
+            initialValues={initialValues}
+            quoteId={quote.id}
+            selectedQuoteVersionId={quoteVersion.id}
+            quoteNumber={quote.quote_number}
+            quoteStatus={quote.status}
+            versionStatus={quoteVersion.version_status}
+            selectedVersionNumber={selectedVersionNumber}
+            currentVersionNumber={quote.current_version}
+            canEdit={canEdit}
+            lockContact={Boolean(quote.opportunity_id && quote.contact_id)}
+          />
+        ) : null}
 
         <Card className="portal-surface mb-6">
           <CardHeader>
