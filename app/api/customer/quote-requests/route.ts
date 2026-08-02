@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { requireCustomerSettingsContext } from "@/lib/customer-settings/auth";
+import { requireCustomerQuoteRequestContext } from "@/lib/customer-settings/auth";
 import { customerSettingsErrorResponse } from "@/lib/customer-settings/api-response";
 import { CustomerSettingsError } from "@/lib/customer-settings/errors";
 import {
@@ -22,7 +22,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
     }
 
-    const context = await requireCustomerSettingsContext(supabase, user);
+    const context = await requireCustomerQuoteRequestContext(supabase, user);
 
     let body: SubmitCustomerQuoteRequestBody;
 

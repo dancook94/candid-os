@@ -8,6 +8,18 @@ import {
 } from "@/lib/customer-settings/queries";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+export type CustomerContactRecord = {
+  id: string;
+  company_id: string;
+  full_name: string;
+  email: string | null;
+  phone: string | null;
+  job_title: string | null;
+  is_primary: boolean;
+  is_active: boolean;
+  updated_at: string;
+};
+
 export type CustomerSettingsContext = {
   user: User;
   profile: {
@@ -18,17 +30,7 @@ export type CustomerSettingsContext = {
     user_role: string;
     updated_at: string | null;
   };
-  contact: {
-    id: string;
-    company_id: string;
-    full_name: string;
-    email: string | null;
-    phone: string | null;
-    job_title: string | null;
-    is_primary: boolean;
-    is_active: boolean;
-    updated_at: string;
-  } | null;
+  contact: CustomerContactRecord | null;
   company: {
     id: string;
     company_name: string;
@@ -44,6 +46,10 @@ export type CustomerSettingsContext = {
     company_number?: string | null;
   };
   loginEmail: string;
+};
+
+export type CustomerQuoteRequestContext = CustomerSettingsContext & {
+  contact: CustomerContactRecord;
 };
 
 type ApprovedCustomerProfile = NonNullable<
@@ -113,6 +119,25 @@ export async function requireCustomerSettingsContext(
     contact,
     company,
     loginEmail: user.email ?? "",
+  };
+}
+
+export async function requireCustomerQuoteRequestContext(
+  supabase: SupabaseClient,
+  user: User
+): Promise<CustomerQuoteRequestContext> {
+  const context = await requireCustomerSettingsContext(supabase, user);
+
+  if (!context.contact) {
+    throw new CustomerSettingsError(
+      "Your account must be linked to a contact before you can submit quote requests.",
+      403
+    );
+  }
+
+  return {
+    ...context,
+    contact: context.contact,
   };
 }
 

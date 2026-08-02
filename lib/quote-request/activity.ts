@@ -1,6 +1,6 @@
 import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
 import { createCrmActivity } from "@/lib/crm/create-crm-activity";
-import type { CustomerSettingsContext } from "@/lib/customer-settings/auth";
+import type { CustomerQuoteRequestContext } from "@/lib/customer-settings/auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type QuoteRequestActivityInput = {
@@ -12,7 +12,7 @@ type QuoteRequestActivityInput = {
 };
 
 export async function logQuoteRequestCustomerActivity(
-  context: CustomerSettingsContext,
+  context: CustomerQuoteRequestContext,
   input: QuoteRequestActivityInput
 ) {
   const adminClient = createAdminClient();
@@ -27,10 +27,10 @@ export async function logQuoteRequestCustomerActivity(
 
   await createCrmActivity(adminClient, {
     companyId: context.company.id,
-    contactId: context.contact?.id ?? null,
+    contactId: context.contact.id,
     activityType: input.activityType,
     description: input.description,
-    actorProfileId: context.user.id,
+    actorProfileId: context.profile.id,
     metadata: {
       ...input.metadata,
       quote_request_id: input.quoteRequestId,
@@ -39,7 +39,7 @@ export async function logQuoteRequestCustomerActivity(
     },
     validatedLinks: {
       companyId: context.company.id,
-      contactId: context.contact?.id ?? null,
+      contactId: context.contact.id,
       opportunityId: null,
       quoteId: null,
       taskId: null,

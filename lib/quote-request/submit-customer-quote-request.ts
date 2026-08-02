@@ -1,10 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { CustomerSettingsContext } from "@/lib/customer-settings/auth";
+import type { CustomerQuoteRequestContext } from "@/lib/customer-settings/auth";
 import { CustomerSettingsError } from "@/lib/customer-settings/errors";
 import { isMissingRelationError } from "@/lib/customer-settings/errors";
 import { loadCompanyAddresses } from "@/lib/customer-settings/addresses";
 import { CRM_ACTIVITY_TYPES, logQuoteRequestCustomerActivity } from "@/lib/quote-request/activity";
+import { createOpportunityFromQuoteRequest } from "@/lib/crm/opportunity-linking";
 import {
   buildAddressDuplicateKey,
   isValidUkPostcode,
@@ -88,7 +89,7 @@ async function findDuplicateCompanyAddress(
 
 async function resolveDeliverySnapshot(
   adminClient: SupabaseClient,
-  context: CustomerSettingsContext,
+  context: CustomerQuoteRequestContext,
   body: SubmitCustomerQuoteRequestBody
 ): Promise<{
   snapshot: DeliveryAddressSnapshot;
@@ -190,7 +191,7 @@ async function resolveDeliverySnapshot(
 }
 
 function buildQuoteRequestInsert(
-  context: CustomerSettingsContext,
+  context: CustomerQuoteRequestContext,
   body: SubmitCustomerQuoteRequestBody,
   defaultDeadlineStatus: string,
   delivery:
@@ -205,7 +206,8 @@ function buildQuoteRequestInsert(
 
   return {
     company_id: context.company.id,
-    requested_by: context.user.id,
+    contact_id: context.contact.id,
+    requested_by: context.profile.id,
     project_name: body.projectName.trim(),
     description: body.description.trim(),
     fulfilment_method: body.fulfilmentMethod,
@@ -250,6 +252,7 @@ async function insertQuoteRequest(
 
   if (error && isMissingColumnError(error)) {
     const {
+      contact_id: _contactId,
       delivery_country: _country,
       delivery_instructions: _instructions,
       delivery_address_label: _label,
@@ -278,7 +281,7 @@ async function insertQuoteRequest(
 }
 
 export async function submitCustomerQuoteRequest(
-  context: CustomerSettingsContext,
+  context: CustomerQuoteRequestContext,
   body: SubmitCustomerQuoteRequestBody,
   defaultDeadlineStatus: string
 ): Promise<SubmitCustomerQuoteRequestResult> {
@@ -385,6 +388,12 @@ export async function submitCustomerQuoteRequest(
         fulfilment_method: body.fulfilmentMethod,
         delivery_address_source: delivery?.source ?? null,
       },
+    });
+
+    await createOpportunityFromQuoteRequest(adminClient, {
+      quoteRequestId: createdQuoteRequestId,
+      actorProfileId: context.profile.id,
+      contactId: context.contact.id,
     });
 
     if (addressWasNewlyCreated && createdAddressId) {

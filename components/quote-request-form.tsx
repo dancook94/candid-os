@@ -355,30 +355,6 @@ export function QuoteRequestForm({
       setInfoMessage("This address is already saved.");
     }
 
-    try {
-      const linkResponse = await fetch(
-        `/api/crm/quote-requests/${submitResult.quoteRequestId}/ensure-opportunity`,
-        { method: "POST" }
-      );
-
-      if (!linkResponse.ok) {
-        const linkPayload = (await linkResponse.json()) as { error?: string };
-        throw new Error(
-          linkPayload.error ??
-            "Quote request saved but opportunity linking failed."
-        );
-      }
-    } catch (linkError) {
-      setIsSubmitting(false);
-      setUploadProgress("");
-      setError(
-        linkError instanceof Error
-          ? linkError.message
-          : "Unable to link quote request to CRM opportunity."
-      );
-      return;
-    }
-
     if (pendingFiles.length > 0) {
       setUploadProgress(`Uploading ${pendingFiles.length} file(s)...`);
 

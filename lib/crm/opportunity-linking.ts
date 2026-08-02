@@ -74,10 +74,12 @@ export async function createOpportunityFromQuoteRequest(
   supabase: SupabaseClient,
   {
     quoteRequestId,
-    createdBy,
+    actorProfileId,
+    contactId,
   }: {
     quoteRequestId: string;
-    createdBy: string;
+    actorProfileId: string;
+    contactId?: string | null;
   }
 ) {
   const { data: quoteRequest, error: requestError } = await supabase
@@ -98,21 +100,34 @@ export async function createOpportunityFromQuoteRequest(
     return { opportunityId: quoteRequest.opportunity_id, created: false };
   }
 
-  const ownerProfileId = await resolveDefaultOpportunityOwnerId(
-    supabase,
-    createdBy
-  );
+  const ownerProfileId = await resolveDefaultOpportunityOwnerId(supabase);
+
+  let resolvedContactId: string | null = contactId ?? null;
+
+  if (resolvedContactId) {
+    const contactValidation = await validateActiveContactForCompany(
+      supabase,
+      resolvedContactId,
+      quoteRequest.company_id,
+      { required: false }
+    );
+
+    if (!contactValidation.ok) {
+      throw new Error(contactValidation.message);
+    }
+  }
 
   const { data: opportunity, error: insertError } = await supabase
     .from("opportunities")
     .insert({
       company_id: quoteRequest.company_id,
+      contact_id: resolvedContactId,
       title: quoteRequest.project_name,
       description: quoteRequest.description,
       stage: "new_enquiry",
       source: "customer_portal" satisfies OpportunitySource,
       owner_profile_id: ownerProfileId,
-      created_by: createdBy,
+      created_by: ownerProfileId,
       currency: "GBP",
     })
     .select("id")
@@ -134,10 +149,15 @@ export async function createOpportunityFromQuoteRequest(
 
   await logOpportunityActivity(supabase, {
     opportunityId: opportunity.id,
+    companyId: quoteRequest.company_id,
+    contactId: resolvedContactId,
     activityType: OPPORTUNITY_ACTIVITY_TYPES.opportunityCreated,
     description: `Opportunity created from customer quote request.`,
-    metadata: { quote_request_id: quoteRequestId },
-    createdBy,
+    metadata: {
+      quote_request_id: quoteRequestId,
+      submitted_by_profile_id: actorProfileId,
+    },
+    createdBy: actorProfileId,
   });
 
   return { opportunityId: opportunity.id, created: true };
