@@ -150,6 +150,14 @@ export async function respondToCustomerQuote(
         actorProfileId: userId,
       });
 
+      if (jobResult.schemaMissing) {
+        return responseError(
+          503,
+          jobResult.warning ??
+            "Quote is already accepted, but production jobs are not configured in Supabase yet."
+        );
+      }
+
       return {
         ok: true,
         job: mapJobResult(jobResult),
@@ -185,6 +193,13 @@ export async function respondToCustomerQuote(
           status: 500,
           message:
             "Your quote was accepted, but the production job could not be created. Please contact Candid Creative.",
+        };
+      }
+
+      if (jobResult.schemaMissing) {
+        return {
+          ok: true,
+          job: mapJobResult(jobResult),
         };
       }
 

@@ -1,0 +1,7 @@
+# Minimal Supabase CLI config for applying migrations with:
+#   DATABASE_URL='postgresql://...' npx supabase db push --db-url "$DATABASE_URL" --yes
+
+project_id = "wdpfqkqnoyeshocwzrxh"
+
+[db]
+major_version = 15

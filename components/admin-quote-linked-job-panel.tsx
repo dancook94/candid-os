@@ -47,6 +47,7 @@ export function AdminQuoteLinkedJobPanel({
       const payload = (await response.json()) as {
         error?: string;
         jobId?: string | null;
+        schemaMissing?: boolean;
       };
 
       if (!response.ok) {
@@ -55,6 +56,7 @@ export function AdminQuoteLinkedJobPanel({
         return;
       }
 
+      setIsSubmitting(false);
       router.refresh();
     } catch {
       setError("Unable to create job. Please try again.");
@@ -85,20 +87,24 @@ export function AdminQuoteLinkedJobPanel({
               </Button>
             </Link>
           </div>
-        ) : schemaMissing ? (
-          <p className="text-sm text-muted-foreground">
-            Jobs schema is not deployed yet. Apply the proposed jobs migration in
-            Supabase, then create the missing job.
-          </p>
         ) : (
           <div className="space-y-3">
-            <p className="text-sm text-amber-900">
-              This accepted quote has no linked production job yet.
+            <p className="text-sm font-medium text-amber-950">
+              This accepted quote has no job.
             </p>
+            {schemaMissing ? (
+              <p className="text-sm text-muted-foreground">
+                The jobs table is not deployed in Supabase yet. Apply{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">
+                  supabase/migrations/20260802190000_jobs_foundation.sql
+                </code>{" "}
+                in the SQL editor, then create the missing job.
+              </p>
+            ) : null}
             <Button
               type="button"
               variant="outline"
-              disabled={isSubmitting}
+              disabled={isSubmitting || schemaMissing}
               onClick={handleEnsureJob}
             >
               {isSubmitting ? "Creating job..." : "Create missing job"}

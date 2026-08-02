@@ -310,6 +310,14 @@ export async function ensureJobForAcceptedQuote({
 
   if (existingError) {
     if (isMissingJobsSchemaError(existingError)) {
+      if (process.env.NODE_ENV === "development") {
+        console.error("[jobs] public.jobs is missing — apply supabase/migrations/20260802190000_jobs_foundation.sql", {
+          quoteId,
+          code: existingError.code,
+          message: existingError.message,
+        });
+      }
+
       return missingSchemaResult();
     }
 
@@ -358,11 +366,6 @@ export async function ensureJobForAcceptedQuote({
   );
 
   const jobReference = buildJobReference(quote.quote_number);
-  const dropbox = await provisionDropboxForJob({
-    jobReference,
-    projectName: quote.project_name,
-  });
-
   const acceptedAt = version?.accepted_at ?? new Date().toISOString();
 
   const { data: createdJob, error: insertError } = await adminClient
@@ -383,9 +386,9 @@ export async function ensureJobForAcceptedQuote({
       customer_visible: true,
       accepted_at: acceptedAt,
       accepted_by: actorProfileId ?? null,
-      dropbox_folder_path: dropbox.dropboxFolderPath,
-      dropbox_folder_id: dropbox.dropboxFolderId,
-      dropbox_setup_status: dropbox.dropboxSetupStatus,
+      dropbox_folder_path: null,
+      dropbox_folder_id: null,
+      dropbox_setup_status: "pending",
     })
     .select(JOB_LIST_COLUMNS)
     .single();
@@ -412,10 +415,56 @@ export async function ensureJobForAcceptedQuote({
       };
     }
 
+    if (process.env.NODE_ENV === "development") {
+      console.error("[jobs] insert failed for accepted quote", {
+        quoteId,
+        code: insertError.code,
+        message: insertError.message,
+        details: insertError.details,
+        hint: insertError.hint,
+      });
+    }
+
     throw new JobError(insertError.message, 500);
   }
 
-  const job = createdJob as JobRecord;
+  let job = createdJob as JobRecord;
+
+  const dropbox = await provisionDropboxForJob({
+    jobReference,
+    projectName: quote.project_name,
+  });
+
+  if (dropbox.dropboxReady) {
+    const { data: updatedJob, error: dropboxUpdateError } = await adminClient
+      .from("jobs")
+      .update({
+        dropbox_folder_path: dropbox.dropboxFolderPath,
+        dropbox_folder_id: dropbox.dropboxFolderId,
+        dropbox_setup_status: dropbox.dropboxSetupStatus,
+      })
+      .eq("id", job.id)
+      .select(JOB_LIST_COLUMNS)
+      .maybeSingle();
+
+    if (dropboxUpdateError && process.env.NODE_ENV === "development") {
+      console.error("[jobs] dropbox metadata update failed", {
+        jobId: job.id,
+        message: dropboxUpdateError.message,
+      });
+    }
+
+    if (updatedJob) {
+      job = updatedJob as JobRecord;
+    }
+  } else if (dropbox.dropboxSetupStatus === "failed") {
+    await adminClient
+      .from("jobs")
+      .update({ dropbox_setup_status: "failed" })
+      .eq("id", job.id);
+
+    job = { ...job, dropbox_setup_status: "failed" };
+  }
 
   try {
     await logJobCreatedFromAcceptedQuote({

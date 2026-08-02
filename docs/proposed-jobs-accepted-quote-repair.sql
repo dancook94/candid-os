@@ -1,12 +1,9 @@
 -- One-time repair: create jobs for accepted quotes that have no linked job.
--- Review and apply manually in Supabase after proposed-jobs-artwork-migration.sql.
--- Do not auto-run from the app.
+-- Review and apply manually in Supabase after:
+--   supabase/migrations/20260802190000_jobs_foundation.sql
 --
--- Preferred path: use the admin API POST /api/admin/quotes/{quoteId}/ensure-job
--- which calls the same idempotent server logic as quote acceptance.
---
--- This SQL is a read-only diagnostic. Job creation requires Dropbox provisioning
--- and activity logging, so run repair via the admin API or app reconcile path.
+-- Preferred path: POST /api/admin/quotes/{quoteId}/ensure-job
+-- or click "Create missing job" on the accepted admin quote page.
 
 -- Accepted quotes missing a job:
 SELECT

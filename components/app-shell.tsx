@@ -92,6 +92,11 @@ const adminLinks = [
     icon: FileText,
   },
   {
+    href: "/admin/jobs",
+    label: "Jobs",
+    icon: Package,
+  },
+  {
     href: "/admin/settings",
     label: "Settings",
     icon: Settings,

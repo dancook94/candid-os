@@ -27,7 +27,19 @@ export async function POST(_request: Request, context: RouteContext) {
     actorProfileId: authResult.userId,
   });
 
-  if (!result.job && !result.schemaMissing) {
+  if (result.schemaMissing) {
+    return NextResponse.json(
+      {
+        error:
+          result.warning ??
+          "Production jobs table is not deployed. Apply supabase/migrations/20260802190000_jobs_foundation.sql in Supabase first.",
+        schemaMissing: true,
+      },
+      { status: 503 }
+    );
+  }
+
+  if (!result.job) {
     return NextResponse.json(
       { error: result.warning ?? "Unable to create job for this quote." },
       { status: 400 }
@@ -44,16 +56,16 @@ export async function POST(_request: Request, context: RouteContext) {
   revalidateQuoteWorkflowRoutes({
     quoteId: id,
     quoteRequestId: quoteLink?.quote_request_id ?? null,
-    jobId: result.job?.id ?? null,
+    jobId: result.job.id,
     opportunityId: quoteLink?.opportunity_id ?? null,
   });
 
   return NextResponse.json({
     success: true,
-    jobId: result.job?.id ?? null,
-    jobReference: result.job?.job_reference ?? null,
+    jobId: result.job.id,
+    jobReference: result.job.job_reference,
     created: result.created,
     jobWarning: result.warning,
-    schemaMissing: result.schemaMissing,
+    schemaMissing: false,
   });
 }
