@@ -1,8 +1,13 @@
 import { NextResponse } from "next/server";
 
 import {
+  AUTH_CALLBACK_ERRORS,
+  mapAuthCallbackFailure,
+} from "@/lib/auth-invite-redirect";
+import {
   resolveInviteCallbackNextPath,
   resolvePostLoginPath,
+  sanitizeNextPath,
 } from "@/lib/auth-redirect";
 import { createRouteHandlerClient } from "@/lib/supabase/server";
 
@@ -28,6 +33,21 @@ function redirectWithCookies(url: URL, cookieSource: NextResponse) {
   return response;
 }
 
+function loginErrorRedirect(
+  origin: string,
+  errorCode: string,
+  message?: string | null
+) {
+  const url = new URL("/login", origin);
+  url.searchParams.set("error", errorCode);
+
+  if (message) {
+    url.searchParams.set("message", message);
+  }
+
+  return NextResponse.redirect(url);
+}
+
 export async function GET(request: Request) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
@@ -50,20 +70,30 @@ export async function GET(request: Request) {
       authErrorDescription,
     });
 
-    return NextResponse.redirect(
-      new URL("/login?error=invite_callback_failed", requestUrl.origin)
+    const description = authErrorDescription?.toLowerCase() ?? "";
+    const errorCode = description.includes("expired")
+      ? AUTH_CALLBACK_ERRORS.invitationExpired
+      : AUTH_CALLBACK_ERRORS.inviteAuthError;
+
+    return loginErrorRedirect(
+      requestUrl.origin,
+      errorCode,
+      authErrorDescription
     );
   }
 
   if (!code) {
     logInviteCallback("No auth code present; redirecting to login");
 
-    return NextResponse.redirect(
-      new URL("/login?error=invite_callback_failed", requestUrl.origin)
+    return loginErrorRedirect(
+      requestUrl.origin,
+      AUTH_CALLBACK_ERRORS.missingInvitationCode
     );
   }
 
-  const cookieResponse = NextResponse.redirect(new URL(safeNext, requestUrl.origin));
+  const cookieResponse = NextResponse.redirect(
+    new URL(safeNext, requestUrl.origin)
+  );
   const supabase = await createRouteHandlerClient(cookieResponse);
 
   const { error } = await supabase.auth.exchangeCodeForSession(code);
@@ -76,8 +106,10 @@ export async function GET(request: Request) {
       safeNext,
     });
 
-    return NextResponse.redirect(
-      new URL("/login?error=invite_callback_failed", requestUrl.origin)
+    return loginErrorRedirect(
+      requestUrl.origin,
+      mapAuthCallbackFailure(error),
+      error.message
     );
   }
 
@@ -103,10 +135,15 @@ export async function GET(request: Request) {
       logInviteCallback("Profile lookup failed after auth callback", {
         message: profileError.message,
       });
-      destination = "/login";
-    } else {
-      destination = resolvePostLoginPath(profile, next);
+
+      return loginErrorRedirect(
+        requestUrl.origin,
+        AUTH_CALLBACK_ERRORS.invitationExchangeFailed,
+        profileError.message
+      );
     }
+
+    destination = resolvePostLoginPath(profile, sanitizeNextPath(next));
   }
 
   return redirectWithCookies(new URL(destination, requestUrl.origin), cookieResponse);

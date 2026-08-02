@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 
@@ -8,6 +8,7 @@ import { AuthPageLayout } from "@/components/auth-page-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { getAuthCallbackErrorMessage } from "@/lib/auth-invite-redirect";
 import { resolvePostLoginPath } from "@/lib/auth-redirect";
 import { createClient } from "@/lib/supabase/client";
 
@@ -17,11 +18,24 @@ export default function LoginForm() {
   const supabase = createClient();
 
   const next = searchParams.get("next");
+  const callbackErrorCode = searchParams.get("error");
+  const callbackErrorMessage = searchParams.get("message");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const knownError =
+      getAuthCallbackErrorMessage(callbackErrorCode) ??
+      callbackErrorMessage?.trim() ??
+      "";
+
+    if (knownError) {
+      setError(knownError);
+    }
+  }, [callbackErrorCode, callbackErrorMessage]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

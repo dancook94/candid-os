@@ -33,7 +33,7 @@ async function findAuthUserByEmail(adminClient: AdminClient, email: string) {
 export async function inviteContactToPortal(
   supabase: SupabaseClient,
   contactId: string,
-  requestOrigin: string
+  redirectTo: string
 ): Promise<InviteContactResult> {
   const {
     data: { user: actor },
@@ -126,7 +126,6 @@ export async function inviteContactToPortal(
     }
 
     if (linkedProfile?.account_status === "pending") {
-      const redirectTo = `${requestOrigin}/auth/callback?next=/set-password`;
       const { error: resendError } =
         await adminClient.auth.admin.inviteUserByEmail(email, {
           data: {
@@ -176,7 +175,6 @@ export async function inviteContactToPortal(
     };
   }
 
-  const redirectTo = `${requestOrigin}/auth/callback?next=/set-password`;
   let authUser: User | null = null;
 
   const { data: inviteData, error: inviteError } =

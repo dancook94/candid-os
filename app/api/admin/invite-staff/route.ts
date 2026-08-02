@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { verifySuperAdmin } from "@/lib/admin-auth";
+import { buildInvitePasswordSetupRedirect } from "@/lib/auth-invite-redirect";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { isInviteableStaffRole } from "@/lib/staff-roles";
@@ -50,7 +51,7 @@ export async function POST(request: Request) {
   }
 
   const requestUrl = new URL(request.url);
-  const redirectTo = `${requestUrl.origin}/auth/callback?next=/set-password`;
+  const redirectTo = buildInvitePasswordSetupRedirect(requestUrl.origin);
 
   let adminClient;
 
