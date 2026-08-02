@@ -13,6 +13,10 @@ import {
   formatSupabaseStorageError,
   QUOTE_ITEM_IMAGES_BUCKET,
 } from "@/lib/quote-item-images";
+import {
+  isPermanentDeleteConfirmationValid,
+  permanentDeleteConfirmationErrorMessage,
+} from "@/lib/permanent-delete-confirmation";
 
 type LoadedAdminQuoteContext = {
   quote: {
@@ -218,22 +222,11 @@ export async function permanentlyDeleteQuoteAsAdmin(
     return { ok: false, status: 404, message: "Quote not found." };
   }
 
-  const standardConfirmation = `Q-${quote.quote_number}`;
-  const acceptedConfirmation = `DELETE Q-${quote.quote_number}`;
-
-  if (quote.status === "accepted") {
-    if (confirmation !== acceptedConfirmation) {
-      return {
-        ok: false,
-        status: 400,
-        message: `Type ${acceptedConfirmation} to permanently delete this accepted quote.`,
-      };
-    }
-  } else if (confirmation !== standardConfirmation) {
+  if (!isPermanentDeleteConfirmationValid(confirmation)) {
     return {
       ok: false,
       status: 400,
-      message: `Type ${standardConfirmation} to confirm permanent deletion.`,
+      message: permanentDeleteConfirmationErrorMessage(),
     };
   }
 
@@ -267,7 +260,13 @@ export async function permanentlyDeleteQuoteAsAdmin(
 
 export async function deleteBrokenQuoteAsAdmin(
   supabase: SupabaseClient,
-  { quoteId }: { quoteId: string }
+  {
+    quoteId,
+    confirmation,
+  }: {
+    quoteId: string;
+    confirmation: string;
+  }
 ): Promise<DeleteBrokenQuoteResult> {
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
@@ -281,6 +280,14 @@ export async function deleteBrokenQuoteAsAdmin(
 
   if (!quote) {
     return { ok: false, status: 404, message: "Quote not found." };
+  }
+
+  if (!isPermanentDeleteConfirmationValid(confirmation)) {
+    return {
+      ok: false,
+      status: 400,
+      message: permanentDeleteConfirmationErrorMessage(),
+    };
   }
 
   const { count, error: versionCountError } = await supabase
@@ -309,14 +316,6 @@ export async function deleteBrokenQuoteAsAdmin(
   }
 
   return { ok: true };
-}
-
-export function buildPermanentDeleteConfirmationHint(quoteNumber: number, quoteStatus: string) {
-  if (quoteStatus === "accepted") {
-    return `DELETE Q-${quoteNumber}`;
-  }
-
-  return `Q-${quoteNumber}`;
 }
 
 export { QUOTE_ITEM_IMAGES_BUCKET };

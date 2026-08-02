@@ -55,7 +55,7 @@ export function DeleteOpportunitySection({
 }: DeleteOpportunitySectionProps) {
   const router = useRouter();
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmationTitle, setConfirmationTitle] = useState("");
+  const [confirmationText, setConfirmationText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -68,7 +68,7 @@ export function DeleteOpportunitySection({
       const response = await fetch(`/api/admin/opportunities/${opportunityId}/delete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirmationTitle: confirmationTitle.trim() }),
+        body: JSON.stringify({ confirmationTitle: confirmationText.trim() }),
       });
       const payload = (await response.json()) as { error?: string };
 
@@ -167,7 +167,7 @@ export function DeleteOpportunitySection({
             disabled={!canDelete || isSubmitting}
             onClick={() => {
               setError("");
-              setConfirmationTitle("");
+              setConfirmationText("");
               setConfirmOpen(true);
             }}
           >
@@ -192,14 +192,8 @@ export function DeleteOpportunitySection({
             cannot be undone.
           </>
         }
-        confirmationLabel={
-          <>
-            Type <span className="font-mono">{opportunityTitle}</span> to confirm
-          </>
-        }
-        confirmationValue={confirmationTitle}
-        confirmText={opportunityTitle}
-        onConfirmationChange={setConfirmationTitle}
+        confirmationValue={confirmationText}
+        onConfirmationChange={setConfirmationText}
         confirmLabel="Delete permanently"
         confirmingLabel="Deleting..."
         isSubmitting={isSubmitting}

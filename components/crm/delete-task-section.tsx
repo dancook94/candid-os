@@ -43,7 +43,7 @@ function formatDueDate(dueAt: string | null) {
 export function DeleteTaskSection({ task }: DeleteTaskSectionProps) {
   const router = useRouter();
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmationTitle, setConfirmationTitle] = useState("");
+  const [confirmationText, setConfirmationText] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const isCompleted = task.status === "completed";
@@ -56,7 +56,7 @@ export function DeleteTaskSection({ task }: DeleteTaskSectionProps) {
       const response = await fetch(`/api/admin/tasks/${task.taskId}/delete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirmationTitle: confirmationTitle.trim() }),
+        body: JSON.stringify({ confirmationTitle: confirmationText.trim() }),
       });
       const payload = (await response.json()) as { error?: string };
 
@@ -102,7 +102,7 @@ export function DeleteTaskSection({ task }: DeleteTaskSectionProps) {
             disabled={isSubmitting}
             onClick={() => {
               setError("");
-              setConfirmationTitle("");
+              setConfirmationText("");
               setConfirmOpen(true);
             }}
           >
@@ -186,14 +186,8 @@ export function DeleteTaskSection({ task }: DeleteTaskSectionProps) {
             </dl>
           </div>
         }
-        confirmationLabel={
-          <>
-            Type <span className="font-mono">{task.title}</span> to confirm
-          </>
-        }
-        confirmationValue={confirmationTitle}
-        confirmText={task.title}
-        onConfirmationChange={setConfirmationTitle}
+        confirmationValue={confirmationText}
+        onConfirmationChange={setConfirmationText}
         confirmLabel="Delete permanently"
         confirmingLabel="Deleting..."
         isSubmitting={isSubmitting}

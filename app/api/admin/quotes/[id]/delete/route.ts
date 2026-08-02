@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { permanentlyDeleteQuoteAsAdmin } from "@/lib/admin-quote-actions";
 import { verifyApprovedAdmin } from "@/lib/admin-auth";
+import { permanentDeleteConfirmationErrorMessage } from "@/lib/permanent-delete-confirmation";
 import { createClient } from "@/lib/supabase/server";
 
 type RouteContext = {
@@ -37,7 +38,7 @@ export async function POST(request: Request, context: RouteContext) {
 
   if (!confirmation) {
     return NextResponse.json(
-      { error: "Confirmation text is required." },
+      { error: permanentDeleteConfirmationErrorMessage() },
       { status: 400 }
     );
   }

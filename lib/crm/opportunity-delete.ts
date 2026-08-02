@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  isPermanentDeleteConfirmationValid,
+  permanentDeleteConfirmationErrorMessage,
+} from "@/lib/permanent-delete-confirmation";
+
 import { getStaffDisplayName } from "@/lib/crm/crm-staff";
 import {
   loadTaskAssigneesByTaskIds,
@@ -146,11 +151,11 @@ export async function permanentlyDeleteOpportunityAsAdmin(
     companyId: string;
   }
 ): Promise<PermanentDeleteOpportunityResult> {
-  if (confirmationTitle.trim() !== opportunityTitle.trim()) {
+  if (!isPermanentDeleteConfirmationValid(confirmationTitle)) {
     return {
       ok: false,
       status: 400,
-      message: "Confirmation text must match the opportunity title exactly.",
+      message: permanentDeleteConfirmationErrorMessage(),
     };
   }
 

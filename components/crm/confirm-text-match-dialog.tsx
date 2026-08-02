@@ -11,14 +11,17 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  isPermanentDeleteConfirmationValid,
+  PERMANENT_DELETE_CONFIRMATION_LABEL,
+  PERMANENT_DELETE_CONFIRMATION_PLACEHOLDER,
+} from "@/lib/permanent-delete-confirmation";
 
 type ConfirmTextMatchDialogProps = {
   open: boolean;
   title: string;
   description: ReactNode;
-  confirmationLabel: ReactNode;
   confirmationValue: string;
-  confirmText: string;
   onConfirmationChange: (value: string) => void;
   confirmLabel: string;
   confirmingLabel?: string;
@@ -32,9 +35,7 @@ export function ConfirmTextMatchDialog({
   open,
   title,
   description,
-  confirmationLabel,
   confirmationValue,
-  confirmText,
   onConfirmationChange,
   confirmLabel,
   confirmingLabel = "Processing...",
@@ -47,7 +48,7 @@ export function ConfirmTextMatchDialog({
     return null;
   }
 
-  const matches = confirmationValue.trim() === confirmText.trim();
+  const matches = isPermanentDeleteConfirmationValid(confirmationValue);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -84,14 +85,14 @@ export function ConfirmTextMatchDialog({
               htmlFor="confirm-text-match-input"
               className="text-sm font-medium text-foreground"
             >
-              {confirmationLabel}
+              {PERMANENT_DELETE_CONFIRMATION_LABEL}
             </label>
             <Input
               id="confirm-text-match-input"
               value={confirmationValue}
               disabled={isSubmitting}
               onChange={(event) => onConfirmationChange(event.target.value)}
-              placeholder={confirmText}
+              placeholder={PERMANENT_DELETE_CONFIRMATION_PLACEHOLDER}
               autoComplete="off"
             />
           </div>

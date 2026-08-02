@@ -3,7 +3,6 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { buildPermanentDeleteConfirmationHint } from "@/lib/admin-quote-actions";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -14,6 +13,11 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatGbp } from "@/lib/format-currency";
+import {
+  isPermanentDeleteConfirmationValid,
+  PERMANENT_DELETE_CONFIRMATION_LABEL,
+  PERMANENT_DELETE_CONFIRMATION_PLACEHOLDER,
+} from "@/lib/permanent-delete-confirmation";
 
 type AdminQuoteManagementActionsProps = {
   quoteId: string;
@@ -44,11 +48,7 @@ export function AdminQuoteManagementActions({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const deleteHint = buildPermanentDeleteConfirmationHint(
-    quoteNumber,
-    quoteStatus
-  );
-  const deleteMatches = deleteConfirmation.trim() === deleteHint;
+  const deleteMatches = isPermanentDeleteConfirmationValid(deleteConfirmation);
 
   async function handleDecisionConfirm() {
     if (!confirmAction || confirmAction === "delete") {
@@ -186,15 +186,14 @@ export function AdminQuoteManagementActions({
               htmlFor="delete-confirmation"
               className="text-sm font-medium text-foreground"
             >
-              Type{" "}
-              <span className="font-mono">{deleteHint}</span> to confirm
+              {PERMANENT_DELETE_CONFIRMATION_LABEL}
             </label>
             <Input
               id="delete-confirmation"
               value={deleteConfirmation}
               disabled={isSubmitting}
               onChange={(event) => setDeleteConfirmation(event.target.value)}
-              placeholder={deleteHint}
+              placeholder={PERMANENT_DELETE_CONFIRMATION_PLACEHOLDER}
               autoComplete="off"
             />
           </div>

@@ -5,6 +5,10 @@ import {
   loadTaskAssigneeIds,
   loadTaskAssigneesByTaskIds,
 } from "@/lib/crm/task-assignees";
+import {
+  isPermanentDeleteConfirmationValid,
+  permanentDeleteConfirmationErrorMessage,
+} from "@/lib/permanent-delete-confirmation";
 
 export type PermanentDeleteTaskResult =
   | { ok: true }
@@ -76,11 +80,11 @@ export async function permanentlyDeleteTaskAsAdmin(
     quoteId: string | null;
   }
 ): Promise<PermanentDeleteTaskResult> {
-  if (confirmationTitle.trim() !== taskTitle.trim()) {
+  if (!isPermanentDeleteConfirmationValid(confirmationTitle)) {
     return {
       ok: false,
       status: 400,
-      message: "Confirmation text must match the task title exactly.",
+      message: permanentDeleteConfirmationErrorMessage(),
     };
   }
 
