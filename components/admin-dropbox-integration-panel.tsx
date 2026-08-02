@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { StatusBadge } from "@/components/status-badge";
@@ -13,6 +14,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type { DropboxConnectionStatus } from "@/lib/dropbox/connection-status";
+import { clearDropboxPendingSetup } from "@/lib/dropbox/clear-pending-setup";
 import { maskDropboxRefreshToken, type DropboxPendingOAuthResult } from "@/lib/dropbox/oauth";
 
 type AdminDropboxIntegrationPanelProps = {
@@ -45,12 +47,36 @@ export function AdminDropboxIntegrationPanel({
   initialError,
   initialSetupPending,
 }: AdminDropboxIntegrationPanelProps) {
+  const router = useRouter();
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [isClearingSetup, setIsClearingSetup] = useState(false);
+  const [clearSetupError, setClearSetupError] = useState<string | null>(null);
 
   async function copyToClipboard(value: string, field: string) {
     await navigator.clipboard.writeText(value);
     setCopiedField(field);
     window.setTimeout(() => setCopiedField(null), 2000);
+  }
+
+  async function handleClearPendingSetup() {
+    setClearSetupError(null);
+    setIsClearingSetup(true);
+
+    try {
+      const result = await clearDropboxPendingSetup();
+
+      if (!result.ok) {
+        setClearSetupError(result.error ?? "Unable to clear setup token.");
+        setIsClearingSetup(false);
+        return;
+      }
+
+      setIsClearingSetup(false);
+      router.refresh();
+    } catch {
+      setClearSetupError("Unable to clear setup token.");
+      setIsClearingSetup(false);
+    }
   }
 
   return (
@@ -235,6 +261,30 @@ DROPBOX_ROOT_FOLDER=${pendingSetup.rootFolder}`}
                 the Dropbox root folder.
               </p>
             </div>
+
+            {canManage ? (
+              <div className="flex flex-wrap gap-3">
+                <Button
+                  type="button"
+                  disabled={isClearingSetup}
+                  onClick={() => void handleClearPendingSetup()}
+                >
+                  {isClearingSetup ? "Clearing..." : "Done"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={isClearingSetup}
+                  onClick={() => void handleClearPendingSetup()}
+                >
+                  Clear setup token
+                </Button>
+              </div>
+            ) : null}
+
+            {clearSetupError ? (
+              <p className="text-sm text-red-600">{clearSetupError}</p>
+            ) : null}
           </CardContent>
         </Card>
       ) : initialSetupPending ? (

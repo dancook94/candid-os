@@ -9,12 +9,13 @@ import {
   DROPBOX_OAUTH_STATE_COOKIE,
   DropboxOAuthError,
   exchangeDropboxAuthorizationCode,
+  getDropboxOAuthCookieOptions,
   logDropboxOperationFailure,
   usersGetCurrentAccount,
 } from "@/lib/dropbox/oauth";
 import { createClient } from "@/lib/supabase/server";
 
-function redirectToSettings(
+function buildSettingsRedirect(
   params: Record<string, string | undefined>,
   requestUrl: string
 ) {
@@ -49,17 +50,19 @@ export async function GET(request: Request) {
   const cookieStore = await cookies();
   const expectedState = cookieStore.get(DROPBOX_OAUTH_STATE_COOKIE)?.value;
 
-  cookieStore.delete(DROPBOX_OAUTH_STATE_COOKIE);
-
   if (error) {
-    return redirectToSettings({ error }, requestUrl.origin);
+    const response = buildSettingsRedirect({ error }, requestUrl.origin);
+    response.cookies.delete(DROPBOX_OAUTH_STATE_COOKIE);
+    return response;
   }
 
   if (!code || !state || !expectedState || state !== expectedState) {
-    return redirectToSettings(
+    const response = buildSettingsRedirect(
       { error: "Dropbox authorization was invalid or expired. Please try again." },
       requestUrl.origin
     );
+    response.cookies.delete(DROPBOX_OAUTH_STATE_COOKIE);
+    return response;
   }
 
   try {
@@ -68,7 +71,9 @@ export async function GET(request: Request) {
     const rootFolder =
       process.env.DROPBOX_ROOT_FOLDER?.trim() || DROPBOX_DEFAULT_ROOT_FOLDER;
 
-    cookieStore.set(
+    const response = buildSettingsRedirect({ setup: "pending" }, requestUrl.origin);
+    response.cookies.delete(DROPBOX_OAUTH_STATE_COOKIE);
+    response.cookies.set(
       DROPBOX_OAUTH_PENDING_COOKIE,
       buildPendingOAuthCookieValue({
         refreshToken: tokenResult.refresh_token!,
@@ -77,13 +82,7 @@ export async function GET(request: Request) {
         connectedAt: new Date().toISOString(),
         rootFolder,
       }),
-      {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 10 * 60,
-        path: "/",
-      }
+      getDropboxOAuthCookieOptions()
     );
 
     if (process.env.NODE_ENV === "development") {
@@ -96,7 +95,7 @@ export async function GET(request: Request) {
       });
     }
 
-    return redirectToSettings({ setup: "pending" }, requestUrl.origin);
+    return response;
   } catch (callbackError) {
     if (callbackError instanceof DropboxOAuthError && callbackError.details) {
       logDropboxOperationFailure(callbackError.details);
@@ -115,6 +114,8 @@ export async function GET(request: Request) {
         ? callbackError.message
         : "Dropbox authorization failed.";
 
-    return redirectToSettings({ error: message }, requestUrl.origin);
+    const response = buildSettingsRedirect({ error: message }, requestUrl.origin);
+    response.cookies.delete(DROPBOX_OAUTH_STATE_COOKIE);
+    return response;
   }
 }

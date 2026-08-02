@@ -40,10 +40,6 @@ export default async function DropboxIntegrationPage({
   const pendingValue = cookieStore.get(DROPBOX_OAUTH_PENDING_COOKIE)?.value;
   const pendingSetup = parsePendingOAuthCookieValue(pendingValue);
 
-  if (pendingSetup) {
-    cookieStore.delete(DROPBOX_OAUTH_PENDING_COOKIE);
-  }
-
   const connection = await getDropboxConnectionStatus();
 
   return (

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 
 import { verifySuperAdmin } from "@/lib/admin-auth";
 import {
   buildDropboxAuthorizeUrl,
   createDropboxOAuthState,
   DROPBOX_OAUTH_STATE_COOKIE,
+  getDropboxOAuthCookieOptions,
 } from "@/lib/dropbox/oauth";
 import { createClient } from "@/lib/supabase/server";
 
@@ -23,17 +23,15 @@ export async function GET() {
   try {
     const state = createDropboxOAuthState();
     const authorizeUrl = buildDropboxAuthorizeUrl(state);
-    const cookieStore = await cookies();
+    const response = NextResponse.redirect(authorizeUrl);
 
-    cookieStore.set(DROPBOX_OAUTH_STATE_COOKIE, state, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "lax",
-      maxAge: 10 * 60,
-      path: "/",
-    });
+    response.cookies.set(
+      DROPBOX_OAUTH_STATE_COOKIE,
+      state,
+      getDropboxOAuthCookieOptions()
+    );
 
-    return NextResponse.redirect(authorizeUrl);
+    return response;
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unable to start Dropbox authorization.";

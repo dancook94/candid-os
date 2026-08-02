@@ -384,6 +384,16 @@ export type DropboxPendingOAuthResult = {
 export const DROPBOX_OAUTH_STATE_COOKIE = "dropbox_oauth_state";
 export const DROPBOX_OAUTH_PENDING_COOKIE = "dropbox_oauth_pending";
 
+export function getDropboxOAuthCookieOptions(maxAge = 10 * 60) {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax" as const,
+    maxAge,
+    path: "/",
+  };
+}
+
 export function buildPendingOAuthCookieValue(result: DropboxPendingOAuthResult) {
   return encodeSignedPayload({
     ...result,
