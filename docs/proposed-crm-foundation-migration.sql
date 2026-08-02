@@ -69,7 +69,7 @@ EXCEPTION
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 2. Shared helpers
+-- 2. Helper functions (no dependency on opportunities tables)
 -- ---------------------------------------------------------------------------
 
 CREATE OR REPLACE FUNCTION public.is_approved_crm_staff()
@@ -118,32 +118,6 @@ AS $$
       AND p.account_status = 'approved'
       AND p.user_role IN ('super_admin', 'admin', 'sales')
   );
-$$;
-
-CREATE OR REPLACE FUNCTION public.can_access_opportunity(target_opportunity_id uuid)
-RETURNS boolean
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT
-    public.is_approved_crm_admin()
-    OR EXISTS (
-      SELECT 1
-      FROM public.opportunities o
-      WHERE o.id = target_opportunity_id
-        AND (
-          o.owner_profile_id = auth.uid()
-          OR o.created_by = auth.uid()
-        )
-    )
-    OR EXISTS (
-      SELECT 1
-      FROM public.opportunity_members om
-      WHERE om.opportunity_id = target_opportunity_id
-        AND om.profile_id = auth.uid()
-    );
 $$;
 
 CREATE OR REPLACE FUNCTION public.set_updated_at()
@@ -229,29 +203,6 @@ CREATE INDEX IF NOT EXISTS opportunities_active_pipeline_idx
   ON public.opportunities (stage, updated_at DESC)
   WHERE stage NOT IN ('won', 'lost');
 
-DROP TRIGGER IF EXISTS opportunities_set_updated_at ON public.opportunities;
-CREATE TRIGGER opportunities_set_updated_at
-  BEFORE UPDATE ON public.opportunities
-  FOR EACH ROW
-  EXECUTE FUNCTION public.set_updated_at();
-
-CREATE OR REPLACE FUNCTION public.validate_opportunity_staff_assignments()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  PERFORM public.validate_crm_staff_profile_id(NEW.owner_profile_id);
-  PERFORM public.validate_crm_staff_profile_id(NEW.created_by);
-  RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS opportunities_validate_staff_assignments ON public.opportunities;
-CREATE TRIGGER opportunities_validate_staff_assignments
-  BEFORE INSERT OR UPDATE OF owner_profile_id, created_by ON public.opportunities
-  FOR EACH ROW
-  EXECUTE FUNCTION public.validate_opportunity_staff_assignments();
-
 -- ---------------------------------------------------------------------------
 -- 4. opportunity_members
 -- ---------------------------------------------------------------------------
@@ -268,6 +219,33 @@ COMMENT ON TABLE public.opportunity_members IS
 
 CREATE INDEX IF NOT EXISTS opportunity_members_profile_id_idx
   ON public.opportunity_members (profile_id);
+
+-- ---------------------------------------------------------------------------
+-- 5. Triggers on opportunities and opportunity_members
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.validate_opportunity_staff_assignments()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  PERFORM public.validate_crm_staff_profile_id(NEW.owner_profile_id);
+  PERFORM public.validate_crm_staff_profile_id(NEW.created_by);
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS opportunities_set_updated_at ON public.opportunities;
+CREATE TRIGGER opportunities_set_updated_at
+  BEFORE UPDATE ON public.opportunities
+  FOR EACH ROW
+  EXECUTE FUNCTION public.set_updated_at();
+
+DROP TRIGGER IF EXISTS opportunities_validate_staff_assignments ON public.opportunities;
+CREATE TRIGGER opportunities_validate_staff_assignments
+  BEFORE INSERT OR UPDATE OF owner_profile_id, created_by ON public.opportunities
+  FOR EACH ROW
+  EXECUTE FUNCTION public.validate_opportunity_staff_assignments();
 
 CREATE OR REPLACE FUNCTION public.validate_opportunity_member_profile()
 RETURNS trigger
@@ -297,7 +275,37 @@ CREATE TRIGGER opportunity_members_validate_profile
   EXECUTE FUNCTION public.validate_opportunity_member_profile();
 
 -- ---------------------------------------------------------------------------
--- 5. tasks
+-- 6. can_access_opportunity (depends on opportunities + opportunity_members)
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.can_access_opportunity(target_opportunity_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT
+    public.is_approved_crm_admin()
+    OR EXISTS (
+      SELECT 1
+      FROM public.opportunities o
+      WHERE o.id = target_opportunity_id
+        AND (
+          o.owner_profile_id = auth.uid()
+          OR o.created_by = auth.uid()
+        )
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM public.opportunity_members om
+      WHERE om.opportunity_id = target_opportunity_id
+        AND om.profile_id = auth.uid()
+    );
+$$;
+
+-- ---------------------------------------------------------------------------
+-- 7. tasks
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS public.tasks (
@@ -403,7 +411,7 @@ CREATE TRIGGER tasks_validate_relationships
   EXECUTE FUNCTION public.validate_task_relationships();
 
 -- ---------------------------------------------------------------------------
--- 6. opportunity_notes
+-- 8. opportunity_notes
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS public.opportunity_notes (
@@ -427,7 +435,7 @@ CREATE TRIGGER opportunity_notes_set_updated_at
   EXECUTE FUNCTION public.set_updated_at();
 
 -- ---------------------------------------------------------------------------
--- 7. opportunity_activity
+-- 9. opportunity_activity
 -- ---------------------------------------------------------------------------
 
 CREATE TABLE IF NOT EXISTS public.opportunity_activity (
@@ -449,7 +457,7 @@ CREATE INDEX IF NOT EXISTS opportunity_activity_type_idx
   ON public.opportunity_activity (activity_type);
 
 -- ---------------------------------------------------------------------------
--- 8. Link existing quotation tables
+-- 10. Link existing quotation tables
 -- ---------------------------------------------------------------------------
 
 ALTER TABLE public.quote_requests
@@ -457,14 +465,6 @@ ALTER TABLE public.quote_requests
 
 ALTER TABLE public.quotes
   ADD COLUMN IF NOT EXISTS opportunity_id uuid REFERENCES public.opportunities(id) ON DELETE SET NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS quote_requests_opportunity_id_unique
-  ON public.quote_requests (opportunity_id)
-  WHERE opportunity_id IS NOT NULL;
-
-CREATE UNIQUE INDEX IF NOT EXISTS quotes_opportunity_id_unique
-  ON public.quotes (opportunity_id)
-  WHERE opportunity_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS quote_requests_opportunity_id_idx
   ON public.quote_requests (opportunity_id);
@@ -504,7 +504,7 @@ CREATE TRIGGER quotes_validate_opportunity_link
   EXECUTE FUNCTION public.validate_quote_opportunity_link();
 
 -- ---------------------------------------------------------------------------
--- 9. Row level security
+-- 11. Row level security
 -- ---------------------------------------------------------------------------
 
 ALTER TABLE public.opportunities ENABLE ROW LEVEL SECURITY;
