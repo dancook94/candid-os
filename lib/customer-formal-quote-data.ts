@@ -2,6 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
 import { resolveCustomerQuoteStatus } from "@/lib/quote-customer-status";
+import {
+  getQuoteDecisionState,
+  type QuoteDecisionState,
+} from "@/lib/quote-status-response";
 
 export type { LinkedQuoteRequestDeadlineLoadResult } from "@/lib/customer-formal-quote-deadline";
 export { formatApprovedQuoteDeadline, loadLinkedQuoteRequestDeadline } from "@/lib/customer-formal-quote-deadline";
@@ -27,6 +31,7 @@ export type CustomerFormalQuoteData = {
   versionNumber: number;
   currentVersion: number;
   canRespondToQuote: boolean;
+  decisionState: QuoteDecisionState;
   dateSent: string | null;
   expiryDate: string | null;
   paymentTermsDays: number | null;
@@ -97,7 +102,7 @@ export async function fetchCustomerFormalQuote(
     supabase
       .from("quote_versions")
       .select(
-        "id, version_number, version_status, created_at, expiry_date, payment_terms_days, introduction, customer_notes, subtotal, vat_amount, total"
+        "id, version_number, version_status, created_at, expiry_date, payment_terms_days, introduction, customer_notes, subtotal, vat_amount, total, accepted_at, declined_at"
       )
       .eq("quote_id", formalQuote.id)
       .order("version_number", { ascending: false }),
@@ -150,6 +155,15 @@ export async function fetchCustomerFormalQuote(
     formalQuote
   );
 
+  const decisionState = getQuoteDecisionState({
+    quoteStatus: formalQuote.status,
+    versionStatus: displayVersion.version_status,
+    versionNumber: displayVersion.version_number,
+    currentVersion: formalQuote.current_version,
+    acceptedAt: displayVersion.accepted_at,
+    declinedAt: displayVersion.declined_at,
+  });
+
   return {
     quoteId: formalQuote.id,
     quoteNumber: formalQuote.quote_number,
@@ -158,10 +172,8 @@ export async function fetchCustomerFormalQuote(
     versionStatus: displayVersion.version_status,
     versionNumber: displayVersion.version_number,
     currentVersion: formalQuote.current_version,
-    canRespondToQuote:
-      formalQuote.status === "sent" &&
-      displayVersion.version_status === "sent" &&
-      displayVersion.version_number === formalQuote.current_version,
+    canRespondToQuote: decisionState.canRespond,
+    decisionState,
     dateSent: displayVersion.created_at,
     expiryDate: displayVersion.expiry_date,
     paymentTermsDays: displayVersion.payment_terms_days,

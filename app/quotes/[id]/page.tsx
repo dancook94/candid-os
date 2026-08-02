@@ -255,7 +255,7 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
           projectName={formalQuote.projectName}
           quoteStatus={formalQuote.quoteStatus}
           versionNumber={formalQuote.versionNumber}
-          canRespondToQuote={formalQuote.canRespondToQuote}
+          decisionState={formalQuote.decisionState}
           dateSent={formalQuote.dateSent}
           expiryDate={formalQuote.expiryDate}
           paymentTermsDays={formalQuote.paymentTermsDays}

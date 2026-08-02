@@ -51,7 +51,128 @@ export function isQuoteAwaitingDecision({
     return false;
   }
 
+  if (
+    quoteStatus === "accepted" ||
+    versionStatus === "accepted" ||
+    quoteStatus === "declined" ||
+    versionStatus === "declined"
+  ) {
+    return false;
+  }
+
   return quoteStatus === "sent" && versionStatus === "sent";
+}
+
+export type QuoteDecisionState =
+  | {
+      kind: "awaiting_decision";
+      canRespond: true;
+    }
+  | {
+      kind: "accepted";
+      canRespond: false;
+      decidedAt: string | null;
+    }
+  | {
+      kind: "declined";
+      canRespond: false;
+      decidedAt: string | null;
+    }
+  | {
+      kind: "expired";
+      canRespond: false;
+    }
+  | {
+      kind: "superseded";
+      canRespond: false;
+    }
+  | {
+      kind: "draft";
+      canRespond: false;
+    }
+  | {
+      kind: "unavailable";
+      canRespond: false;
+      reason: string;
+    };
+
+export function getQuoteDecisionState({
+  quoteStatus,
+  versionStatus,
+  versionNumber,
+  currentVersion,
+  acceptedAt = null,
+  declinedAt = null,
+}: {
+  quoteStatus: string;
+  versionStatus: string;
+  versionNumber: number;
+  currentVersion: number;
+  acceptedAt?: string | null;
+  declinedAt?: string | null;
+}): QuoteDecisionState {
+  const normalizedQuoteStatus = quoteStatus.toLowerCase();
+  const normalizedVersionStatus = versionStatus.toLowerCase();
+
+  if (
+    normalizedQuoteStatus === "accepted" ||
+    normalizedVersionStatus === "accepted"
+  ) {
+    return {
+      kind: "accepted",
+      canRespond: false,
+      decidedAt: acceptedAt,
+    };
+  }
+
+  if (
+    normalizedQuoteStatus === "declined" ||
+    normalizedVersionStatus === "declined"
+  ) {
+    return {
+      kind: "declined",
+      canRespond: false,
+      decidedAt: declinedAt,
+    };
+  }
+
+  if (
+    isQuoteAwaitingDecision({
+      quoteStatus,
+      versionStatus,
+      versionNumber,
+      currentVersion,
+    })
+  ) {
+    return {
+      kind: "awaiting_decision",
+      canRespond: true,
+    };
+  }
+
+  if (
+    normalizedQuoteStatus === "expired" ||
+    normalizedVersionStatus === "expired"
+  ) {
+    return { kind: "expired", canRespond: false };
+  }
+
+  if (normalizedVersionStatus === "superseded") {
+    return { kind: "superseded", canRespond: false };
+  }
+
+  if (
+    normalizedQuoteStatus === "draft" ||
+    normalizedVersionStatus === "draft"
+  ) {
+    return { kind: "draft", canRespond: false };
+  }
+
+  return {
+    kind: "unavailable",
+    canRespond: false,
+    reason: quoteResponseConflictMessage(quoteStatus, versionStatus),
+  };
 }
 
 export function quoteResponseConflictMessage(
@@ -102,7 +223,32 @@ export async function applyQuoteStatusResponse(
   }
 
   if (!updatedQuote) {
-    return responseError(409, "This quote has already been actioned.");
+    const { data: currentQuote } = await supabase
+      .from("quotes")
+      .select("status")
+      .eq("id", context.quote.id)
+      .maybeSingle();
+
+    const { data: currentVersion } = await supabase
+      .from("quote_versions")
+      .select("version_status")
+      .eq("id", context.version.id)
+      .maybeSingle();
+
+    if (currentQuote && currentVersion) {
+      return responseError(
+        409,
+        quoteResponseConflictMessage(
+          currentQuote.status,
+          currentVersion.version_status
+        )
+      );
+    }
+
+    return responseError(
+      409,
+      "This quote could not be updated. It may already have been actioned."
+    );
   }
 
   const versionUpdate =

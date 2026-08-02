@@ -3,12 +3,14 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ensureJobForAcceptedQuote } from "@/lib/jobs/create-from-quote";
 import {
   applyQuoteStatusResponse,
+  getQuoteDecisionState,
   isQuoteAwaitingDecision,
   quoteResponseConflictMessage,
   type QuoteResponseAction,
   type QuoteStatusResponseResult,
 } from "@/lib/quote-status-response";
 import { syncOpportunityFromQuoteEvent } from "@/lib/crm/opportunity-stage-sync";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 type LoadedQuoteContext = {
   quote: {
@@ -124,13 +126,14 @@ export async function respondToCustomerQuote(
     return loaded;
   }
 
-  const result = await applyQuoteStatusResponse(supabase, loaded, action);
+  const adminClient = createAdminClient();
+  const result = await applyQuoteStatusResponse(adminClient, loaded, action);
 
   if (!result.ok) {
     return result;
   }
 
-  await syncOpportunityFromQuoteEvent(supabase, {
+  await syncOpportunityFromQuoteEvent(adminClient, {
     quoteId,
     event: action === "accept" ? "quote_accepted" : "quote_declined",
     changedBy: userId,
@@ -160,16 +163,22 @@ export function canCustomerRespondToQuote({
   versionStatus,
   versionNumber,
   currentVersion,
+  acceptedAt = null,
+  declinedAt = null,
 }: {
   quoteStatus: string;
   versionStatus: string;
   versionNumber: number;
   currentVersion: number;
+  acceptedAt?: string | null;
+  declinedAt?: string | null;
 }) {
-  return isQuoteAwaitingDecision({
+  return getQuoteDecisionState({
     quoteStatus,
     versionStatus,
     versionNumber,
     currentVersion,
-  });
+    acceptedAt,
+    declinedAt,
+  }).canRespond;
 }

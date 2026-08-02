@@ -19,6 +19,7 @@ import {
   mapCustomerQuoteStatusToBadge,
 } from "@/lib/customer-quote-request";
 import { formatPaymentTermsLabel } from "@/lib/payment-terms";
+import type { QuoteDecisionState } from "@/lib/quote-status-response";
 
 const CANDID_YELLOW = "#fbd12c";
 
@@ -41,7 +42,7 @@ export type CustomerFormalQuoteViewProps = {
   projectName: string;
   quoteStatus: string;
   versionNumber: number;
-  canRespondToQuote: boolean;
+  decisionState: QuoteDecisionState;
   dateSent: string | null;
   expiryDate: string | null;
   paymentTermsDays: number | null;
@@ -113,6 +114,93 @@ function MetaBadge({ label, value }: { label: string; value: string }) {
   );
 }
 
+function formatDecisionDate(dateString: string | null) {
+  if (!dateString) {
+    return null;
+  }
+
+  return new Date(dateString).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function CustomerQuoteDecisionSection({
+  quoteId,
+  quoteNumber,
+  versionNumber,
+  total,
+  decisionState,
+}: {
+  quoteId: string;
+  quoteNumber: number;
+  versionNumber: number;
+  total: number;
+  decisionState: QuoteDecisionState;
+}) {
+  if (decisionState.kind === "awaiting_decision") {
+    return (
+      <CustomerQuoteActions
+        quoteId={quoteId}
+        quoteNumber={quoteNumber}
+        versionNumber={versionNumber}
+        total={total}
+      />
+    );
+  }
+
+  if (decisionState.kind === "accepted") {
+    const decidedOn = formatDecisionDate(decisionState.decidedAt);
+
+    return (
+      <section
+        aria-label="Quote decision"
+        className="mb-8 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900"
+      >
+        <p className="font-semibold">Quotation accepted</p>
+        <p className="mt-1">
+          You accepted Q-{quoteNumber}, Version {versionNumber}.
+          {decidedOn ? ` Accepted on ${decidedOn}.` : ""} Candid Creative has
+          been notified.
+        </p>
+      </section>
+    );
+  }
+
+  if (decisionState.kind === "declined") {
+    const decidedOn = formatDecisionDate(decisionState.decidedAt);
+
+    return (
+      <section
+        aria-label="Quote decision"
+        className="mb-8 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-900"
+      >
+        <p className="font-semibold">Quotation declined</p>
+        <p className="mt-1">
+          You declined Q-{quoteNumber}, Version {versionNumber}.
+          {decidedOn ? ` Declined on ${decidedOn}.` : ""} Candid Creative has
+          been notified.
+        </p>
+      </section>
+    );
+  }
+
+  if (decisionState.kind === "unavailable") {
+    return (
+      <section
+        aria-label="Quote decision"
+        className="mb-8 rounded-2xl border border-neutral-200/80 bg-white px-5 py-4 text-sm text-neutral-700 shadow-sm"
+      >
+        <p className="font-semibold text-neutral-950">Decision unavailable</p>
+        <p className="mt-1">{decisionState.reason}</p>
+      </section>
+    );
+  }
+
+  return null;
+}
+
 export function CustomerFormalQuoteView({
   quoteId,
   showPdfDownload,
@@ -120,7 +208,7 @@ export function CustomerFormalQuoteView({
   projectName,
   quoteStatus,
   versionNumber,
-  canRespondToQuote,
+  decisionState,
   dateSent,
   expiryDate,
   paymentTermsDays,
@@ -140,8 +228,6 @@ export function CustomerFormalQuoteView({
   const backHref = linkedRequestId ? `/quotes/${linkedRequestId}` : "/quotes";
   const displayProjectName = formatQuoteProjectName(projectName);
   const statusLabel = getFormalQuoteStatusLabel(quoteStatus);
-  const showAcceptedConfirmation = quoteStatus === "accepted";
-  const showDeclinedConfirmation = quoteStatus === "declined";
 
   return (
     <div className="min-h-screen bg-[#fafafa] pb-16 pt-6 sm:pb-20 sm:pt-8">
@@ -216,32 +302,12 @@ export function CustomerFormalQuoteView({
           ) : null}
         </header>
 
-        {showAcceptedConfirmation ? (
-          <div className="mb-8 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-900">
-            <p className="font-semibold">Quotation accepted</p>
-            <p className="mt-1">
-              You accepted Q-{quoteNumber}, Version {versionNumber}. Candid Creative
-              has been notified.
-            </p>
-          </div>
-        ) : null}
-
-        {showDeclinedConfirmation ? (
-          <div className="mb-8 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm text-red-900">
-            <p className="font-semibold">Quotation declined</p>
-            <p className="mt-1">
-              You declined Q-{quoteNumber}, Version {versionNumber}. Candid Creative
-              has been notified.
-            </p>
-          </div>
-        ) : null}
-
-        <CustomerQuoteActions
+        <CustomerQuoteDecisionSection
           quoteId={quoteId}
           quoteNumber={quoteNumber}
           versionNumber={versionNumber}
           total={total}
-          canRespond={canRespondToQuote}
+          decisionState={decisionState}
         />
 
         <section

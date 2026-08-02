@@ -18,7 +18,6 @@ type CustomerQuoteActionsProps = {
   quoteNumber: number;
   versionNumber: number;
   total: number;
-  canRespond: boolean;
 };
 
 type ConfirmAction = "accept" | "decline" | null;
@@ -28,16 +27,11 @@ export function CustomerQuoteActions({
   quoteNumber,
   versionNumber,
   total,
-  canRespond,
 }: CustomerQuoteActionsProps) {
   const router = useRouter();
   const [confirmAction, setConfirmAction] = useState<ConfirmAction>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
-
-  if (!canRespond) {
-    return null;
-  }
 
   async function handleConfirm() {
     if (!confirmAction) {
@@ -59,6 +53,12 @@ export function CustomerQuoteActions({
       if (!response.ok) {
         setError(payload.error ?? "Unable to update this quotation.");
         setIsSubmitting(false);
+
+        if (response.status === 409) {
+          setConfirmAction(null);
+          router.refresh();
+        }
+
         return;
       }
 

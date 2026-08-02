@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
 import { respondToCustomerQuote } from "@/lib/customer-quote-response";
+import { revalidateQuoteWorkflowRoutes } from "@/lib/quote-route-revalidation";
+import { resolveQuoteRequestIdFromQuote } from "@/lib/quote-request-link";
 import { createClient } from "@/lib/supabase/server";
 
 type RouteContext = {
@@ -32,6 +34,13 @@ async function handleQuoteResponse(
   if (!result.ok) {
     return NextResponse.json({ error: result.message }, { status: result.status });
   }
+
+  const quoteRequestId = await resolveQuoteRequestIdFromQuote(supabase, id);
+
+  revalidateQuoteWorkflowRoutes({
+    quoteId: id,
+    quoteRequestId,
+  });
 
   return NextResponse.json({ success: true });
 }
