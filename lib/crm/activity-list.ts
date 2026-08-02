@@ -1,7 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
-  CRM_ACTIVITY_ACTOR_PROFILE_ID_FKEY,
   formatActivityRecordTypeLabel,
   pickActivityPrimaryLink,
   resolveActivityRecordType,
@@ -193,27 +192,37 @@ type ActivityRow = {
   task_id: string | null;
   actor_profile_id: string | null;
   created_at: string;
-  actor: {
-    id: string;
-    full_name: string | null;
-    user_role: string;
-  } | null;
 };
 
-type ActivityRowRaw = Omit<ActivityRow, "actor"> & {
-  actor:
-    | ActivityRow["actor"]
-    | NonNullable<ActivityRow["actor"]>[]
-    | null;
-};
+async function loadActivityActors(
+  supabase: SupabaseClient,
+  profileIds: string[]
+) {
+  if (profileIds.length === 0) {
+    return new Map<
+      string,
+      { name: string; role: string | null }
+    >();
+  }
 
-function normalizeActivityRow(row: ActivityRowRaw): ActivityRow {
-  const actor = Array.isArray(row.actor) ? (row.actor[0] ?? null) : row.actor;
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, full_name, user_role")
+    .in("id", profileIds);
 
-  return {
-    ...row,
-    actor,
-  };
+  if (error) {
+    throw new Error(error.message);
+  }
+
+  return new Map(
+    (data ?? []).map((profile) => [
+      profile.id,
+      {
+        name: getStaffDisplayName(profile),
+        role: profile.user_role ?? null,
+      },
+    ])
+  );
 }
 
 function parseGroupParam(value: string | undefined): ActivityListGroup {
@@ -423,26 +432,26 @@ function applyRecordTypeFilter<T extends {
   is: (column: string, value: null) => T;
 }>(query: T, record: ActivityListRecordFilter) {
   switch (record) {
-    case "quote":
-      return query.not("quote_id", "is", null);
     case "opportunity":
-      return query.not("opportunity_id", "is", null).is("quote_id", null);
+      return query.not("opportunity_id", "is", null);
+    case "quote":
+      return query.not("quote_id", "is", null).is("opportunity_id", null);
     case "task":
       return query
         .not("task_id", "is", null)
-        .is("quote_id", null)
-        .is("opportunity_id", null);
+        .is("opportunity_id", null)
+        .is("quote_id", null);
     case "contact":
       return query
         .not("contact_id", "is", null)
-        .is("quote_id", null)
         .is("opportunity_id", null)
+        .is("quote_id", null)
         .is("task_id", null);
     case "company":
       return query
         .not("company_id", "is", null)
-        .is("quote_id", null)
         .is("opportunity_id", null)
+        .is("quote_id", null)
         .is("task_id", null)
         .is("contact_id", null);
     default:
@@ -592,13 +601,17 @@ async function buildLinkedRecordLabels(
 
 function mapActivityRows(
   rows: ActivityRow[],
-  labels: Awaited<ReturnType<typeof buildLinkedRecordLabels>>
+  labels: Awaited<ReturnType<typeof buildLinkedRecordLabels>>,
+  actors: Map<string, { name: string; role: string | null }>
 ): ActivityListItem[] {
   return rows.map((row) => {
     const { recordType, primaryLink, secondaryLinks } = pickActivityPrimaryLink(
       row,
       labels
     );
+    const actor = row.actor_profile_id
+      ? actors.get(row.actor_profile_id)
+      : null;
 
     return {
       id: row.id,
@@ -608,12 +621,8 @@ function mapActivityRows(
       metadata: (row.metadata ?? {}) as Record<string, unknown>,
       created_at: row.created_at,
       actor_profile_id: row.actor_profile_id,
-      actor_name: row.actor
-        ? getStaffDisplayName(row.actor)
-        : row.actor_profile_id
-          ? null
-          : "System",
-      actor_role: row.actor?.user_role ?? null,
+      actor_name: actor?.name ?? (row.actor_profile_id ? null : "System"),
+      actor_role: actor?.role ?? null,
       company_id: row.company_id,
       company_name: row.company_id
         ? labels.companyNameById.get(row.company_id) ?? null
@@ -643,14 +652,11 @@ export async function fetchActivityList(
     ? await buildSearchOrFilter(supabase, filters.search)
     : null;
 
-  const actorSelect = `actor:profiles!${CRM_ACTIVITY_ACTOR_PROFILE_ID_FKEY}(id, full_name, user_role)`;
+  const actorSelect = `id, activity_type, description, metadata, company_id, contact_id, opportunity_id, quote_id, task_id, actor_profile_id, created_at`;
 
   let query = supabase
     .from("crm_activity")
-    .select(
-      `id, activity_type, description, metadata, company_id, contact_id, opportunity_id, quote_id, task_id, actor_profile_id, created_at, ${actorSelect}`,
-      { count: "exact" }
-    )
+    .select(actorSelect, { count: "exact" })
     .order("created_at", { ascending: filters.sort === "oldest" })
     .range(offset, offset + ACTIVITY_LIST_PAGE_SIZE - 1);
 
@@ -691,13 +697,40 @@ export async function fetchActivityList(
     };
   }
 
-  const rows = ((data ?? []) as ActivityRowRaw[]).map(normalizeActivityRow);
-  const labels = await buildLinkedRecordLabels(supabase, rows);
+  const rows = (data ?? []) as ActivityRow[];
+  const actorIds = [
+    ...new Set(
+      rows
+        .map((row) => row.actor_profile_id)
+        .filter((value): value is string => Boolean(value))
+    ),
+  ];
+
+  let labels: Awaited<ReturnType<typeof buildLinkedRecordLabels>>;
+  let actors: Map<string, { name: string; role: string | null }>;
+
+  try {
+    [labels, actors] = await Promise.all([
+      buildLinkedRecordLabels(supabase, rows),
+      loadActivityActors(supabase, actorIds),
+    ]);
+  } catch (enrichmentError) {
+    return {
+      items: [],
+      totalCount: 0,
+      hasMore: false,
+      queryError:
+        enrichmentError instanceof Error
+          ? enrichmentError.message
+          : "Unable to load activity details.",
+    };
+  }
+
   const totalCount = count ?? rows.length;
   const hasMore = offset + rows.length < totalCount;
 
   return {
-    items: mapActivityRows(rows, labels),
+    items: mapActivityRows(rows, labels, actors),
     totalCount,
     hasMore,
     queryError: null,

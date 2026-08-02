@@ -16,10 +16,15 @@ export type CreateCrmNoteInput = CrmRecordLinks & {
   createdBy: string;
 };
 
+export type CreateCrmNoteResult = {
+  noteId: string;
+  activityId: string;
+};
+
 export async function createCrmNote(
   supabase: SupabaseClient,
   input: CreateCrmNoteInput
-) {
+): Promise<CreateCrmNoteResult> {
   const body = input.body.trim();
 
   if (!body) {
@@ -55,19 +60,57 @@ export async function createCrmNote(
     .single();
 
   if (error || !note) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[crm note] insert failed:", error?.message ?? "Unknown error");
+    }
+
     throw new Error(error?.message ?? "Unable to create note.");
   }
 
-  await createCrmActivity(supabase, {
-    ...links,
-    activityType: CRM_ACTIVITY_TYPES.noteAdded,
-    description: `${formatCrmNoteTypeLabel(noteType)} added.`,
-    metadata: {
-      note_id: note.id,
-      note_type: noteType,
-    },
-    actorProfileId: input.createdBy,
-  });
+  if (process.env.NODE_ENV === "development") {
+    console.log("[crm note] inserted note id:", note.id);
+  }
 
-  return note.id;
+  try {
+    const activityId = await createCrmActivity(supabase, {
+      companyId: links.companyId,
+      contactId: links.contactId,
+      opportunityId: links.opportunityId,
+      quoteId: links.quoteId,
+      taskId: links.taskId,
+      validatedLinks: links,
+      activityType: CRM_ACTIVITY_TYPES.noteAdded,
+      description: `${formatCrmNoteTypeLabel(noteType)} added.`,
+      metadata: {
+        note_id: note.id,
+        note_type: noteType,
+      },
+      actorProfileId: input.createdBy,
+    });
+
+    return {
+      noteId: note.id,
+      activityId,
+    };
+  } catch (activityError) {
+    const { error: rollbackError } = await supabase
+      .from("crm_notes")
+      .delete()
+      .eq("id", note.id);
+
+    if (process.env.NODE_ENV === "development") {
+      console.error("[crm note] activity insert failed after note created:", {
+        noteId: note.id,
+        activityError:
+          activityError instanceof Error
+            ? activityError.message
+            : "Unable to create CRM activity.",
+        rollbackError: rollbackError?.message ?? null,
+      });
+    }
+
+    throw activityError instanceof Error
+      ? activityError
+      : new Error("Unable to create CRM activity.");
+  }
 }

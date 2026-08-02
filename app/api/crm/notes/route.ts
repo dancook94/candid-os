@@ -33,6 +33,7 @@ function revalidateNotePaths(body: CreateNoteBody) {
     revalidatePath(`/admin/tasks/${body.taskId}/edit`);
   }
   revalidatePath("/admin");
+  revalidatePath("/admin/activity");
 }
 
 export async function POST(request: Request) {
@@ -52,7 +53,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const noteId = await createCrmNote(supabase, {
+    const { noteId, activityId } = await createCrmNote(supabase, {
       body: body.body ?? "",
       noteType: body.noteType ?? "note",
       isPinned: body.isPinned ?? false,
@@ -66,12 +67,18 @@ export async function POST(request: Request) {
 
     revalidateNotePaths(body);
 
-    return NextResponse.json({ id: noteId });
+    return NextResponse.json({ id: noteId, activityId });
   } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unable to create note.";
+
+    if (process.env.NODE_ENV === "development") {
+      console.error("[crm notes api] create failed:", message);
+    }
+
     return NextResponse.json(
       {
-        error:
-          error instanceof Error ? error.message : "Unable to create note.",
+        error: message,
       },
       { status: 400 }
     );

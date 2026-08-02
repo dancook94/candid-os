@@ -46,12 +46,12 @@ export function formatActivityRecordTypeLabel(type: ActivityRecordType) {
 export function resolveActivityRecordType(
   row: ActivityLinkRow
 ): ActivityRecordType | null {
-  if (row.quote_id) {
-    return "quote";
-  }
-
   if (row.opportunity_id) {
     return "opportunity";
+  }
+
+  if (row.quote_id) {
+    return "quote";
   }
 
   if (row.task_id) {
@@ -128,10 +128,10 @@ export function pickActivityPrimaryLink(
   }
 
   const primaryId =
-    recordType === "quote"
-      ? row.quote_id
-      : recordType === "opportunity"
-        ? row.opportunity_id
+    recordType === "opportunity"
+      ? row.opportunity_id
+      : recordType === "quote"
+        ? row.quote_id
         : recordType === "task"
           ? row.task_id
           : recordType === "contact"
@@ -150,8 +150,8 @@ export function pickActivityPrimaryLink(
   const secondaryLinks: ActivityLinkedRecord[] = [];
 
   const candidates: Array<[ActivityRecordType, string | null]> = [
-    ["quote", row.quote_id],
     ["opportunity", row.opportunity_id],
+    ["quote", row.quote_id],
     ["task", row.task_id],
     ["contact", row.contact_id],
     ["company", row.company_id],

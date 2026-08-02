@@ -63,7 +63,6 @@ export default async function AdminActivityPage({
     supabase
       .from("companies")
       .select("id, company_name")
-      .eq("is_active", true)
       .order("company_name"),
     loadCrmStaffProfiles(supabase),
   ]);

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { validateCrmLinks, type CrmRecordLinks } from "@/lib/crm/validate-crm-links";
+import { validateCrmLinks, type CrmRecordLinks, type ValidatedCrmLinks } from "@/lib/crm/validate-crm-links";
 
 const FORBIDDEN_METADATA_KEYS = new Set([
   "password",
@@ -11,6 +11,8 @@ const FORBIDDEN_METADATA_KEYS = new Set([
   "raw_email",
   "auth",
   "secret",
+  "body",
+  "note_body",
 ]);
 
 function sanitizeMetadata(metadata: Record<string, unknown> | undefined) {
@@ -43,12 +45,13 @@ export type CreateCrmActivityInput = CrmRecordLinks & {
   description: string;
   metadata?: Record<string, unknown>;
   actorProfileId?: string | null;
+  validatedLinks?: ValidatedCrmLinks;
 };
 
 export async function createCrmActivity(
   supabase: SupabaseClient,
   input: CreateCrmActivityInput
-) {
+): Promise<string> {
   const activityType = input.activityType.trim();
   const description = input.description.trim();
 
@@ -60,27 +63,47 @@ export async function createCrmActivity(
     throw new Error("Activity description is required.");
   }
 
-  const validation = await validateCrmLinks(supabase, input);
+  let links: ValidatedCrmLinks;
 
-  if (!validation.ok) {
-    throw new Error(validation.message);
+  if (input.validatedLinks) {
+    links = input.validatedLinks;
+  } else {
+    const validation = await validateCrmLinks(supabase, input);
+
+    if (!validation.ok) {
+      throw new Error(validation.message);
+    }
+
+    links = validation.links;
   }
 
-  const { links } = validation;
+  const { data: activity, error } = await supabase
+    .from("crm_activity")
+    .insert({
+      activity_type: activityType,
+      description,
+      metadata: sanitizeMetadata(input.metadata),
+      company_id: links.companyId,
+      contact_id: links.contactId,
+      opportunity_id: links.opportunityId,
+      quote_id: links.quoteId,
+      task_id: links.taskId,
+      actor_profile_id: input.actorProfileId ?? null,
+    })
+    .select("id")
+    .single();
 
-  const { error } = await supabase.from("crm_activity").insert({
-    activity_type: activityType,
-    description,
-    metadata: sanitizeMetadata(input.metadata),
-    company_id: links.companyId,
-    contact_id: links.contactId,
-    opportunity_id: links.opportunityId,
-    quote_id: links.quoteId,
-    task_id: links.taskId,
-    actor_profile_id: input.actorProfileId ?? null,
-  });
+  if (error || !activity) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[crm activity] insert failed:", error?.message ?? "Unknown error");
+    }
 
-  if (error) {
-    throw new Error(error.message);
+    throw new Error(error?.message ?? "Unable to create CRM activity.");
   }
+
+  if (process.env.NODE_ENV === "development") {
+    console.log("[crm activity] inserted activity id:", activity.id);
+  }
+
+  return activity.id;
 }
