@@ -15,7 +15,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createClient } from "@/lib/supabase/client";
 
-export function CreateCompanyDialog() {
+type CreateCompanyDialogProps = {
+  defaultPaymentTermsDays?: number;
+};
+
+export function CreateCompanyDialog({
+  defaultPaymentTermsDays = 14,
+}: CreateCompanyDialogProps) {
   const router = useRouter();
   const supabase = createClient();
 
@@ -25,7 +31,9 @@ export function CreateCompanyDialog() {
   const [accountsEmail, setAccountsEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [vatNumber, setVatNumber] = useState("");
-  const [paymentTermsDays, setPaymentTermsDays] = useState("14");
+  const [paymentTermsDays, setPaymentTermsDays] = useState(
+    String(defaultPaymentTermsDays)
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -36,7 +44,7 @@ export function CreateCompanyDialog() {
     setAccountsEmail("");
     setPhone("");
     setVatNumber("");
-    setPaymentTermsDays("14");
+    setPaymentTermsDays(String(defaultPaymentTermsDays));
     setError("");
     setSuccess("");
   }

@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatPaymentTermsLabel } from "@/lib/payment-terms";
+import { loadAppSettings } from "@/lib/app-settings-server";
 import { createClient } from "@/lib/supabase/server";
 import { buildLoginUrl } from "@/lib/auth-redirect";
 import { isCandidAdminRole, isSuperAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
@@ -36,10 +37,13 @@ export default async function CompaniesPage() {
     redirect(resolveAdminAccessDeniedPath(profile?.user_role));
   }
 
-  const { data: companies } = await supabase
-    .from("companies")
-    .select("*")
-    .order("company_name");
+  const [{ data: companies }, appSettingsResult] = await Promise.all([
+    supabase
+      .from("companies")
+      .select("*")
+      .order("company_name"),
+    loadAppSettings(supabase),
+  ]);
 
   return (
     <AppShell
@@ -52,7 +56,13 @@ export default async function CompaniesPage() {
         <PageHeader
           title="Companies"
           description="Manage customer companies."
-          actions={<CreateCompanyDialog />}
+          actions={
+            <CreateCompanyDialog
+              defaultPaymentTermsDays={
+                appSettingsResult.settings.default_company_payment_terms_days
+              }
+            />
+          }
         />
 
         {!companies || companies.length === 0 ? (

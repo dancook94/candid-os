@@ -70,6 +70,7 @@ export type QuoteBuilderInitialValues = {
   customerNotes: string;
   internalNotes: string;
   lineItems: QuoteBuilderLineItem[];
+  defaultVatRate?: number;
 };
 
 type CompanyOption = {
@@ -287,7 +288,7 @@ function calculateLineTotal(quantity: number, unitPrice: number) {
   return roundMoney(quantity * unitPrice);
 }
 
-function calculateTotals(lineItems: LineItemFormState[]) {
+function calculateTotals(lineItems: LineItemFormState[], vatRate: number) {
   const parsedItems = lineItems.map((item) => {
     const quantity = Number.parseFloat(item.quantity) || 0;
     const unitPrice = Number.parseFloat(item.unitPrice) || 0;
@@ -306,7 +307,7 @@ function calculateTotals(lineItems: LineItemFormState[]) {
       .filter((item) => !item.isOptional)
       .reduce((sum, item) => sum + item.lineTotal, 0)
   );
-  const vatAmount = roundMoney(subtotal * VAT_RATE);
+  const vatAmount = roundMoney(subtotal * vatRate);
   const total = roundMoney(subtotal + vatAmount);
 
   return { parsedItems, subtotal, vatAmount, total };
@@ -363,7 +364,12 @@ export function QuoteBuilderForm({
 
   const isBusy = isSaving || isSending;
 
-  const totals = useMemo(() => calculateTotals(lineItems), [lineItems]);
+  const vatRate = initialValues.defaultVatRate ?? VAT_RATE;
+
+  const totals = useMemo(
+    () => calculateTotals(lineItems, vatRate),
+    [lineItems, vatRate]
+  );
 
   const filteredQuoteRequests = quoteRequests.filter(
     (request) => !companyId || request.company_id === companyId
@@ -611,7 +617,7 @@ export function QuoteBuilderForm({
         customer_notes: customerNotes.trim() || null,
         internal_notes: internalNotes.trim() || null,
         subtotal: totals.subtotal,
-        vat_rate: VAT_RATE,
+        vat_rate: vatRate,
         vat_amount: totals.vatAmount,
         total: totals.total,
       };

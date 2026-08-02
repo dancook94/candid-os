@@ -13,6 +13,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { createClient } from "@/lib/supabase/server";
+import { loadAppSettings } from "@/lib/app-settings-server";
 
 export default async function QuoteRequestPage() {
   const supabase = await createClient();
@@ -25,11 +26,14 @@ export default async function QuoteRequestPage() {
     redirect("/login");
   }
 
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("full_name, company_id, account_status")
-    .eq("id", user.id)
-    .single();
+  const [{ data: profile }, appSettingsResult] = await Promise.all([
+    supabase
+      .from("profiles")
+      .select("full_name, company_id, account_status")
+      .eq("id", user.id)
+      .single(),
+    loadAppSettings(supabase),
+  ]);
 
   const fullName =
     profile?.full_name ||
@@ -55,6 +59,9 @@ export default async function QuoteRequestPage() {
           <QuoteRequestForm
             companyId={profile.company_id}
             requestedBy={user.id}
+            defaultDeadlineStatus={
+              appSettingsResult.settings.default_deadline_status
+            }
           />
         ) : (
           <Card className="portal-surface">

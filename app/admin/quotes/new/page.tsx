@@ -9,6 +9,8 @@ import {
 } from "@/components/quote-builder-form";
 import { Button } from "@/components/ui/button";
 import { resolvePaymentTermsDays } from "@/lib/payment-terms";
+import { computeDefaultQuoteExpiryDate } from "@/lib/app-settings";
+import { loadAppSettings } from "@/lib/app-settings-server";
 import { createClient } from "@/lib/supabase/server";
 import { buildLoginUrl } from "@/lib/auth-redirect";
 import { isCandidAdminRole, isSuperAdminRole, resolveAdminAccessDeniedPath } from "@/lib/staff-roles";
@@ -50,7 +52,8 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
     redirect(resolveAdminAccessDeniedPath(profile?.user_role));
   }
 
-  const [{ data: companies }, { data: quoteRequests }] = await Promise.all([
+  const [{ data: companies }, { data: quoteRequests }, appSettingsResult] =
+    await Promise.all([
     supabase
       .from("companies")
       .select("id, company_name, payment_terms_days")
@@ -60,18 +63,22 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
       .from("quote_requests")
       .select("id, company_id, project_name")
       .order("created_at", { ascending: false }),
+    loadAppSettings(supabase),
   ]);
+
+  const appSettings = appSettingsResult.settings;
 
   let initialValues: QuoteBuilderInitialValues = {
     companyId: "",
     quoteRequestId: null,
     projectName: "",
-    expiryDate: "",
-    paymentTermsDays: 14,
-    introduction: "",
-    customerNotes: "",
+    expiryDate: computeDefaultQuoteExpiryDate(appSettings.default_quote_expiry_days),
+    paymentTermsDays: appSettings.default_payment_terms_days,
+    introduction: appSettings.default_introduction ?? "",
+    customerNotes: appSettings.default_customer_notes ?? "",
     internalNotes: "",
     lineItems: [],
+    defaultVatRate: appSettings.default_vat_rate,
   };
 
   if (quoteRequestId) {
@@ -90,17 +97,18 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
         companyId: quoteRequest.company_id,
         quoteRequestId: quoteRequest.id,
         projectName: quoteRequest.project_name,
-        expiryDate: "",
+        expiryDate: computeDefaultQuoteExpiryDate(appSettings.default_quote_expiry_days),
         paymentTermsDays: resolvePaymentTermsDays(
-          linkedCompany?.payment_terms_days
+          linkedCompany?.payment_terms_days ?? appSettings.default_payment_terms_days
         ),
-        introduction: "",
+        introduction: appSettings.default_introduction ?? "",
         customerNotes: buildCustomerNotes(
           quoteRequest.description,
           quoteRequest.notes
         ),
         internalNotes: "",
         lineItems: [],
+        defaultVatRate: appSettings.default_vat_rate,
       };
     }
   }

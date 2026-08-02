@@ -166,6 +166,7 @@ export default async function QuoteDetailPage({
         imagePreviewUrl,
       })
     ),
+    defaultVatRate: Number(quoteVersion.vat_rate ?? 0.2),
   };
 
   const canEdit = quoteVersion.version_status === "draft";

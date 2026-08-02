@@ -37,13 +37,14 @@ type QuoteRequestInsert = {
   delivery_contact_phone: string | null;
   purchase_order_number: string | null;
   notes: string | null;
-  deadline_status: "pending";
+  deadline_status: string;
   request_status: "submitted";
 };
 
 type QuoteRequestFormProps = {
   companyId: string;
   requestedBy: string;
+  defaultDeadlineStatus?: string;
 };
 
 type FieldErrors = Record<string, string>;
@@ -81,6 +82,7 @@ function formatDeliveryAddress(
 export function QuoteRequestForm({
   companyId,
   requestedBy,
+  defaultDeadlineStatus = "pending",
 }: QuoteRequestFormProps) {
   const router = useRouter();
   const supabase = createClient();
@@ -220,7 +222,7 @@ export function QuoteRequestForm({
       delivery_contact_phone: isDelivery ? deliveryContactPhone.trim() : null,
       purchase_order_number: purchaseOrderNumber.trim() || null,
       notes: notes.trim() || null,
-      deadline_status: "pending",
+      deadline_status: defaultDeadlineStatus,
       request_status: "submitted",
     };
 
