@@ -3,6 +3,11 @@ import { notFound } from "next/navigation";
 
 import { AdminQuoteManagementActions } from "@/components/admin-quote-management-actions";
 import { CreateQuoteVersionButton } from "@/components/create-quote-version-button";
+import {
+  loadLinkableOpportunitiesForCompany,
+  loadLinkedOpportunityForQuote,
+  QuoteLinkedOpportunitySection,
+} from "@/components/crm/quote-linked-opportunity-section";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
 import {
@@ -111,7 +116,8 @@ export default async function QuoteDetailPage({
     }))
   );
 
-  const [{ data: companies }, { data: quoteRequests }] = await Promise.all([
+  const [{ data: companies }, { data: quoteRequests }, linkedOpportunity, linkableOpportunities] =
+    await Promise.all([
     supabase
       .from("companies")
       .select("id, company_name, payment_terms_days")
@@ -121,6 +127,8 @@ export default async function QuoteDetailPage({
       .from("quote_requests")
       .select("id, company_id, project_name")
       .order("created_at", { ascending: false }),
+    loadLinkedOpportunityForQuote(supabase, quote.opportunity_id),
+    loadLinkableOpportunitiesForCompany(supabase, quote.company_id),
   ]);
 
   const initialValues: QuoteBuilderInitialValues = {
@@ -237,6 +245,14 @@ export default async function QuoteDetailPage({
           companyName={companyName}
           total={Number(quoteVersion.total ?? 0)}
           canRespondOnBehalf={canRespondOnBehalf}
+        />
+
+        <QuoteLinkedOpportunitySection
+          quoteId={quote.id}
+          quoteNumber={quote.quote_number}
+          companyName={companyName}
+          linkableOpportunities={linkableOpportunities}
+          linkedOpportunity={linkedOpportunity}
         />
 
         <QuoteBuilderForm

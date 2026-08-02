@@ -9,6 +9,7 @@ export const OPPORTUNITY_ACTIVITY_TYPES = {
   taskReopened: "task_reopened",
   noteAdded: "note_added",
   quoteCreated: "quote_created",
+  quoteLinked: "quote_linked",
 } as const;
 
 export function formatActivityTypeLabel(activityType: string) {

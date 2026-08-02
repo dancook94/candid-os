@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/app-shell";
+import { QuoteOpportunityCell } from "@/components/crm/link-quote-opportunity-dialog";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
@@ -10,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import {
+  ADMIN_QUOTE_OPPORTUNITY_LINK_OPTIONS,
   ADMIN_QUOTE_SORT_OPTIONS,
   ADMIN_QUOTE_STATUS_OPTIONS,
   fetchAdminQuotesList,
@@ -18,6 +20,7 @@ import {
   type AdminQuotesListSearchParams,
 } from "@/lib/admin-quotes-list";
 import { formatAdminQuoteStatusLabel } from "@/lib/admin-quote-status";
+import type { OpportunityStage } from "@/lib/crm/types";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { formatGbp, formatQuoteCount } from "@/lib/format-currency";
@@ -74,6 +77,21 @@ function formatSortLabel(sort: (typeof ADMIN_QUOTE_SORT_OPTIONS)[number]) {
   }
 }
 
+function formatOpportunityLinkLabel(
+  link: (typeof ADMIN_QUOTE_OPPORTUNITY_LINK_OPTIONS)[number]
+) {
+  switch (link) {
+    case "all":
+      return "All opportunity links";
+    case "linked":
+      return "Linked";
+    case "not_linked":
+      return "Not linked";
+    default:
+      return link;
+  }
+}
+
 type AdminQuotesPageProps = {
   searchParams: Promise<AdminQuotesListSearchParams>;
 };
@@ -126,7 +144,7 @@ export default async function AdminQuotesPage({
           <CardContent className="pt-6">
             <form
               method="get"
-              className="grid gap-4 md:grid-cols-2 xl:grid-cols-6"
+              className="grid gap-4 md:grid-cols-2 xl:grid-cols-7"
             >
               <div className="space-y-2 md:col-span-2 xl:col-span-2">
                 <Label htmlFor="search">Search</Label>
@@ -134,7 +152,7 @@ export default async function AdminQuotesPage({
                   id="search"
                   name="search"
                   type="search"
-                  placeholder="Search quotes…"
+                  placeholder="Search quotes, projects, or opportunities…"
                   defaultValue={filters.search}
                 />
               </div>
@@ -172,6 +190,21 @@ export default async function AdminQuotesPage({
               </div>
 
               <div className="space-y-2">
+                <Label htmlFor="opportunity">Opportunity link</Label>
+                <Select
+                  id="opportunity"
+                  name="opportunity"
+                  defaultValue={filters.opportunityLink}
+                >
+                  {ADMIN_QUOTE_OPPORTUNITY_LINK_OPTIONS.map((link) => (
+                    <option key={link} value={link}>
+                      {formatOpportunityLinkLabel(link)}
+                    </option>
+                  ))}
+                </Select>
+              </div>
+
+              <div className="space-y-2">
                 <Label htmlFor="sort">Sort</Label>
                 <Select id="sort" name="sort" defaultValue={filters.sort}>
                   {ADMIN_QUOTE_SORT_OPTIONS.map((sort) => (
@@ -202,7 +235,7 @@ export default async function AdminQuotesPage({
                 />
               </div>
 
-              <div className="flex flex-wrap items-end gap-2 md:col-span-2 xl:col-span-6">
+              <div className="flex flex-wrap items-end gap-2 md:col-span-2 xl:col-span-7">
                 <Button type="submit">Apply filters</Button>
                 {hasFilters ? (
                   <Link href="/admin/quotes">
@@ -269,6 +302,7 @@ export default async function AdminQuotesPage({
                         <th>Company</th>
                         <th>Version</th>
                         <th>Status</th>
+                        <th>Opportunity</th>
                         <th>Total</th>
                         <th>Created</th>
                         <th>Sent</th>
@@ -333,6 +367,17 @@ export default async function AdminQuotesPage({
                                 label={formatAdminQuoteStatusLabel(quote.status)}
                               />
                             </Link>
+                          </td>
+
+                          <td className="p-0">
+                            <QuoteOpportunityCell
+                              quoteId={quote.id}
+                              opportunityId={quote.opportunity_id}
+                              opportunityTitle={quote.opportunity_title}
+                              opportunityStage={
+                                quote.opportunity_stage as OpportunityStage | null
+                              }
+                            />
                           </td>
 
                           <td className="p-0">

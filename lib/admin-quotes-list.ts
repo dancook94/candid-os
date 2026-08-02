@@ -21,6 +21,15 @@ export const ADMIN_QUOTE_SORT_OPTIONS = [
 export type AdminQuoteStatus = (typeof ADMIN_QUOTE_STATUS_OPTIONS)[number];
 export type AdminQuoteSort = (typeof ADMIN_QUOTE_SORT_OPTIONS)[number];
 
+export const ADMIN_QUOTE_OPPORTUNITY_LINK_OPTIONS = [
+  "all",
+  "linked",
+  "not_linked",
+] as const;
+
+export type AdminQuoteOpportunityLink =
+  (typeof ADMIN_QUOTE_OPPORTUNITY_LINK_OPTIONS)[number];
+
 export type AdminQuotesListSearchParams = {
   search?: string;
   status?: string;
@@ -28,6 +37,7 @@ export type AdminQuotesListSearchParams = {
   from?: string;
   to?: string;
   sort?: string;
+  opportunity?: string;
 };
 
 export type AdminQuotesListFilters = {
@@ -37,6 +47,7 @@ export type AdminQuotesListFilters = {
   fromDate: string | null;
   toDate: string | null;
   sort: AdminQuoteSort;
+  opportunityLink: AdminQuoteOpportunityLink;
 };
 
 export type AdminQuoteListRow = {
@@ -53,6 +64,9 @@ export type AdminQuoteListRow = {
   customer_name: string | null;
   current_version_total: number;
   sent_at: string | null;
+  opportunity_id: string | null;
+  opportunity_title: string | null;
+  opportunity_stage: string | null;
 };
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -92,6 +106,19 @@ function parseSortParam(value: string | undefined): AdminQuoteSort {
   return "newest";
 }
 
+function parseOpportunityLinkParam(
+  value: string | undefined
+): AdminQuoteOpportunityLink {
+  if (
+    value &&
+    (ADMIN_QUOTE_OPPORTUNITY_LINK_OPTIONS as readonly string[]).includes(value)
+  ) {
+    return value as AdminQuoteOpportunityLink;
+  }
+
+  return "all";
+}
+
 export function parseAdminQuotesListFilters(
   params: AdminQuotesListSearchParams
 ): AdminQuotesListFilters {
@@ -102,6 +129,7 @@ export function parseAdminQuotesListFilters(
     fromDate: parseDateParam(params.from),
     toDate: parseDateParam(params.to),
     sort: parseSortParam(params.sort),
+    opportunityLink: parseOpportunityLinkParam(params.opportunity),
   };
 }
 
@@ -112,7 +140,8 @@ export function hasActiveAdminQuotesFilters(filters: AdminQuotesListFilters) {
       filters.companyId ||
       filters.fromDate ||
       filters.toDate ||
-      filters.sort !== "newest"
+      filters.sort !== "newest" ||
+      filters.opportunityLink !== "all"
   );
 }
 
@@ -147,6 +176,10 @@ export function buildAdminQuotesListHref(
     params.set("sort", nextFilters.sort);
   }
 
+  if (nextFilters.opportunityLink !== "all") {
+    params.set("opportunity", nextFilters.opportunityLink);
+  }
+
   const query = params.toString();
 
   return query ? `/admin/quotes?${query}` : "/admin/quotes";
@@ -157,6 +190,7 @@ type QuoteRecord = {
   quote_number: number;
   company_id: string;
   quote_request_id: string | null;
+  opportunity_id: string | null;
   project_name: string;
   status: string;
   current_version: number;
@@ -276,6 +310,24 @@ async function resolveSearchMatchingQuoteIds(
     }
   }
 
+  const { data: opportunitiesByTitle } = await supabase
+    .from("opportunities")
+    .select("id")
+    .ilike("title", ilikePattern);
+
+  const opportunityIds = (opportunitiesByTitle ?? []).map(
+    (opportunity) => opportunity.id
+  );
+
+  if (opportunityIds.length > 0) {
+    const { data: quotesByOpportunity } = await supabase
+      .from("quotes")
+      .select("id")
+      .in("opportunity_id", opportunityIds);
+
+    quotesByOpportunity?.forEach((quote) => matchingIds.add(quote.id));
+  }
+
   return [...matchingIds];
 }
 
@@ -363,11 +415,17 @@ export async function fetchAdminQuotesList(
   let quotesQuery = supabase
     .from("quotes")
     .select(
-      "id, quote_number, company_id, quote_request_id, project_name, status, current_version, created_at, updated_at"
+      "id, quote_number, company_id, quote_request_id, opportunity_id, project_name, status, current_version, created_at, updated_at"
     );
 
   if (searchMatchingIds) {
     quotesQuery = quotesQuery.in("id", searchMatchingIds);
+  }
+
+  if (filters.opportunityLink === "linked") {
+    quotesQuery = quotesQuery.not("opportunity_id", "is", null);
+  } else if (filters.opportunityLink === "not_linked") {
+    quotesQuery = quotesQuery.is("opportunity_id", null);
   }
 
   if (filters.status) {
@@ -423,11 +481,19 @@ export async function fetchAdminQuotesList(
         .filter((id): id is string => Boolean(id))
     ),
   ];
+  const opportunityIds = [
+    ...new Set(
+      quotes
+        .map((quote) => quote.opportunity_id)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
 
   const [
     { data: versions, error: versionsError },
     { data: companies, error: companiesError },
     { data: quoteRequests, error: quoteRequestsError },
+    { data: opportunities, error: opportunitiesError },
   ] = await Promise.all([
     supabase
       .from("quote_versions")
@@ -446,12 +512,22 @@ export async function fetchAdminQuotesList(
           data: [] as { id: string; requested_by: string }[],
           error: null,
         }),
+    opportunityIds.length > 0
+      ? supabase
+          .from("opportunities")
+          .select("id, title, stage")
+          .in("id", opportunityIds)
+      : Promise.resolve({
+          data: [] as { id: string; title: string; stage: string }[],
+          error: null,
+        }),
   ]);
 
   const relatedErrors = [
     versionsError?.message,
     companiesError?.message,
     quoteRequestsError?.message,
+    opportunitiesError?.message,
   ].filter(Boolean);
 
   const requesterIds = [
@@ -493,6 +569,13 @@ export async function fetchAdminQuotesList(
     ])
   );
 
+  const opportunityById = new Map(
+    (opportunities ?? []).map((opportunity) => [
+      opportunity.id,
+      { title: opportunity.title, stage: opportunity.stage },
+    ])
+  );
+
   const rows: AdminQuoteListRow[] = quotes.map((quote) => {
     const quoteVersions = versionsByQuoteId.get(quote.id) ?? [];
     const currentVersion = quoteVersions.find(
@@ -501,6 +584,9 @@ export async function fetchAdminQuotesList(
 
     const requesterId = quote.quote_request_id
       ? requesterByRequestId.get(quote.quote_request_id)
+      : null;
+    const linkedOpportunity = quote.opportunity_id
+      ? opportunityById.get(quote.opportunity_id)
       : null;
 
     return {
@@ -511,6 +597,9 @@ export async function fetchAdminQuotesList(
         : null,
       current_version_total: Number(currentVersion?.total ?? 0),
       sent_at: resolveSentDate(quote.status, currentVersion),
+      opportunity_id: quote.opportunity_id,
+      opportunity_title: linkedOpportunity?.title ?? null,
+      opportunity_stage: linkedOpportunity?.stage ?? null,
     };
   });
 
