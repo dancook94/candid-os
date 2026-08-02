@@ -3,6 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useCallback, useState } from "react";
 import {
   Building2,
   CheckSquare,
@@ -18,6 +19,11 @@ import {
 } from "lucide-react";
 
 import { CompanyLogoDisplay } from "@/components/company-logo-display";
+import {
+  GlobalSearch,
+  GlobalSearchTrigger,
+  useGlobalSearchShortcut,
+} from "@/components/global-search";
 import { StaffAvatarDisplay } from "@/components/staff-avatar-display";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -27,6 +33,7 @@ type AppShellProps = {
   userRole?: "customer" | "admin" | "staff";
   showStaffNav?: boolean;
   showCrmNav?: boolean;
+  showGlobalSearch?: boolean;
   userName?: string;
   companyName?: string;
   companyLogoUrl?: string | null;
@@ -130,6 +137,7 @@ export function AppShell({
   userRole = "customer",
   showStaffNav = false,
   showCrmNav = false,
+  showGlobalSearch,
   userName,
   companyName,
   companyLogoUrl = null,
@@ -138,6 +146,12 @@ export function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const supabase = createClient();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const openSearch = useCallback(() => setSearchOpen(true), []);
+  const canShowGlobalSearch =
+    showGlobalSearch ?? (showCrmNav && userRole !== "customer");
+
+  useGlobalSearchShortcut(openSearch);
 
   const links =
     userRole === "admin"
@@ -193,6 +207,12 @@ export function AppShell({
             </div>
           </Link>
         </div>
+
+        {canShowGlobalSearch ? (
+          <div className="px-3 pb-3">
+            <GlobalSearchTrigger onOpen={openSearch} />
+          </div>
+        ) : null}
 
         <nav className="flex-1 space-y-1 px-3 py-4">
           {links.map((link) => {
@@ -297,17 +317,27 @@ export function AppShell({
               height={47}
               className="h-auto w-20 shrink-0"
             />
-            <div>
+            <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-foreground">Candid OS</p>
               <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                 {portalLabel}
               </p>
             </div>
           </div>
+
+          {canShowGlobalSearch ? (
+            <div className="mt-3">
+              <GlobalSearchTrigger onOpen={openSearch} />
+            </div>
+          ) : null}
         </header>
 
         <main className="px-6 py-8 lg:px-10 lg:py-10">{children}</main>
       </div>
+
+      {canShowGlobalSearch ? (
+        <GlobalSearch open={searchOpen} onOpenChange={setSearchOpen} />
+      ) : null}
     </div>
   );
 }
