@@ -38,9 +38,21 @@ export default async function DropboxIntegrationPage({
 
   const cookieStore = await cookies();
   const pendingValue = cookieStore.get(DROPBOX_OAUTH_PENDING_COOKIE)?.value;
-  const pendingSetup = parsePendingOAuthCookieValue(pendingValue);
-
   const connection = await getDropboxConnectionStatus();
+  const pendingSetupRaw = parsePendingOAuthCookieValue(pendingValue);
+  const pendingSetup =
+    canManage && !connection.connected ? pendingSetupRaw : null;
+
+  if (
+    process.env.NODE_ENV === "development" &&
+    params.setup === "pending" &&
+    pendingValue &&
+    !pendingSetupRaw
+  ) {
+    console.info("[dropbox]", {
+      operation: "pending_setup_cookie_unreadable",
+    });
+  }
 
   return (
     <AppShell {...shellProps}>

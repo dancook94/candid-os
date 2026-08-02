@@ -17,9 +17,11 @@ import { createClient } from "@/lib/supabase/server";
 
 function buildSettingsRedirect(
   params: Record<string, string | undefined>,
-  requestUrl: string
+  requestOrigin: string
 ) {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/+$/, "") ?? requestUrl;
+  // Keep the post-OAuth redirect on the same origin as the callback so the
+  // httpOnly pending-setup cookie is not dropped (e.g. localhost vs 127.0.0.1).
+  const baseUrl = requestOrigin.replace(/\/+$/, "");
   const url = new URL("/admin/settings/integrations/dropbox", baseUrl);
 
   for (const [key, value] of Object.entries(params)) {

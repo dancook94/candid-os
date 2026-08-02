@@ -317,7 +317,7 @@ export async function exchangeDropboxAuthorizationCode(code: string) {
       errorSummary: "missing refresh_token",
       errorTag: "missing_refresh_token",
       message:
-        "Dropbox did not return a refresh token. Confirm token_access_type=offline is enabled and re-authorize.",
+        "Dropbox did not return a refresh token. Reconnect using offline access.",
       accessTokenReturned,
       refreshTokenReturned,
     };

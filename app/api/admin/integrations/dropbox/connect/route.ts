@@ -9,7 +9,7 @@ import {
 } from "@/lib/dropbox/oauth";
 import { createClient } from "@/lib/supabase/server";
 
-export async function GET() {
+export async function GET(request: Request) {
   const supabase = await createClient();
   const authResult = await verifySuperAdmin(supabase);
 
@@ -39,7 +39,7 @@ export async function GET() {
     return NextResponse.redirect(
       new URL(
         `/admin/settings/integrations/dropbox?error=${encodeURIComponent(message)}`,
-        process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
+        new URL(request.url).origin
       )
     );
   }
