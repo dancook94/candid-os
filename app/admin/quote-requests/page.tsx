@@ -9,9 +9,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { formatAdminQuoteStatusLabel } from "@/lib/admin-quote-status";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
+import {
+  buildQuoteRequestDisplayState,
+  loadLinkedQuotesByRequestIds,
+} from "@/lib/quote-request-link";
 import { createClient } from "@/lib/supabase/server";
 
 type QuoteRequestRow = {
@@ -213,29 +216,8 @@ export default async function AdminQuoteRequestsPage({
 
   const requestIds = quoteRequests.map((request) => request.id);
 
-  const { data: linkedQuotes } =
-    requestIds.length > 0
-      ? await supabase
-          .from("quotes")
-          .select("id, quote_request_id, status, quote_number")
-          .in("quote_request_id", requestIds)
-          .order("updated_at", { ascending: false })
-      : { data: [] as { id: string; quote_request_id: string | null; status: string; quote_number: number }[] };
-
-  const quoteByRequestId = new Map<
-    string,
-    { id: string; status: string; quote_number: number }
-  >();
-
-  for (const quote of linkedQuotes ?? []) {
-    if (quote.quote_request_id && !quoteByRequestId.has(quote.quote_request_id)) {
-      quoteByRequestId.set(quote.quote_request_id, {
-        id: quote.id,
-        status: quote.status,
-        quote_number: quote.quote_number,
-      });
-    }
-  }
+  const { quotesByRequestId, loadError: linkedQuotesLoadError } =
+    await loadLinkedQuotesByRequestIds(supabase, requestIds);
 
   const searchQuery = q?.trim().toLowerCase() ?? "";
 
@@ -321,13 +303,15 @@ export default async function AdminQuoteRequestsPage({
           </CardContent>
         </Card>
 
-        {isDevelopment && queryError ? (
+        {isDevelopment && (queryError || linkedQuotesLoadError) ? (
           <Card className="rounded-2xl border-red-200 bg-red-50 shadow-sm ring-0">
             <CardContent className="p-6">
               <p className="text-sm font-medium text-red-800">
                 Supabase query error
               </p>
-              <p className="mt-2 text-sm text-red-700">{queryError}</p>
+              <p className="mt-2 text-sm text-red-700">
+                {queryError ?? linkedQuotesLoadError}
+              </p>
             </CardContent>
           </Card>
         ) : filteredQuoteRequests.length === 0 ? (
@@ -360,7 +344,11 @@ export default async function AdminQuoteRequestsPage({
 
                   <tbody>
                     {filteredQuoteRequests.map((request) => {
-                      const linkedQuote = quoteByRequestId.get(request.id);
+                      const linkedQuote = quotesByRequestId.get(request.id) ?? null;
+                      const quoteDisplay = buildQuoteRequestDisplayState({
+                        linkedQuote,
+                        loadError: linkedQuotesLoadError,
+                      });
 
                       return (
                       <tr
@@ -458,12 +446,16 @@ export default async function AdminQuoteRequestsPage({
                             >
                               <StatusBadge
                                 status={mapQuoteStatusToBadge(linkedQuote.status)}
-                                label={formatAdminQuoteStatusLabel(linkedQuote.status)}
+                                label={quoteDisplay.adminLabel}
                               />
                             </Link>
+                          ) : quoteDisplay.kind === "load_error" ? (
+                            <span className="block p-4 text-neutral-500">
+                              {quoteDisplay.adminLabel}
+                            </span>
                           ) : (
                             <span className="block p-4 text-neutral-500">
-                              No quote yet
+                              {quoteDisplay.adminLabel}
                             </span>
                           )}
                         </td>

@@ -7,6 +7,12 @@ import {
   normalizeSupabaseQueryError,
 } from "@/lib/customer-settings/query-errors";
 import type { QuoteRequestAttachmentRecord } from "@/lib/quote-request-attachments";
+import {
+  buildQuoteRequestDisplayState,
+  loadLinkedQuoteForRequest,
+  type LinkedQuoteSummary,
+  type QuoteRequestQuoteDisplayState,
+} from "@/lib/quote-request-link";
 
 /**
  * Core quote_requests columns confirmed on live schema (service-role probe).
@@ -58,7 +64,8 @@ export type AdminQuoteRequestRelatedData = {
   requesterWarning: string | null;
   attachments: QuoteRequestAttachmentRecord[];
   attachmentsWarning: string | null;
-  linkedQuote: { id: string; status: string; quote_number: number } | null;
+  linkedQuote: LinkedQuoteSummary | null;
+  linkedQuoteDisplay: QuoteRequestQuoteDisplayState;
   linkedQuoteWarning: string | null;
   linkedAddress: { id: string; label: string | null; is_active: boolean } | null;
   linkedAddressWarning: string | null;
@@ -308,6 +315,7 @@ export async function loadAdminQuoteRequestDetail(
     attachments: [],
     attachmentsWarning: null,
     linkedQuote: null,
+    linkedQuoteDisplay: buildQuoteRequestDisplayState({ linkedQuote: null }),
     linkedQuoteWarning: null,
     linkedAddress: null,
     linkedAddressWarning: null,
@@ -358,19 +366,19 @@ export async function loadAdminQuoteRequestDetail(
     related.attachments = attachments ?? [];
   }
 
-  const { data: linkedQuote, error: linkedQuoteError } = await supabase
-    .from("quotes")
-    .select("id, status, quote_number")
-    .eq("quote_request_id", routeId)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const linkedQuoteLoad = await loadLinkedQuoteForRequest(supabase, routeId);
+  related.linkedQuote = linkedQuoteLoad.quote;
+  related.linkedQuoteDisplay = buildQuoteRequestDisplayState({
+    linkedQuote: linkedQuoteLoad.quote,
+    loadError: linkedQuoteLoad.loadError,
+  });
 
-  if (linkedQuoteError) {
-    logAdminQuoteRequestQueryError("linked quote", linkedQuoteError);
-    related.linkedQuoteWarning = "Linked quote details could not be loaded.";
-  } else {
-    related.linkedQuote = linkedQuote;
+  if (linkedQuoteLoad.loadError) {
+    logAdminQuoteRequestQueryError(
+      "linked quote",
+      new Error(linkedQuoteLoad.loadError)
+    );
+    related.linkedQuoteWarning = linkedQuoteLoad.loadError;
   }
 
   if (quoteRequest.selected_company_address_id) {

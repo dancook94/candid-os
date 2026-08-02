@@ -19,6 +19,7 @@ import { formatAdminQuoteStatusLabel } from "@/lib/admin-quote-status";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { formatCountryLabel } from "@/lib/quote-request/normalize-address";
+import type { QuoteRequestQuoteDisplayState } from "@/lib/quote-request-link";
 import { createClient } from "@/lib/supabase/server";
 
 type BadgeStatus =
@@ -124,6 +125,48 @@ function mapQuoteStatusToBadge(value: string): BadgeStatus {
   return "draft";
 }
 
+function formatCurrency(value: number | null | undefined) {
+  if (value == null || Number.isNaN(value)) {
+    return "—";
+  }
+
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "GBP",
+  }).format(value);
+}
+
+function formatSentDate(value: string | null | undefined) {
+  if (!value) {
+    return "—";
+  }
+
+  return formatDate(value);
+}
+
+function quoteDisplayLabel(display: QuoteRequestQuoteDisplayState) {
+  return display.adminLabel;
+}
+
+function quoteDisplayBadgeStatus(display: QuoteRequestQuoteDisplayState): BadgeStatus {
+  switch (display.kind) {
+    case "awaiting":
+      return "pending";
+    case "in_progress":
+      return "draft";
+    case "sent":
+      return "sent";
+    case "accepted":
+      return "accepted";
+    case "declined":
+      return "declined";
+    case "load_error":
+    case "integrity_error":
+      return "disabled";
+    default:
+      return "draft";
+  }
+}
 function formatDeliveryAddress(quoteRequest: AdminQuoteRequestDetail) {
   const address = [
     quoteRequest.delivery_address_line_1,
@@ -219,6 +262,8 @@ export default async function AdminQuoteRequestDetailPage({
 
   const { quoteRequest, related, warnings } = loadResult;
   const isDelivery = quoteRequest.fulfilment_method === "delivery";
+  const quoteDisplay = related.linkedQuoteDisplay;
+  const linkedQuote = related.linkedQuote;
 
   return (
     <AppShell {...shellProps}>
@@ -228,17 +273,17 @@ export default async function AdminQuoteRequestDetailPage({
           description="Admin quote request review"
           actions={
             <div className="flex flex-wrap gap-2">
-              {related.linkedQuote ? (
-                <Link href={`/admin/quotes/${related.linkedQuote.id}`}>
+              {linkedQuote ? (
+                <Link href={`/admin/quotes/${linkedQuote.id}`}>
                   <Button>
-                    View quote Q-{related.linkedQuote.quote_number}
+                    View quote Q-{linkedQuote.quoteNumber}
                   </Button>
                 </Link>
-              ) : (
+              ) : quoteDisplay.kind === "awaiting" ? (
                 <Link href={`/admin/quotes/new?quoteRequestId=${quoteRequest.id}`}>
                   <Button>Create quote</Button>
                 </Link>
-              )}
+              ) : null}
               <Link href="/admin/quote-requests">
                 <Button variant="outline">Back to inbox</Button>
               </Link>
@@ -280,17 +325,22 @@ export default async function AdminQuoteRequestDetailPage({
               <div>
                 <p className="portal-field-label">Quote status</p>
                 <div className="mt-2">
-                  {related.linkedQuote ? (
-                    <Link href={`/admin/quotes/${related.linkedQuote.id}`}>
+                  {linkedQuote ? (
+                    <Link href={`/admin/quotes/${linkedQuote.id}`}>
                       <StatusBadge
-                        status={mapQuoteStatusToBadge(related.linkedQuote.status)}
-                        label={formatAdminQuoteStatusLabel(related.linkedQuote.status)}
+                        status={quoteDisplayBadgeStatus(quoteDisplay)}
+                        label={quoteDisplayLabel(quoteDisplay)}
                       />
                     </Link>
-                  ) : related.linkedQuoteWarning ? (
-                    <span className="text-muted-foreground">Unavailable</span>
+                  ) : quoteDisplay.kind === "load_error" ||
+                    quoteDisplay.kind === "integrity_error" ? (
+                    <span className="text-muted-foreground">
+                      {quoteDisplayLabel(quoteDisplay)}
+                    </span>
                   ) : (
-                    <span className="text-muted-foreground">No quote yet</span>
+                    <span className="text-muted-foreground">
+                      {quoteDisplayLabel(quoteDisplay)}
+                    </span>
                   )}
                 </div>
               </div>
@@ -300,6 +350,40 @@ export default async function AdminQuoteRequestDetailPage({
           <CardContent className="space-y-5 pt-6">
             {related.linkedQuoteWarning ? (
               <SectionWarning message={related.linkedQuoteWarning} />
+            ) : null}
+
+            {linkedQuote ? (
+              <div className="rounded-xl border border-border bg-muted/20 px-4 py-4 text-sm">
+                <p className="font-medium text-neutral-950">Linked quote</p>
+                <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <dt className="text-neutral-500">Quote number</dt>
+                    <dd className="mt-1 font-medium text-neutral-950">
+                      Q-{linkedQuote.quoteNumber}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-neutral-500">Quote status</dt>
+                    <dd className="mt-1 font-medium text-neutral-950">
+                      {formatAdminQuoteStatusLabel(linkedQuote.status)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-neutral-500">Current total</dt>
+                    <dd className="mt-1 font-medium text-neutral-950">
+                      {formatCurrency(linkedQuote.total)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-neutral-500">Sent date</dt>
+                    <dd className="mt-1 font-medium text-neutral-950">
+                      {formatSentDate(linkedQuote.sentAt)}
+                    </dd>
+                  </div>
+                </dl>
+              </div>
+            ) : quoteDisplay.kind === "integrity_error" ? (
+              <SectionWarning message={quoteDisplay.message} />
             ) : null}
 
             <dl className="space-y-5 text-sm">
@@ -480,18 +564,20 @@ export default async function AdminQuoteRequestDetailPage({
               <div>
                 <dt className="text-neutral-500">Quote status</dt>
                 <dd className="mt-1">
-                  {related.linkedQuote ? (
+                  {linkedQuote ? (
                     <Link
-                      href={`/admin/quotes/${related.linkedQuote.id}`}
+                      href={`/admin/quotes/${linkedQuote.id}`}
                       className="inline-flex"
                     >
                       <StatusBadge
-                        status={mapQuoteStatusToBadge(related.linkedQuote.status)}
-                        label={formatAdminQuoteStatusLabel(related.linkedQuote.status)}
+                        status={quoteDisplayBadgeStatus(quoteDisplay)}
+                        label={quoteDisplayLabel(quoteDisplay)}
                       />
                     </Link>
                   ) : (
-                    <span className="text-neutral-950">No quote yet</span>
+                    <span className="text-neutral-950">
+                      {quoteDisplayLabel(quoteDisplay)}
+                    </span>
                   )}
                 </dd>
               </div>

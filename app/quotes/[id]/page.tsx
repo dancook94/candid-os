@@ -36,6 +36,10 @@ import {
   mapCustomerQuoteStatusToBadge,
   QUOTE_REQUEST_LOCKED_NOTICE,
 } from "@/lib/customer-quote-request";
+import {
+  buildQuoteRequestDisplayState,
+  loadLinkedQuoteForRequest,
+} from "@/lib/quote-request-link";
 import { resolveCustomerQuoteStatus } from "@/lib/quote-customer-status";
 import type { QuoteRequestAttachmentRecord } from "@/lib/quote-request-attachments";
 
@@ -293,22 +297,26 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
     .eq("quote_request_id", id)
     .order("created_at", { ascending: false });
 
-  const { data: linkedQuote } = await supabase
-    .from("quotes")
-    .select("id, status")
-    .eq("quote_request_id", id)
-    .order("updated_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  const linkedQuoteLoad = await loadLinkedQuoteForRequest(supabase, id);
+  const linkedQuote = linkedQuoteLoad.quote
+    ? { id: linkedQuoteLoad.quote.id, status: linkedQuoteLoad.quote.status }
+    : null;
+  const quoteDisplay = buildQuoteRequestDisplayState({
+    linkedQuote: linkedQuoteLoad.quote,
+    loadError: linkedQuoteLoad.loadError,
+  });
 
   const quoteAttachments: QuoteRequestAttachmentRecord[] = attachments ?? [];
   const customerQuoteStatus = linkedQuote
     ? await resolveCustomerQuoteStatus(supabase, linkedQuote)
     : undefined;
-  const quoteActionLabel = getCustomerQuoteActionLabel(customerQuoteStatus);
+  const quoteActionLabel =
+    quoteDisplay.kind === "load_error" || quoteDisplay.kind === "integrity_error"
+      ? quoteDisplay.customerLabel
+      : getCustomerQuoteActionLabel(customerQuoteStatus);
   const quoteStatusLabel = customerQuoteStatus
     ? getFormalQuoteStatusLabel(customerQuoteStatus)
-    : quoteActionLabel;
+    : quoteDisplay.customerLabel;
   const quoteStatusIsClickable = isCustomerQuoteViewable(customerQuoteStatus);
   const isLockedByFormalQuote = isQuoteRequestLockedByFormalQuote(
     customerQuoteStatus

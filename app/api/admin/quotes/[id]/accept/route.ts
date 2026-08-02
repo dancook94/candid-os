@@ -1,21 +1,25 @@
-import { revalidatePath } from "next/cache";
 import { NextResponse } from "next/server";
 
 import { respondToQuoteAsAdmin } from "@/lib/admin-quote-actions";
 import { verifyApprovedAdmin } from "@/lib/admin-auth";
+import { revalidateQuoteWorkflowRoutes } from "@/lib/quote-route-revalidation";
 import { createClient } from "@/lib/supabase/server";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
-function revalidateQuotePaths(quoteId: string) {
-  revalidatePath("/admin");
-  revalidatePath("/admin/quotes");
-  revalidatePath(`/admin/quotes/${quoteId}`);
-  revalidatePath("/dashboard");
-  revalidatePath("/quotes");
-  revalidatePath(`/quotes/${quoteId}`);
+async function revalidateQuotePaths(supabase: Awaited<ReturnType<typeof createClient>>, quoteId: string) {
+  const { data: quoteLink } = await supabase
+    .from("quotes")
+    .select("quote_request_id")
+    .eq("id", quoteId)
+    .maybeSingle();
+
+  revalidateQuoteWorkflowRoutes({
+    quoteId,
+    quoteRequestId: quoteLink?.quote_request_id ?? null,
+  });
 }
 
 async function handleAdminQuoteResponse(
@@ -43,7 +47,7 @@ async function handleAdminQuoteResponse(
     return NextResponse.json({ error: result.message }, { status: result.status });
   }
 
-  revalidateQuotePaths(id);
+  revalidateQuotePaths(supabase, id);
 
   return NextResponse.json({ success: true });
 }

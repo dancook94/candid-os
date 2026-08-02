@@ -16,6 +16,7 @@ import {
 import { computeDefaultQuoteExpiryDate } from "@/lib/app-settings";
 import { loadAppSettings } from "@/lib/app-settings-server";
 import { loadQuoteContactDisplay } from "@/lib/crm/quote-contact-display";
+import { findQuoteRequestIdForOpportunity } from "@/lib/quote-request-link";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { createClient } from "@/lib/supabase/server";
@@ -164,12 +165,20 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
         supabase,
         opportunity.contact_id
       );
+      const linkedQuoteRequestId = await findQuoteRequestIdForOpportunity(
+        supabase,
+        {
+          opportunityId: opportunity.id,
+          companyId: opportunity.company_id,
+        }
+      );
 
       initialValues = {
         ...initialValues,
         companyId: opportunity.company_id,
         contactId: opportunity.contact_id,
         opportunityId: opportunity.id,
+        quoteRequestId: linkedQuoteRequestId ?? initialValues.quoteRequestId,
         projectName: opportunity.title,
         paymentTermsDays: resolveQuotePaymentTermsDays(
           linkedCompany?.payment_terms_days,

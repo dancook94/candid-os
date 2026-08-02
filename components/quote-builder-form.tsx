@@ -136,6 +136,49 @@ function formatSupabaseError(error: unknown) {
   return "Unable to save quote.";
 }
 
+async function resolveLinkedQuoteRequestId(input: {
+  quoteRequestId: string;
+  opportunityId: string;
+  companyId: string;
+  excludeQuoteId?: string;
+}) {
+  const response = await fetch("/api/crm/quotes/resolve-request-link", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      quoteRequestId: input.quoteRequestId || null,
+      opportunityId: input.opportunityId || null,
+      companyId: input.companyId,
+      excludeQuoteId: input.excludeQuoteId ?? null,
+    }),
+  });
+
+  const payload = (await response.json()) as {
+    quoteRequestId?: string | null;
+    error?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Unable to resolve quote request link.");
+  }
+
+  return payload.quoteRequestId ?? null;
+}
+
+async function revalidateQuoteWorkflowRoutes(input: {
+  quoteId?: string;
+  quoteRequestId?: string | null;
+}) {
+  await fetch("/api/crm/quotes/revalidate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      quoteId: input.quoteId ?? null,
+      quoteRequestId: input.quoteRequestId ?? null,
+    }),
+  });
+}
+
 function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
 }
@@ -678,6 +721,17 @@ export function QuoteBuilderForm({
     }
 
     try {
+      const resolvedQuoteRequestId = await resolveLinkedQuoteRequestId({
+        quoteRequestId,
+        opportunityId,
+        companyId,
+        excludeQuoteId: quoteId,
+      });
+
+      if (resolvedQuoteRequestId && resolvedQuoteRequestId !== quoteRequestId) {
+        setQuoteRequestId(resolvedQuoteRequestId);
+      }
+
       const versionFields = {
         version_status: targetStatus,
         expiry_date: expiryDate || null,
@@ -689,6 +743,9 @@ export function QuoteBuilderForm({
         vat_rate: vatRate,
         vat_amount: totals.vatAmount,
         total: totals.total,
+        ...(targetStatus === "sent"
+          ? { sent_at: new Date().toISOString() }
+          : {}),
       };
 
       const itemsPayload = buildItemsPayload(activeItems);
@@ -737,7 +794,7 @@ export function QuoteBuilderForm({
             quote_number: nextQuoteNumber,
             company_id: companyId,
             contact_id: contactId,
-            quote_request_id: quoteRequestId || null,
+            quote_request_id: resolvedQuoteRequestId,
             opportunity_id: linkedOpportunityId,
             project_name: trimmedProjectName,
             status: "draft",
@@ -803,16 +860,16 @@ export function QuoteBuilderForm({
           );
         }
 
-        if (quoteRequestId) {
+        if (resolvedQuoteRequestId) {
           const { error: requestUpdateError } = await supabase
             .from("quote_requests")
             .update({
-              request_status: "quoted",
+              request_status: "reviewing",
               ...(linkedOpportunityId
                 ? { opportunity_id: linkedOpportunityId }
                 : {}),
             })
-            .eq("id", quoteRequestId);
+            .eq("id", resolvedQuoteRequestId);
 
           if (requestUpdateError) {
             await rollbackCreatedQuote(createdQuote.id, createdVersion.id);
@@ -823,6 +880,11 @@ export function QuoteBuilderForm({
         if (linkedOpportunityId) {
           await syncQuoteOpportunityStage(createdQuote.id, "quote_draft_created");
         }
+
+        await revalidateQuoteWorkflowRoutes({
+          quoteId: createdQuote.id,
+          quoteRequestId: resolvedQuoteRequestId,
+        });
 
         router.push(`/admin/quotes/${createdQuote.id}`);
         router.refresh();
@@ -863,12 +925,34 @@ export function QuoteBuilderForm({
         .map((item) => item.image_storage_path)
         .filter((path): path is string => Boolean(path));
 
+      if (targetStatus === "sent") {
+        if (!selectedQuoteVersionId || selectedVersionNumber === undefined) {
+          throw new Error("Quote version is missing. Save a draft version before sending.");
+        }
+
+        const { data: currentVersionRow, error: currentVersionError } =
+          await supabase
+            .from("quote_versions")
+            .select("id, version_number")
+            .eq("quote_id", quoteId)
+            .eq("version_number", selectedVersionNumber)
+            .maybeSingle();
+
+        if (currentVersionError) {
+          throw currentVersionError;
+        }
+
+        if (!currentVersionRow) {
+          throw new Error("This quote has no current version and cannot be sent.");
+        }
+      }
+
       const { error: quoteUpdateError } = await supabase
         .from("quotes")
         .update({
           company_id: companyId,
           contact_id: contactId,
-          quote_request_id: quoteRequestId || null,
+          quote_request_id: resolvedQuoteRequestId,
           opportunity_id: opportunityId || null,
           project_name: trimmedProjectName,
           status: targetStatus,
@@ -943,11 +1027,11 @@ export function QuoteBuilderForm({
         setSuccess("Draft saved successfully.");
       }
 
-      if (targetStatus === "sent" && quoteRequestId) {
+      if (targetStatus === "sent" && resolvedQuoteRequestId) {
         const { error: requestUpdateError } = await supabase
           .from("quote_requests")
           .update({ request_status: "quoted" })
-          .eq("id", quoteRequestId);
+          .eq("id", resolvedQuoteRequestId);
 
         if (requestUpdateError) {
           throw requestUpdateError;
@@ -957,6 +1041,11 @@ export function QuoteBuilderForm({
       if (targetStatus === "sent" && opportunityId) {
         await syncQuoteOpportunityStage(quoteId, "quote_sent");
       }
+
+      await revalidateQuoteWorkflowRoutes({
+        quoteId,
+        quoteRequestId: resolvedQuoteRequestId,
+      });
 
       router.refresh();
     } catch (saveError) {

@@ -6,6 +6,7 @@ import {
   syncOpportunityFromQuoteEvent,
   type QuoteOpportunitySyncEvent,
 } from "@/lib/crm/opportunity-stage-sync";
+import { revalidateQuoteWorkflowRoutes } from "@/lib/quote-route-revalidation";
 import { createClient } from "@/lib/supabase/server";
 
 type SyncBody = {
@@ -59,6 +60,17 @@ export async function POST(
     revalidatePath("/admin/opportunities");
     revalidatePath(`/admin/opportunities/${result.opportunityId}`);
   }
+
+  const { data: quoteLink } = await supabase
+    .from("quotes")
+    .select("quote_request_id")
+    .eq("id", quoteId)
+    .maybeSingle();
+
+  revalidateQuoteWorkflowRoutes({
+    quoteId,
+    quoteRequestId: quoteLink?.quote_request_id ?? null,
+  });
 
   return NextResponse.json(result);
 }

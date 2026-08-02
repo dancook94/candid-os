@@ -18,6 +18,10 @@ import {
   isCustomerQuoteViewable,
   mapCustomerQuoteStatusToBadge,
 } from "@/lib/customer-quote-request";
+import {
+  buildQuoteRequestDisplayState,
+  loadLinkedQuotesByRequestIds,
+} from "@/lib/quote-request-link";
 import { resolveCustomerQuoteStatuses } from "@/lib/quote-customer-status";
 
 type QuoteRequest = {
@@ -139,29 +143,15 @@ export default async function QuotesPage() {
 
   const requestIds = quoteRequests.map((request) => request.id);
 
-  const { data: linkedQuotes } =
-    requestIds.length > 0
-      ? await supabase
-          .from("quotes")
-          .select("id, quote_request_id, status")
-          .in("quote_request_id", requestIds)
-          .order("updated_at", { ascending: false })
-      : { data: [] as { id: string; quote_request_id: string | null; status: string }[] };
-
-  const quoteByRequestId = new Map<string, { id: string; status: string }>();
-
-  for (const quote of linkedQuotes ?? []) {
-    if (quote.quote_request_id && !quoteByRequestId.has(quote.quote_request_id)) {
-      quoteByRequestId.set(quote.quote_request_id, {
-        id: quote.id,
-        status: quote.status,
-      });
-    }
-  }
+  const { quotesByRequestId, loadError: linkedQuotesLoadError } =
+    await loadLinkedQuotesByRequestIds(supabase, requestIds);
 
   const customerQuoteStatuses = await resolveCustomerQuoteStatuses(
     supabase,
-    (linkedQuotes ?? []).map((quote) => ({ id: quote.id, status: quote.status }))
+    [...quotesByRequestId.values()].map((quote) => ({
+      id: quote.id,
+      status: quote.status,
+    }))
   );
 
   const requestQuoteButton = (
@@ -179,13 +169,15 @@ export default async function QuotesPage() {
           actions={requestQuoteButton}
         />
 
-        {isDevelopment && queryError ? (
+        {isDevelopment && (queryError || linkedQuotesLoadError) ? (
           <Card className="rounded-2xl border-red-200 bg-red-50 shadow-sm ring-0">
             <CardContent className="p-6">
               <p className="text-sm font-medium text-red-800">
                 Supabase query error
               </p>
-              <p className="mt-2 text-sm text-red-700">{queryError}</p>
+              <p className="mt-2 text-sm text-red-700">
+                {queryError ?? linkedQuotesLoadError}
+              </p>
             </CardContent>
           </Card>
         ) : quoteRequests.length === 0 ? (
@@ -213,16 +205,23 @@ export default async function QuotesPage() {
 
                   <tbody>
                     {quoteRequests.map((request) => {
-                      const linkedQuote = quoteByRequestId.get(request.id);
+                      const linkedQuote = quotesByRequestId.get(request.id) ?? null;
+                      const quoteDisplay = buildQuoteRequestDisplayState({
+                        linkedQuote,
+                        loadError: linkedQuotesLoadError,
+                      });
                       const customerQuoteStatus = linkedQuote
                         ? (customerQuoteStatuses.get(linkedQuote.id) ??
                           linkedQuote.status)
                         : undefined;
                       const quoteActionLabel =
-                        getCustomerQuoteActionLabel(customerQuoteStatus);
+                        quoteDisplay.kind === "load_error" ||
+                        quoteDisplay.kind === "integrity_error"
+                          ? quoteDisplay.customerLabel
+                          : getCustomerQuoteActionLabel(customerQuoteStatus);
                       const quoteStatusLabel = customerQuoteStatus
                         ? getFormalQuoteStatusLabel(customerQuoteStatus)
-                        : quoteActionLabel;
+                        : quoteDisplay.customerLabel;
                       const quoteStatusIsClickable =
                         isCustomerQuoteViewable(customerQuoteStatus);
 
