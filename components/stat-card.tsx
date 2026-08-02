@@ -69,7 +69,7 @@ export function StatCard({
     return (
       <Link
         href={href}
-        className="block rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="block cursor-pointer rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         {card}
       </Link>

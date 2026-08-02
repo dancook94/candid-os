@@ -94,6 +94,7 @@ export default async function AdminPage() {
             value={quoteMetrics.quotesSent.formattedValue}
             description="Awaiting customer decision"
             meta={quoteMetrics.quotesSent.formattedQuoteCount}
+            href="/admin/quotes?status=sent"
           />
 
           <StatCard
@@ -101,6 +102,7 @@ export default async function AdminPage() {
             value={quoteMetrics.quotesAccepted.formattedValue}
             description="Confirmed quote value"
             meta={quoteMetrics.quotesAccepted.formattedQuoteCount}
+            href="/admin/quotes?status=accepted"
           />
 
           <StatCard
