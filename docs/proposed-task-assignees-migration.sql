@@ -1,6 +1,10 @@
 -- Proposed migration: multi-assignee tasks via task_assignees join table
 -- Apply manually in Supabase. Do not run automatically from the app.
 --
+-- Prerequisites:
+--   - docs/proposed-crm-foundation-migration.sql must already be applied
+--   - Requires public.tasks, public.profiles, and CRM helper functions
+--
 -- Phase 1 (this file):
 --   - Create task_assignees
 --   - Backfill from tasks.assigned_to
@@ -10,6 +14,8 @@
 -- Phase 2 (future cleanup — not in this migration):
 --   - Drop tasks.assigned_to after all app code reads task_assignees only
 --   - Remove compatibility writes to tasks.assigned_to
+--
+-- Idempotent: safe to rerun (IF NOT EXISTS, ON CONFLICT, DROP IF EXISTS).
 
 BEGIN;
 
@@ -84,6 +90,9 @@ $$;
 -- ---------------------------------------------------------------------------
 
 ALTER TABLE public.task_assignees ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "CRM admins full access to task assignees" ON public.task_assignees;
+DROP POLICY IF EXISTS "CRM sales manage assignees on accessible tasks" ON public.task_assignees;
 
 CREATE POLICY "CRM admins full access to task assignees"
   ON public.task_assignees
