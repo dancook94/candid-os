@@ -2,6 +2,7 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
 
 import { getDashboardRoleRedirect } from "@/lib/auth-redirect";
 import { loadCustomerCompanyBranding } from "@/lib/customer-company-branding";
+import { loadCustomerSettingsProfile } from "@/lib/customer-settings/queries";
 import { getCustomerPortalStatusSubtitle } from "@/lib/customer-portal-status";
 import { loadProfileAvatarSignedUrl } from "@/lib/staff-avatar-server";
 
@@ -11,6 +12,7 @@ export type CustomerPortalProfile = {
   account_status: string | null;
   user_role: string | null;
   avatar_storage_path?: string | null;
+  updated_at?: string | null;
 };
 
 export function resolveCustomerDisplayName(
@@ -29,15 +31,7 @@ export async function loadCustomerPortalProfile(
   supabase: SupabaseClient,
   userId: string
 ) {
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select(
-      "full_name, company_id, account_status, user_role, avatar_storage_path, updated_at"
-    )
-    .eq("id", userId)
-    .single();
-
-  return profile;
+  return loadCustomerSettingsProfile(supabase, userId);
 }
 
 export async function requireCustomerPortalUser(

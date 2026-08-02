@@ -3,7 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CustomerSettingsContext } from "@/lib/customer-settings/auth";
 import { loadCompanyAddresses } from "@/lib/customer-settings/addresses";
 import { loadContactNotificationPreferences } from "@/lib/customer-settings/notifications";
-import { fetchContactsList } from "@/lib/crm/contacts";
+import { loadCompanyContactsForSettings } from "@/lib/customer-settings/queries";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type CustomerSettingsPayload = {
@@ -14,15 +14,7 @@ export type CustomerSettingsPayload = {
   };
   contact: CustomerSettingsContext["contact"];
   company: CustomerSettingsContext["company"];
-  companyContacts: Array<{
-    id: string;
-    full_name: string;
-    email: string | null;
-    phone: string | null;
-    job_title: string | null;
-    is_primary: boolean;
-    isSelf: boolean;
-  }>;
+  companyContacts: Awaited<ReturnType<typeof loadCompanyContactsForSettings>>;
   addresses: Awaited<ReturnType<typeof loadCompanyAddresses>>;
   notifications: Awaited<ReturnType<typeof loadContactNotificationPreferences>>;
 };
@@ -33,8 +25,12 @@ export async function loadCustomerSettingsPayload(
 ): Promise<CustomerSettingsPayload> {
   const adminClient = createAdminClient();
 
-  const [{ contacts }, addresses, notifications] = await Promise.all([
-    fetchContactsList(adminClient, { companyId: context.company.id }),
+  const [companyContacts, addresses, notifications] = await Promise.all([
+    loadCompanyContactsForSettings(
+      adminClient,
+      context.company.id,
+      context.user.id
+    ),
     loadCompanyAddresses(adminClient, context.company.id),
     context.contact
       ? loadContactNotificationPreferences(adminClient, context.contact.id)
@@ -62,17 +58,7 @@ export async function loadCustomerSettingsPayload(
     },
     contact: context.contact,
     company: context.company,
-    companyContacts: contacts
-      .filter((row) => row.is_active)
-      .map((row) => ({
-        id: row.id,
-        full_name: row.full_name,
-        email: row.email,
-        phone: row.phone,
-        job_title: row.job_title,
-        is_primary: row.is_primary,
-        isSelf: row.profile_id === context.user.id,
-      })),
+    companyContacts,
     addresses,
     notifications,
   };

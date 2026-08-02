@@ -1,6 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { isMissingRelationError } from "@/lib/customer-settings/errors";
+import {
+  isMissingRelationError,
+  logPortalSettingsQueryError,
+} from "@/lib/customer-settings/errors";
 import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   NOTIFICATION_PREFERENCE_KEYS,
@@ -46,6 +49,10 @@ export async function loadContactNotificationPreferences(
 
   if (error) {
     if (isMissingRelationError(error)) {
+      logPortalSettingsQueryError(
+        "contact_notification_preferences.select(preferences).eq(contact_id)",
+        error
+      );
       return {
         available: false,
         preferences: { ...DEFAULT_NOTIFICATION_PREFERENCES },
@@ -53,7 +60,15 @@ export async function loadContactNotificationPreferences(
       };
     }
 
-    throw error;
+    logPortalSettingsQueryError(
+      "contact_notification_preferences.select(preferences).eq(contact_id)",
+      error
+    );
+    return {
+      available: false,
+      preferences: { ...DEFAULT_NOTIFICATION_PREFERENCES },
+      updatedAt: null,
+    };
   }
 
   if (!data) {

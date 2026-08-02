@@ -1,6 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { isMissingRelationError } from "@/lib/customer-settings/errors";
+import {
+  isMissingRelationError,
+  logPortalSettingsQueryError,
+} from "@/lib/customer-settings/errors";
 
 export type CompanyAddressRecord = {
   id: string;
@@ -30,10 +33,17 @@ export type CompanyAddressesFeature = {
 const ADDRESS_SELECT =
   "id, company_id, label, recipient_name, address_line_1, address_line_2, city, county, postcode, country, phone, delivery_instructions, is_default_delivery, is_default_billing, is_active, created_at, updated_at";
 
+function handleAddressQueryError(query: string, error: { code?: string; message?: string; details?: string | null; hint?: string | null }) {
+  logPortalSettingsQueryError(query, error);
+  return { available: false, addresses: [] } satisfies CompanyAddressesFeature;
+}
+
 export async function loadCompanyAddresses(
   adminClient: SupabaseClient,
   companyId: string
 ): Promise<CompanyAddressesFeature> {
+  const query = `company_addresses.select(${ADDRESS_SELECT}).eq(company_id).eq(is_active)`;
+
   const { data, error } = await adminClient
     .from("company_addresses")
     .select(ADDRESS_SELECT)
@@ -43,10 +53,10 @@ export async function loadCompanyAddresses(
 
   if (error) {
     if (isMissingRelationError(error)) {
-      return { available: false, addresses: [] };
+      return handleAddressQueryError(query, error);
     }
 
-    throw error;
+    return handleAddressQueryError(query, error);
   }
 
   return {
@@ -59,6 +69,8 @@ export async function loadAllCompanyAddressesForAdmin(
   adminClient: SupabaseClient,
   companyId: string
 ): Promise<CompanyAddressesFeature> {
+  const query = `company_addresses.select(${ADDRESS_SELECT}).eq(company_id)`;
+
   const { data, error } = await adminClient
     .from("company_addresses")
     .select(ADDRESS_SELECT)
@@ -68,10 +80,10 @@ export async function loadAllCompanyAddressesForAdmin(
 
   if (error) {
     if (isMissingRelationError(error)) {
-      return { available: false, addresses: [] };
+      return handleAddressQueryError(query, error);
     }
 
-    throw error;
+    return handleAddressQueryError(query, error);
   }
 
   return {

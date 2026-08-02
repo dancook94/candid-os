@@ -640,8 +640,8 @@ export function CustomerSettingsPanel({ initialData }: CustomerSettingsPanelProp
         <div className="space-y-6">
           {!data.addresses.available ? (
             <EmptyState
-              title="Saved addresses coming soon"
-              description="Shared company addresses require the customer settings database migration. Once applied, addresses added here will appear in admin Company 360 and quote forms."
+              title="Saved addresses unavailable"
+              description="Saved addresses require the proposed database migration (docs/proposed-customer-settings-migration.sql)."
             />
           ) : (
             <>
@@ -1019,8 +1019,8 @@ export function CustomerSettingsPanel({ initialData }: CustomerSettingsPanelProp
           <CardContent>
             {!data.notifications.available ? (
               <EmptyState
-                title="Notification preferences coming soon"
-                description="Apply the customer settings database migration to enable shared notification preferences."
+                title="Notification preferences unavailable"
+                description="Notification preferences require the proposed database migration (docs/proposed-customer-settings-migration.sql)."
               />
             ) : (
               <form className="space-y-4" onSubmit={handleNotificationsSubmit}>

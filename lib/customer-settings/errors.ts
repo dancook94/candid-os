@@ -8,10 +8,10 @@ export class CustomerSettingsError extends Error {
   }
 }
 
-export function isMissingRelationError(error: { code?: string; message?: string }) {
-  return (
-    error.code === "42P01" ||
-    (error.message?.includes("relation") &&
-      error.message.includes("does not exist"))
-  );
-}
+export {
+  isMissingColumnError,
+  isMissingRelationError,
+  isSchemaMismatchError,
+  logPortalSettingsQueryError,
+  toCustomerFacingDatabaseMessage,
+} from "@/lib/customer-settings/query-errors";
