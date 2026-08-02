@@ -13,56 +13,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { QuoteRequestAttachmentRecord } from "@/lib/quote-request-attachments";
+import type { AdminQuoteRequestDetail } from "@/lib/admin-quote-request-detail";
+import { loadAdminQuoteRequestDetail } from "@/lib/admin-quote-request-detail";
 import { formatAdminQuoteStatusLabel } from "@/lib/admin-quote-status";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { formatCountryLabel } from "@/lib/quote-request/normalize-address";
 import { createClient } from "@/lib/supabase/server";
-
-type QuoteRequestDetail = {
-  id: string;
-  company_id: string;
-  requested_by: string;
-  project_name: string;
-  description: string;
-  fulfilment_method: string;
-  requested_date: string;
-  requested_time: string | null;
-  delivery_address_line_1: string | null;
-  delivery_address_line_2: string | null;
-  delivery_city: string | null;
-  delivery_county: string | null;
-  delivery_postcode: string | null;
-  delivery_contact_name: string | null;
-  delivery_contact_phone: string | null;
-  delivery_country: string | null;
-  delivery_instructions: string | null;
-  delivery_address_label: string | null;
-  selected_company_address_id: string | null;
-  delivery_address_source: string | null;
-  purchase_order_number: string | null;
-  notes: string | null;
-  deadline_status: string;
-  request_status: string;
-  created_at: string;
-};
-
-const QUOTE_REQUEST_DETAIL_SELECT =
-  "id, company_id, requested_by, project_name, description, fulfilment_method, requested_date, requested_time, delivery_address_line_1, delivery_address_line_2, delivery_city, delivery_county, delivery_postcode, delivery_contact_name, delivery_contact_phone, delivery_country, delivery_instructions, delivery_address_label, selected_company_address_id, delivery_address_source, purchase_order_number, notes, deadline_status, request_status, created_at";
-
-function formatDeliveryAddressSource(source: string | null | undefined) {
-  switch (source) {
-    case "saved":
-      return "Selected from saved addresses";
-    case "new_saved":
-      return "Newly entered and saved";
-    case "new":
-      return "Newly entered (one-off)";
-    default:
-      return "Submitted snapshot";
-  }
-}
 
 type BadgeStatus =
   | "pending"
@@ -97,6 +54,19 @@ const statusVariantMap: Record<string, BadgeStatus> = {
   cancelled: "declined",
   alternative_proposed: "sent",
 };
+
+function formatDeliveryAddressSource(source: string | null | undefined) {
+  switch (source) {
+    case "saved":
+      return "Selected from saved addresses";
+    case "new_saved":
+      return "Newly entered and saved";
+    case "new":
+      return "Newly entered (one-off)";
+    default:
+      return "Submitted snapshot";
+  }
+}
 
 function formatDate(dateString: string) {
   return new Date(dateString).toLocaleDateString("en-GB", {
@@ -154,7 +124,7 @@ function mapQuoteStatusToBadge(value: string): BadgeStatus {
   return "draft";
 }
 
-function formatDeliveryAddress(quoteRequest: QuoteRequestDetail) {
+function formatDeliveryAddress(quoteRequest: AdminQuoteRequestDetail) {
   const address = [
     quoteRequest.delivery_address_line_1,
     quoteRequest.delivery_address_line_2,
@@ -171,7 +141,7 @@ function formatDeliveryAddress(quoteRequest: QuoteRequestDetail) {
   return address || "—";
 }
 
-function formatDeliveryContact(quoteRequest: QuoteRequestDetail) {
+function formatDeliveryContact(quoteRequest: AdminQuoteRequestDetail) {
   if (
     !quoteRequest.delivery_contact_name &&
     !quoteRequest.delivery_contact_phone
@@ -182,6 +152,14 @@ function formatDeliveryContact(quoteRequest: QuoteRequestDetail) {
   return [quoteRequest.delivery_contact_name, quoteRequest.delivery_contact_phone]
     .filter(Boolean)
     .join(" · ");
+}
+
+function SectionWarning({ message }: { message: string }) {
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+      {message}
+    </div>
+  );
 }
 
 type AdminQuoteRequestDetailPageProps = {
@@ -198,52 +176,49 @@ export default async function AdminQuoteRequestDetailPage({
     `/admin/quote-requests/${id}`
   );
 
-  const { data: quoteRequest, error } = await supabase
-    .from("quote_requests")
-    .select(QUOTE_REQUEST_DETAIL_SELECT)
-    .eq("id", id)
-    .maybeSingle();
+  const loadResult = await loadAdminQuoteRequestDetail(supabase, id);
 
-  if (error || !quoteRequest) {
+  if (loadResult.kind === "not_found") {
     notFound();
   }
 
-  const [{ data: company }, { data: requester }, { data: attachments }, { data: linkedQuote }, { data: linkedAddress }] =
-    await Promise.all([
-      supabase
-        .from("companies")
-        .select("company_name")
-        .eq("id", quoteRequest.company_id)
-        .maybeSingle(),
-      supabase
-        .from("profiles")
-        .select("full_name")
-        .eq("id", quoteRequest.requested_by)
-        .maybeSingle(),
-      supabase
-        .from("quote_request_attachments")
-        .select("id, file_name, file_size, file_type, storage_path, created_at")
-        .eq("quote_request_id", id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("quotes")
-        .select("id, status, quote_number")
-        .eq("quote_request_id", id)
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      quoteRequest.selected_company_address_id
-        ? supabase
-            .from("company_addresses")
-            .select("id, label, is_active")
-            .eq("id", quoteRequest.selected_company_address_id)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
-    ]);
-
-  const quoteAttachments: QuoteRequestAttachmentRecord[] = attachments ?? [];
-  const isDelivery = quoteRequest.fulfilment_method === "delivery";
   const shellProps = await buildAdminAppShellProps(supabase, profile);
+
+  if (loadResult.kind === "core_error") {
+    return (
+      <AppShell {...shellProps}>
+        <div className="mx-auto max-w-4xl">
+          <PageHeader
+            title="Quote request"
+            description="Admin quote request review"
+            actions={
+              <Link href="/admin/quote-requests">
+                <Button variant="outline">Back to inbox</Button>
+              </Link>
+            }
+          />
+
+          <Card className="portal-surface overflow-hidden">
+            <CardHeader>
+              <CardTitle className="text-lg font-semibold">
+                {loadResult.message}
+              </CardTitle>
+            </CardHeader>
+            {loadResult.devMessage ? (
+              <CardContent>
+                <p className="text-sm text-muted-foreground">
+                  {loadResult.devMessage}
+                </p>
+              </CardContent>
+            ) : null}
+          </Card>
+        </div>
+      </AppShell>
+    );
+  }
+
+  const { quoteRequest, related, warnings } = loadResult;
+  const isDelivery = quoteRequest.fulfilment_method === "delivery";
 
   return (
     <AppShell {...shellProps}>
@@ -253,9 +228,11 @@ export default async function AdminQuoteRequestDetailPage({
           description="Admin quote request review"
           actions={
             <div className="flex flex-wrap gap-2">
-              {linkedQuote ? (
-                <Link href={`/admin/quotes/${linkedQuote.id}`}>
-                  <Button>View quote Q-{linkedQuote.quote_number}</Button>
+              {related.linkedQuote ? (
+                <Link href={`/admin/quotes/${related.linkedQuote.id}`}>
+                  <Button>
+                    View quote Q-{related.linkedQuote.quote_number}
+                  </Button>
                 </Link>
               ) : (
                 <Link href={`/admin/quotes/new?quoteRequestId=${quoteRequest.id}`}>
@@ -268,6 +245,14 @@ export default async function AdminQuoteRequestDetailPage({
             </div>
           }
         />
+
+        {warnings.length > 0 ? (
+          <div className="mb-4 space-y-2">
+            {warnings.map((warning) => (
+              <SectionWarning key={warning} message={warning} />
+            ))}
+          </div>
+        ) : null}
 
         <Card className="portal-surface overflow-hidden">
           <CardHeader className="border-b border-border">
@@ -295,13 +280,15 @@ export default async function AdminQuoteRequestDetailPage({
               <div>
                 <p className="portal-field-label">Quote status</p>
                 <div className="mt-2">
-                  {linkedQuote ? (
-                    <Link href={`/admin/quotes/${linkedQuote.id}`}>
+                  {related.linkedQuote ? (
+                    <Link href={`/admin/quotes/${related.linkedQuote.id}`}>
                       <StatusBadge
-                        status={mapQuoteStatusToBadge(linkedQuote.status)}
-                        label={formatAdminQuoteStatusLabel(linkedQuote.status)}
+                        status={mapQuoteStatusToBadge(related.linkedQuote.status)}
+                        label={formatAdminQuoteStatusLabel(related.linkedQuote.status)}
                       />
                     </Link>
+                  ) : related.linkedQuoteWarning ? (
+                    <span className="text-muted-foreground">Unavailable</span>
                   ) : (
                     <span className="text-muted-foreground">No quote yet</span>
                   )}
@@ -310,7 +297,11 @@ export default async function AdminQuoteRequestDetailPage({
             </div>
           </CardHeader>
 
-          <CardContent className="pt-6">
+          <CardContent className="space-y-5 pt-6">
+            {related.linkedQuoteWarning ? (
+              <SectionWarning message={related.linkedQuoteWarning} />
+            ) : null}
+
             <dl className="space-y-5 text-sm">
               <div>
                 <dt className="text-neutral-500">Project name</dt>
@@ -329,15 +320,25 @@ export default async function AdminQuoteRequestDetailPage({
               <div>
                 <dt className="text-neutral-500">Company</dt>
                 <dd className="mt-1 font-medium text-neutral-950">
-                  {company?.company_name || "Unknown company"}
+                  {related.company?.company_name || "Unknown company"}
                 </dd>
+                {related.companyWarning ? (
+                  <p className="mt-1 text-xs text-amber-800">
+                    {related.companyWarning}
+                  </p>
+                ) : null}
               </div>
 
               <div>
                 <dt className="text-neutral-500">Requester</dt>
                 <dd className="mt-1 font-medium text-neutral-950">
-                  {requester?.full_name || "Unknown requester"}
+                  {related.requester?.full_name || "Unknown requester"}
                 </dd>
+                {related.requesterWarning ? (
+                  <p className="mt-1 text-xs text-amber-800">
+                    {related.requesterWarning}
+                  </p>
+                ) : null}
               </div>
 
               <div>
@@ -411,7 +412,7 @@ export default async function AdminQuoteRequestDetailPage({
                     </div>
                   ) : null}
 
-                  {linkedAddress ? (
+                  {related.linkedAddress ? (
                     <div>
                       <dt className="text-neutral-500">Saved address link</dt>
                       <dd className="mt-1 text-neutral-950">
@@ -419,9 +420,16 @@ export default async function AdminQuoteRequestDetailPage({
                           href={`/admin/companies/${quoteRequest.company_id}`}
                           className="underline-offset-4 hover:underline"
                         >
-                          {linkedAddress.label || "Saved address"}
-                          {!linkedAddress.is_active ? " (inactive)" : ""}
+                          {related.linkedAddress.label || "Saved address"}
+                          {!related.linkedAddress.is_active ? " (inactive)" : ""}
                         </Link>
+                      </dd>
+                    </div>
+                  ) : related.linkedAddressWarning ? (
+                    <div>
+                      <dt className="text-neutral-500">Saved address link</dt>
+                      <dd className="mt-1 text-xs text-amber-800">
+                        {related.linkedAddressWarning}
                       </dd>
                     </div>
                   ) : null}
@@ -472,14 +480,14 @@ export default async function AdminQuoteRequestDetailPage({
               <div>
                 <dt className="text-neutral-500">Quote status</dt>
                 <dd className="mt-1">
-                  {linkedQuote ? (
+                  {related.linkedQuote ? (
                     <Link
-                      href={`/admin/quotes/${linkedQuote.id}`}
+                      href={`/admin/quotes/${related.linkedQuote.id}`}
                       className="inline-flex"
                     >
                       <StatusBadge
-                        status={mapQuoteStatusToBadge(linkedQuote.status)}
-                        label={formatAdminQuoteStatusLabel(linkedQuote.status)}
+                        status={mapQuoteStatusToBadge(related.linkedQuote.status)}
+                        label={formatAdminQuoteStatusLabel(related.linkedQuote.status)}
                       />
                     </Link>
                   ) : (
@@ -491,7 +499,13 @@ export default async function AdminQuoteRequestDetailPage({
           </CardContent>
         </Card>
 
-        <QuoteRequestAttachmentsList attachments={quoteAttachments} />
+        {related.attachmentsWarning ? (
+          <div className="mt-4">
+            <SectionWarning message={related.attachmentsWarning} />
+          </div>
+        ) : null}
+
+        <QuoteRequestAttachmentsList attachments={related.attachments} />
 
         <AdminQuoteRequestActions
           quoteRequestId={quoteRequest.id}
