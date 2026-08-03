@@ -11,7 +11,11 @@ import {
 } from "@/lib/invoice/display-status";
 import type { InvoiceDraftRecord, InvoiceItemRecord } from "@/lib/invoice/types";
 import { invoiceLineNeedsPricing, normalizeInvoiceItemNumericFields } from "@/lib/invoice/money";
-import { calculateInvoiceTotalGroups } from "@/lib/invoice/total-groups";
+import {
+  buildInvoiceCommercialSummary,
+} from "@/lib/invoice/total-groups";
+import { quoteVersionVatRateToPercent, type AcceptedQuoteLine } from "@/lib/invoice/quote-lines";
+import { loadAcceptedQuoteItems } from "@/lib/manifest/service";
 import { getBillableInvoiceLines } from "@/lib/invoice/validation";
 import { MANIFEST_ITEM_SELECT } from "@/lib/manifest/constants";
 import type { ManifestItemRecord } from "@/lib/manifest/types";
@@ -74,7 +78,8 @@ export type AdminInvoiceListRow = {
   taxTotal: number;
   total: number;
   originalQuoteTotal: number;
-  changesTotal: number;
+  cancellationsTotal: number;
+  additionsTotal: number;
   unpricedCount: number;
   productionCompletedAt: string | null;
   approvedAt: string | null;
@@ -294,7 +299,7 @@ export async function fetchAdminInvoicesList(
     adminClient
       .from("jobs")
       .select(
-        "id, job_reference, project_name, commercial_status, status, updated_at"
+        "id, job_reference, project_name, commercial_status, status, updated_at, quote_version_id"
       )
       .in("id", jobIds),
     adminClient.from("companies").select("id, company_name").in("id", companyIds),
@@ -370,6 +375,70 @@ export async function fetchAdminInvoicesList(
     manifestByJobId.set(item.job_id, bucket);
   }
 
+  const quoteVersionIds = [
+    ...new Set(
+      (jobsResult.data ?? [])
+        .map((job) => job.quote_version_id as string | null)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ];
+
+  const [quoteItemsResult, quoteVersionsResult] = await Promise.all([
+    quoteVersionIds.length
+      ? adminClient
+          .from("quote_items")
+          .select(
+            "id, quote_version_id, title, description, quantity, unit_price, line_total, is_optional, sort_order"
+          )
+          .in("quote_version_id", quoteVersionIds)
+          .order("sort_order")
+      : Promise.resolve({ data: [], error: null }),
+    quoteVersionIds.length
+      ? adminClient
+          .from("quote_versions")
+          .select("id, vat_rate")
+          .in("id", quoteVersionIds)
+      : Promise.resolve({ data: [], error: null }),
+  ]);
+
+  if (quoteItemsResult.error || quoteVersionsResult.error) {
+    const message =
+      quoteItemsResult.error?.message ??
+      quoteVersionsResult.error?.message ??
+      "Unable to load quote data for invoice drafts.";
+
+    if (process.env.NODE_ENV === "development") {
+      console.error("[admin invoices] quote query failed:", message);
+    }
+
+    return {
+      invoices: [],
+      metrics: {
+        needsPricingCount: 0,
+        readyForReviewCount: 0,
+        readyForXeroCount: 0,
+        totalDraftValue: 0,
+      },
+      schemaMissing: false,
+      queryError: message,
+    };
+  }
+
+  const quoteItemsByVersionId = new Map<string, AcceptedQuoteLine[]>();
+  for (const item of quoteItemsResult.data ?? []) {
+    const versionId = item.quote_version_id as string;
+    const bucket = quoteItemsByVersionId.get(versionId) ?? [];
+    bucket.push(item as AcceptedQuoteLine);
+    quoteItemsByVersionId.set(versionId, bucket);
+  }
+
+  const vatRateByVersionId = new Map(
+    (quoteVersionsResult.data ?? []).map((version) => [
+      version.id as string,
+      quoteVersionVatRateToPercent(version.vat_rate as number | null),
+    ])
+  );
+
   const productionCompletedAtByJobId = new Map<string, string | null>();
   if (jobIds.length > 0) {
     const { data: productionItems } = await adminClient
@@ -407,14 +476,25 @@ export async function fetchAdminInvoicesList(
   const rows: AdminInvoiceListRow[] = typedDrafts.map((draft) => {
     const items = (itemsByDraftId.get(draft.id) ?? []).map(normalizeInvoiceItemNumericFields);
     const jobManifest = manifestByJobId.get(draft.job_id) ?? [];
-    const manifestById = new Map(jobManifest.map((item) => [item.id, item]));
-    const totalGroups = calculateInvoiceTotalGroups(items, manifestById);
+    const job = jobById.get(draft.job_id);
+    const quoteVersionId = job?.quote_version_id as string | null | undefined;
+    const quoteItems = quoteVersionId
+      ? quoteItemsByVersionId.get(quoteVersionId) ?? []
+      : [];
+    const taxRatePercent = quoteVersionId
+      ? vatRateByVersionId.get(quoteVersionId) ?? 20
+      : 20;
+    const commercialSummary = buildInvoiceCommercialSummary({
+      quoteItems,
+      manifestItems: jobManifest,
+      invoiceItems: items,
+      taxRatePercent,
+    });
     const unpricedCount = countUnpricedItems(items);
     const displayStatus = deriveInvoiceDisplayStatus({
       status: draft.status,
       unpricedCount,
     });
-    const job = jobById.get(draft.job_id);
     const productionCompletedAt =
       productionCompletedAtByJobId.get(draft.job_id) ?? null;
 
@@ -433,11 +513,12 @@ export async function fetchAdminInvoicesList(
       draftStatus: draft.status,
       displayStatus,
       commercialStatus: job?.commercial_status ?? "not_ready",
-      subtotal: totalGroups.finalInvoice.subtotal,
-      taxTotal: totalGroups.finalInvoice.tax_total,
-      total: totalGroups.finalInvoice.total,
-      originalQuoteTotal: totalGroups.originalQuote.total,
-      changesTotal: totalGroups.productionChanges.total,
+      subtotal: commercialSummary.totalGroups.finalInvoice.subtotal,
+      taxTotal: commercialSummary.totalGroups.finalInvoice.tax_total,
+      total: commercialSummary.totalGroups.finalInvoice.total,
+      originalQuoteTotal: commercialSummary.quoteAudit.beforeCancellations.total,
+      cancellationsTotal: commercialSummary.quoteAudit.cancellations.total,
+      additionsTotal: commercialSummary.totalGroups.productionChanges.total,
       unpricedCount,
       productionCompletedAt,
       approvedAt: draft.approved_at,

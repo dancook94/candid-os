@@ -195,3 +195,26 @@ export function findMissingQuotedInvoiceLines(input: {
     })
     .filter((item): item is ManifestItemRecord => Boolean(item));
 }
+
+export type InvoiceCommercialSummary = {
+  quoteAudit: QuoteTotalAudit;
+  totalGroups: InvoiceTotalGroups;
+};
+
+export function buildInvoiceCommercialSummary(input: {
+  quoteItems: AcceptedQuoteLine[];
+  manifestItems: ManifestItemRecord[];
+  invoiceItems: InvoiceItemRecord[];
+  taxRatePercent: number;
+}): InvoiceCommercialSummary {
+  const manifestById = new Map(input.manifestItems.map((item) => [item.id, item]));
+
+  return {
+    quoteAudit: calculateQuoteTotalAudit({
+      quoteItems: input.quoteItems,
+      manifestItems: input.manifestItems,
+      taxRatePercent: input.taxRatePercent,
+    }),
+    totalGroups: calculateInvoiceTotalGroups(input.invoiceItems, manifestById),
+  };
+}

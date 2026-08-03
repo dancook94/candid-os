@@ -31,11 +31,13 @@ import {
   normalizeQuoteLineDiagnostic,
 } from "@/lib/invoice/quote-lines";
 import type {
+  InvoiceItemRecord,
   InvoiceLineView,
   InvoiceReviewData,
   InvoiceTotalGroup,
   XeroPayloadPreview,
 } from "@/lib/invoice/types";
+import type { ManifestItemRecord } from "@/lib/manifest/types";
 import {
   MANIFEST_BILLING_STATUS_LABELS,
   MANIFEST_SOURCE_TYPE_LABELS,
@@ -82,26 +84,94 @@ function buildLiveLineSnapshot(line: InvoiceLineView): LiveLineSnapshot {
   };
 }
 
-function TotalGroupPanel({
-  title,
-  totals,
-  emphasized = false,
+function formatReviewDate(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  return new Date(value).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function deriveQuoteTaxRatePercent(beforeCancellations: InvoiceTotalGroup) {
+  if (beforeCancellations.subtotal <= 0) {
+    return 20;
+  }
+
+  return Math.round((beforeCancellations.tax_total / beforeCancellations.subtotal) * 100);
+}
+
+function manifestLineTotals(item: ManifestItemRecord, taxRatePercent: number) {
+  const quantity = item.quoted_quantity ?? item.quantity ?? 0;
+  const unitPrice = item.quote_unit_price ?? 0;
+
+  return calculateInvoiceLineTotals({
+    quantity,
+    unitPrice,
+    taxRate: taxRatePercent,
+  });
+}
+
+function OriginalAcceptedQuoteSummaryCard({
+  beforeCancellations,
+  cancellations,
+  adjustedOriginal,
 }: {
-  title: string;
-  totals: InvoiceTotalGroup;
-  emphasized?: boolean;
+  beforeCancellations: InvoiceTotalGroup;
+  cancellations: InvoiceTotalGroup;
+  adjustedOriginal: InvoiceTotalGroup;
 }) {
   return (
-    <div
-      className={
-        emphasized
-          ? "portal-surface rounded-xl border-2 border-foreground/10 bg-card p-6 shadow-sm"
-          : "portal-surface rounded-xl border border-border bg-card p-6 shadow-sm"
-      }
-    >
-      <h2 className={emphasized ? "text-lg font-semibold" : "text-base font-semibold"}>
-        {title}
-      </h2>
+    <div className="portal-surface rounded-xl border border-border bg-card p-6 shadow-sm">
+      <h2 className="text-base font-semibold">Original accepted quote</h2>
+      <dl className="mt-4 space-y-3 text-sm">
+        <div className="flex justify-between">
+          <dt className="text-muted-foreground">Subtotal</dt>
+          <dd className="font-medium">{formatGbp(beforeCancellations.subtotal)}</dd>
+        </div>
+        <div className="flex justify-between">
+          <dt className="text-muted-foreground">VAT</dt>
+          <dd className="font-medium">{formatGbp(beforeCancellations.tax_total)}</dd>
+        </div>
+        <div className="flex justify-between border-t border-border pt-3">
+          <dt className="font-medium">Total</dt>
+          <dd className="font-semibold">{formatGbp(beforeCancellations.total)}</dd>
+        </div>
+      </dl>
+
+      {cancellations.total > 0 ? (
+        <div className="mt-4 space-y-3 border-t border-border pt-4 text-sm">
+          <div className="flex justify-between gap-4">
+            <dt className="text-muted-foreground">Less customer cancellations</dt>
+            <dd className="font-medium text-destructive">
+              -{formatGbp(cancellations.total)}
+            </dd>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Net -{formatGbp(cancellations.subtotal)} · VAT -{formatGbp(cancellations.tax_total)}
+          </p>
+        </div>
+      ) : null}
+
+      <div className="mt-4 flex justify-between border-t border-border pt-4 text-sm">
+        <dt className="font-medium">Adjusted quoted work</dt>
+        <dd className="font-semibold">{formatGbp(adjustedOriginal.total)}</dd>
+      </div>
+    </div>
+  );
+}
+
+function AdditionalBillableWorkSummaryCard({
+  totals,
+}: {
+  totals: InvoiceTotalGroup;
+}) {
+  return (
+    <div className="portal-surface rounded-xl border border-border bg-card p-6 shadow-sm">
+      <h2 className="text-base font-semibold">Additional billable work</h2>
       <dl className="mt-4 space-y-3 text-sm">
         <div className="flex justify-between">
           <dt className="text-muted-foreground">Subtotal</dt>
@@ -111,19 +181,172 @@ function TotalGroupPanel({
           <dt className="text-muted-foreground">VAT</dt>
           <dd className="font-medium">{formatGbp(totals.tax_total)}</dd>
         </div>
-        <div
-          className={
-            emphasized
-              ? "flex justify-between border-t border-border pt-3 text-base"
-              : "flex justify-between border-t border-border pt-3"
-          }
-        >
-          <dt className={emphasized ? "font-semibold" : "text-muted-foreground"}>Total</dt>
-          <dd className={emphasized ? "font-semibold" : "font-medium"}>
-            {formatGbp(totals.total)}
-          </dd>
+        <div className="flex justify-between border-t border-border pt-3">
+          <dt className="font-medium">Total</dt>
+          <dd className="font-semibold">{formatGbp(totals.total)}</dd>
         </div>
       </dl>
+    </div>
+  );
+}
+
+function FinalInvoiceSummaryCard({
+  adjustedOriginal,
+  additionalWork,
+  finalInvoice,
+}: {
+  adjustedOriginal: InvoiceTotalGroup;
+  additionalWork: InvoiceTotalGroup;
+  finalInvoice: InvoiceTotalGroup;
+}) {
+  return (
+    <div className="portal-surface rounded-xl border-2 border-foreground/10 bg-card p-6 shadow-sm">
+      <h2 className="text-lg font-semibold">Final invoice total</h2>
+      <dl className="mt-4 space-y-2 text-sm">
+        <div className="flex justify-between gap-4">
+          <dt className="text-muted-foreground">Adjusted quoted work</dt>
+          <dd className="font-medium">{formatGbp(adjustedOriginal.total)}</dd>
+        </div>
+        <div className="flex justify-between gap-4">
+          <dt className="text-muted-foreground">Additional billable work</dt>
+          <dd className="font-medium">{formatGbp(additionalWork.total)}</dd>
+        </div>
+      </dl>
+      <dl className="mt-4 space-y-3 border-t border-border pt-4 text-sm">
+        <div className="flex justify-between">
+          <dt className="text-muted-foreground">Invoice subtotal</dt>
+          <dd className="font-medium">{formatGbp(finalInvoice.subtotal)}</dd>
+        </div>
+        <div className="flex justify-between">
+          <dt className="text-muted-foreground">VAT</dt>
+          <dd className="font-medium">{formatGbp(finalInvoice.tax_total)}</dd>
+        </div>
+        <div className="flex justify-between border-t border-border pt-3 text-base">
+          <dt className="font-semibold">Final total</dt>
+          <dd className="font-semibold">{formatGbp(finalInvoice.total)}</dd>
+        </div>
+      </dl>
+    </div>
+  );
+}
+
+function OriginallyQuotedItemCard({
+  item,
+  quoteTaxRatePercent,
+}: {
+  item: ManifestItemRecord;
+  quoteTaxRatePercent: number;
+}) {
+  const isCancelled = isManifestQuoteItemCancelled(item);
+  const lineTotals = manifestLineTotals(item, quoteTaxRatePercent);
+  const cancelledDate = formatReviewDate(item.customer_cancelled_at);
+
+  return (
+    <div
+      className={
+        isCancelled
+          ? "rounded-lg border border-border/50 bg-muted/25 p-4 text-sm text-muted-foreground"
+          : "rounded-lg border border-border/70 p-4 text-sm"
+      }
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className={isCancelled ? "font-medium text-foreground/80" : "font-medium"}>
+          {item.item_name}
+        </p>
+        <span className="text-xs text-muted-foreground">
+          {MANIFEST_SOURCE_TYPE_LABELS[item.source_type]}
+        </span>
+      </div>
+
+      {isCancelled ? (
+        <div className="mt-3 rounded-lg border border-border/60 bg-muted/40 p-3 text-xs">
+          <p className="font-medium text-foreground/80">Cancelled by customer</p>
+          <p className="mt-2">
+            This item formed part of the accepted quotation but was cancelled before
+            production.
+          </p>
+          <p className="mt-1">Excluded from the final invoice.</p>
+        </div>
+      ) : null}
+
+      {item.description ? (
+        <p className="mt-3 whitespace-pre-wrap text-muted-foreground">{item.description}</p>
+      ) : null}
+
+      <p className="mt-3 text-muted-foreground">
+        Qty {item.quoted_quantity ?? item.quantity ?? "—"}
+        {item.quote_unit_price !== null ? ` · ${formatGbp(item.quote_unit_price)} each` : ""}
+        {" · "}
+        Line total {formatGbp(lineTotals.netTotal)}
+        {" · "}
+        VAT {formatGbp(lineTotals.vatAmount)}
+        {" · "}
+        Gross {formatGbp(lineTotals.grossTotal)}
+      </p>
+      <p className="mt-1 text-muted-foreground">
+        Requirement: {PRODUCTION_REQUIREMENT_STATUS_LABELS[item.production_requirement_status]}
+        {" · "}
+        Billing: {MANIFEST_BILLING_STATUS_LABELS[item.billing_status]}
+      </p>
+      {isCancelled && item.customer_change_reason ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Cancellation reason: {item.customer_change_reason}
+        </p>
+      ) : null}
+      {isCancelled && cancelledDate ? (
+        <p className="mt-1 text-xs text-muted-foreground">Cancelled on {cancelledDate}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function AdditionalWorkItemCard({
+  item,
+  invoiceLine,
+}: {
+  item: ManifestItemRecord;
+  invoiceLine?: InvoiceItemRecord | null;
+}) {
+  const quantity = invoiceLine?.quantity ?? item.quantity ?? item.quoted_quantity ?? "—";
+  const unit = invoiceLine?.unit ?? item.unit ?? "each";
+  const lineTotals =
+    invoiceLine &&
+    invoiceLine.unit_price !== null &&
+    !invoiceLineNeedsPricing(invoiceLine)
+      ? calculateInvoiceLineTotals({
+          quantity: invoiceLine.quantity,
+          unitPrice: invoiceLine.unit_price,
+          taxRate: invoiceLine.tax_rate,
+        })
+      : null;
+
+  return (
+    <div className="rounded-lg border border-[var(--candid-yellow)]/30 bg-yellow-50/20 p-4 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-medium">{item.item_name}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full border border-[var(--candid-yellow)]/40 bg-yellow-50 px-2 py-0.5 text-xs font-medium text-amber-900">
+            {MANIFEST_SOURCE_TYPE_LABELS[item.source_type]}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            {MANIFEST_BILLING_STATUS_LABELS[item.billing_status]}
+          </span>
+        </div>
+      </div>
+      <p className="mt-2 whitespace-pre-wrap text-muted-foreground">
+        {formatManifestPreviewDescription(item)}
+      </p>
+      <p className="mt-2 text-muted-foreground">
+        Qty {quantity} {unit}
+        {lineTotals
+          ? ` · Net ${formatGbp(lineTotals.netTotal)} · VAT ${formatGbp(lineTotals.vatAmount)} · Gross ${formatGbp(lineTotals.grossTotal)}`
+          : invoiceLine?.unit_price !== null && invoiceLine
+            ? ` · ${formatGbp(invoiceLine.unit_price)} each`
+            : ""}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">
+        Requirement: {PRODUCTION_REQUIREMENT_STATUS_LABELS[item.production_requirement_status]}
+      </p>
     </div>
   );
 }
@@ -455,6 +678,21 @@ export function InvoiceReviewClient({
     });
   }, [data, liveLineSnapshots]);
 
+  const invoiceLineByProductionId = useMemo(
+    () =>
+      new Map(
+        data.invoiceItems
+          .filter((line) => line.production_item_id)
+          .map((line) => [line.production_item_id as string, line])
+      ),
+    [data.invoiceItems]
+  );
+
+  const quoteTaxRatePercent = useMemo(
+    () => deriveQuoteTaxRatePercent(data.quoteAudit.beforeCancellations),
+    [data.quoteAudit.beforeCancellations]
+  );
+
   const quoteLineDiagnostics = useMemo(
     () => (data.quoteLineDiagnostics ?? []).map(normalizeQuoteLineDiagnostic),
     [data.quoteLineDiagnostics]
@@ -470,13 +708,11 @@ export function InvoiceReviewClient({
     [effectiveInvoiceItems]
   );
 
-  const displayTotals = data.isApproved ? data.totalGroups.finalInvoice : liveTotalGroups.finalInvoice;
-  const displayOriginalTotals = data.isApproved
-    ? data.totalGroups.originalQuote
-    : liveTotalGroups.originalQuote;
-  const displayChangeTotals = data.isApproved
+  const displayFinalTotals = data.isApproved ? data.totalGroups.finalInvoice : liveTotalGroups.finalInvoice;
+  const displayAdditionalTotals = data.isApproved
     ? data.totalGroups.productionChanges
     : liveTotalGroups.productionChanges;
+  const displayQuoteAudit = data.quoteAudit;
 
   const displayUnpricedCount = data.isApproved ? data.unpricedCount : liveUnpricedCount;
 
@@ -653,92 +889,33 @@ export function InvoiceReviewClient({
                 No items from the accepted quote.
               </p>
             ) : (
-              data.quotedItems.map((item) => {
-                const isCancelled = isManifestQuoteItemCancelled(item);
-
-                return (
-                  <div
-                    key={item.id}
-                    className={
-                      isCancelled
-                        ? "rounded-lg border border-border/50 bg-muted/25 p-4 text-sm text-muted-foreground"
-                        : "rounded-lg border border-border/70 p-4 text-sm"
-                    }
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <p className={isCancelled ? "font-medium text-foreground/80" : "font-medium"}>
-                        {item.item_name}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {isCancelled ? (
-                          <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                            Cancelled by customer
-                          </span>
-                        ) : null}
-                        <span className="text-xs text-muted-foreground">
-                          {MANIFEST_SOURCE_TYPE_LABELS[item.source_type]}
-                        </span>
-                      </div>
-                    </div>
-                    {item.description ? (
-                      <p className="mt-2 whitespace-pre-wrap text-muted-foreground">
-                        {item.description}
-                      </p>
-                    ) : null}
-                    <p className="mt-2 text-muted-foreground">
-                      Qty {item.quoted_quantity ?? item.quantity ?? "—"}
-                      {item.quote_unit_price !== null
-                        ? ` · ${formatGbp(item.quote_unit_price)} each`
-                        : ""}
-                    </p>
-                    <p className="mt-1 text-muted-foreground">
-                      Requirement:{" "}
-                      {PRODUCTION_REQUIREMENT_STATUS_LABELS[item.production_requirement_status]}
-                      {" · "}
-                      Billing: {MANIFEST_BILLING_STATUS_LABELS[item.billing_status]}
-                    </p>
-                    {isCancelled ? (
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        Excluded from final invoice
-                        {item.customer_change_reason
-                          ? ` · ${item.customer_change_reason}`
-                          : ""}
-                      </p>
-                    ) : null}
-                  </div>
-                );
-              })
+              data.quotedItems.map((item) => (
+                <OriginallyQuotedItemCard
+                  key={item.id}
+                  item={item}
+                  quoteTaxRatePercent={quoteTaxRatePercent}
+                />
+              ))
             )}
           </div>
         </section>
 
         <section className="portal-surface rounded-xl border border-border bg-card p-6">
-          <h2 className="text-lg font-semibold">Production changes</h2>
+          <h2 className="text-lg font-semibold">Additional work and variations</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Post-acceptance additions, replacements, reprints, manual charges, and other
+            production variations.
+          </p>
           <div className="mt-4 space-y-3">
             {data.productionChanges.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No production changes recorded.</p>
+              <p className="text-sm text-muted-foreground">No additional work recorded.</p>
             ) : (
               data.productionChanges.map((item) => (
-                <div
+                <AdditionalWorkItemCard
                   key={item.id}
-                  className="rounded-lg border border-[var(--candid-yellow)]/30 bg-yellow-50/20 p-4 text-sm"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-medium">{item.item_name}</p>
-                    <span className="text-xs text-muted-foreground">
-                      {MANIFEST_SOURCE_TYPE_LABELS[item.source_type]}
-                    </span>
-                  </div>
-                  <p className="mt-2 whitespace-pre-wrap text-muted-foreground">
-                    {formatManifestPreviewDescription(item)}
-                  </p>
-                  <p className="mt-2 text-muted-foreground">
-                    {MANIFEST_BILLING_STATUS_LABELS[item.billing_status]}
-                    {item.customer_change_reason
-                      ? ` · Cancelled: ${item.customer_change_reason}`
-                      : ""}
-                  </p>
-                </div>
+                  item={item}
+                  invoiceLine={invoiceLineByProductionId.get(item.id) ?? null}
+                />
               ))
             )}
           </div>
@@ -788,17 +965,13 @@ export function InvoiceReviewClient({
       </div>
 
       <aside className="xl:sticky xl:top-24 xl:self-start space-y-4">
-        <TotalGroupPanel title="Original accepted quote" totals={displayOriginalTotals} />
+        <OriginalAcceptedQuoteSummaryCard
+          beforeCancellations={displayQuoteAudit.beforeCancellations}
+          cancellations={displayQuoteAudit.cancellations}
+          adjustedOriginal={displayQuoteAudit.adjustedOriginal}
+        />
 
-        {data.quoteAudit.cancellations.total > 0 ? (
-          <p className="px-1 text-xs text-muted-foreground">
-            Accepted quote before cancellations: {formatGbp(data.quoteAudit.beforeCancellations.total)}
-            {" · "}
-            Less cancellations: {formatGbp(data.quoteAudit.cancellations.total)}
-            {" · "}
-            Adjusted original quote: {formatGbp(data.quoteAudit.adjustedOriginal.total)}
-          </p>
-        ) : null}
+        <AdditionalBillableWorkSummaryCard totals={displayAdditionalTotals} />
 
         {quoteLineDiagnostics.length > 0 ? (
           <div className="portal-surface rounded-xl border border-dashed border-amber-300/60 bg-amber-50/30 p-4 text-xs">
@@ -841,12 +1014,10 @@ export function InvoiceReviewClient({
           </div>
         ) : null}
 
-        <TotalGroupPanel title="Production changes" totals={displayChangeTotals} />
-
-        <TotalGroupPanel
-          title="Final invoice total"
-          totals={displayTotals}
-          emphasized
+        <FinalInvoiceSummaryCard
+          adjustedOriginal={displayQuoteAudit.adjustedOriginal}
+          additionalWork={displayAdditionalTotals}
+          finalInvoice={displayFinalTotals}
         />
 
         <p className="px-1 text-sm text-muted-foreground">
