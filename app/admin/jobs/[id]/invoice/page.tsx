@@ -56,7 +56,8 @@ export default async function AdminJobInvoicePage({
   const invoiceData = await loadInvoiceReviewData(
     adminClient,
     id,
-    user?.id ?? undefined
+    user?.id ?? undefined,
+    detail.companyName
   );
 
   const xeroPreview = invoiceData.draft

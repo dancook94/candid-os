@@ -2,6 +2,8 @@ import type {
   InvoiceDraftStatus,
   PricingSource,
 } from "@/lib/invoice/constants";
+import type { InvoiceDisplayStatus } from "@/lib/invoice/display-status";
+import type { InvoiceApprovalReadiness } from "@/lib/invoice/validation";
 import type { ManifestBillingStatus } from "@/lib/manifest/constants";
 import type { ManifestItemRecord } from "@/lib/manifest/types";
 
@@ -62,6 +64,10 @@ export type InvoiceReviewData = {
   finalLines: InvoiceLineView[];
   unpricedCount: number;
   canApprove: boolean;
+  approvalReadiness: InvoiceApprovalReadiness;
+  displayStatus: InvoiceDisplayStatus;
+  productionChangedAfterApproval: boolean;
+  isApproved: boolean;
   schemaMissing: boolean;
   error: string | null;
 };

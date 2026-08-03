@@ -6,6 +6,7 @@ import {
   approveInvoiceDraft,
   loadInvoiceReviewData,
   reconcileInvoiceDraft,
+  reopenInvoiceDraft,
   resetInvoiceItemFromSource,
   updateInvoiceItem,
 } from "@/lib/invoice/service";
@@ -77,6 +78,27 @@ export async function POST(
       const draft = await approveInvoiceDraft(adminClient, draftId, auth.userId);
       revalidatePath(`/admin/jobs/${jobId}/invoice`);
       revalidatePath(`/admin/jobs/${jobId}`);
+      revalidatePath("/admin/invoices");
+      return NextResponse.json({ draft });
+    }
+
+    if (action === "reopen") {
+      const draftId = body.draftId ? String(body.draftId) : "";
+      const reason = body.reason ? String(body.reason) : "";
+
+      if (!draftId) {
+        return NextResponse.json({ error: "Draft ID is required." }, { status: 400 });
+      }
+
+      const draft = await reopenInvoiceDraft(
+        adminClient,
+        draftId,
+        reason,
+        auth.userId
+      );
+      revalidatePath(`/admin/jobs/${jobId}/invoice`);
+      revalidatePath(`/admin/jobs/${jobId}`);
+      revalidatePath("/admin/invoices");
       return NextResponse.json({ draft });
     }
 
@@ -127,6 +149,7 @@ export async function POST(
 
       const item = await updateInvoiceItem(adminClient, itemId, input, auth.userId);
       revalidatePath(`/admin/jobs/${jobId}/invoice`);
+      revalidatePath("/admin/invoices");
       return NextResponse.json({ item });
     }
 
@@ -139,12 +162,14 @@ export async function POST(
 
       const item = await resetInvoiceItemFromSource(adminClient, itemId, auth.userId);
       revalidatePath(`/admin/jobs/${jobId}/invoice`);
+      revalidatePath("/admin/invoices");
       return NextResponse.json({ item });
     }
 
     const result = await reconcileInvoiceDraft(adminClient, jobId, auth.userId);
     revalidatePath(`/admin/jobs/${jobId}/invoice`);
     revalidatePath(`/admin/jobs/${jobId}`);
+    revalidatePath("/admin/invoices");
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof ProductionError) {

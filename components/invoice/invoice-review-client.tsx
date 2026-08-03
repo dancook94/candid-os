@@ -8,9 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  INVOICE_DRAFT_STATUS_LABELS,
   PRICING_SOURCE_LABELS,
 } from "@/lib/invoice/constants";
+import { INVOICE_DISPLAY_STATUS_LABELS } from "@/lib/invoice/display-status";
 import { buildXeroLineDescription, formatManifestPreviewDescription } from "@/lib/invoice/line-text";
 import type { InvoiceLineView, InvoiceReviewData, XeroPayloadPreview } from "@/lib/invoice/types";
 import {
@@ -53,10 +53,12 @@ function InvoiceLineEditor({
   jobId,
   line,
   onSaved,
+  readOnly = false,
 }: {
   jobId: string;
   line: InvoiceLineView;
   onSaved: (message: string) => void;
+  readOnly?: boolean;
 }) {
   const [draft, setDraft] = useState<LineDraft>(() => buildLineDraft(line));
   const [isSaving, setIsSaving] = useState(false);
@@ -154,6 +156,7 @@ function InvoiceLineEditor({
           <Input
             id={`item-name-${line.id}`}
             value={draft.itemName}
+            disabled={readOnly}
             onChange={(event) =>
               setDraft((current) => ({ ...current, itemName: event.target.value }))
             }
@@ -165,6 +168,7 @@ function InvoiceLineEditor({
           <Textarea
             id={`description-${line.id}`}
             value={draft.description}
+            disabled={readOnly}
             onChange={(event) =>
               setDraft((current) => ({ ...current, description: event.target.value }))
             }
@@ -183,6 +187,7 @@ function InvoiceLineEditor({
               min="0"
               step="any"
               value={draft.quantity}
+              disabled={readOnly}
               onChange={(event) =>
                 setDraft((current) => ({ ...current, quantity: event.target.value }))
               }
@@ -193,6 +198,7 @@ function InvoiceLineEditor({
             <Input
               id={`unit-${line.id}`}
               value={draft.unit}
+              disabled={readOnly}
               onChange={(event) =>
                 setDraft((current) => ({ ...current, unit: event.target.value }))
               }
@@ -206,6 +212,7 @@ function InvoiceLineEditor({
               min="0"
               step="0.01"
               value={draft.unitPrice}
+              disabled={readOnly}
               onChange={(event) =>
                 setDraft((current) => ({ ...current, unitPrice: event.target.value }))
               }
@@ -219,6 +226,7 @@ function InvoiceLineEditor({
               min="0"
               step="0.1"
               value={draft.taxRate}
+              disabled={readOnly}
               onChange={(event) =>
                 setDraft((current) => ({ ...current, taxRate: event.target.value }))
               }
@@ -233,7 +241,7 @@ function InvoiceLineEditor({
           {MANIFEST_BILLING_STATUS_LABELS[line.billing_status]}
         </p>
         <div className="flex flex-wrap gap-2">
-          {line.canResetFromSource ? (
+          {!readOnly && line.canResetFromSource ? (
             <Button
               type="button"
               variant="outline"
@@ -244,14 +252,16 @@ function InvoiceLineEditor({
               Reset from source
             </Button>
           ) : null}
-          <Button
-            type="button"
-            size="sm"
-            disabled={isSaving || isResetting || !draft.itemName.trim()}
-            onClick={() => void saveLine()}
-          >
-            {isSaving ? "Saving…" : "Save line"}
-          </Button>
+          {!readOnly ? (
+            <Button
+              type="button"
+              size="sm"
+              disabled={isSaving || isResetting || !draft.itemName.trim()}
+              onClick={() => void saveLine()}
+            >
+              {isSaving ? "Saving…" : "Save line"}
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -273,6 +283,9 @@ export function InvoiceReviewClient({
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [isApproving, setIsApproving] = useState(false);
+  const [isReopening, setIsReopening] = useState(false);
+  const [showReopenDialog, setShowReopenDialog] = useState(false);
+  const [reopenReason, setReopenReason] = useState("");
 
   const previewFromDrafts = useMemo(() => {
     if (data.schemaMissing || data.error) {
@@ -322,6 +335,40 @@ export function InvoiceReviewClient({
     }
   }
 
+  async function reopenDraft() {
+    setIsReopening(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const response = await fetch(`/api/admin/jobs/${jobId}/invoice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reopen",
+          draftId: data.draft.id,
+          reason: reopenReason,
+        }),
+      });
+
+      const result = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Unable to reopen invoice draft.");
+      }
+
+      window.location.reload();
+    } catch (reopenError) {
+      setError(
+        reopenError instanceof Error
+          ? reopenError.message
+          : "Unable to reopen invoice draft."
+      );
+    } finally {
+      setIsReopening(false);
+    }
+  }
+
   if (data.schemaMissing) {
     return (
       <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/50 p-6 text-sm text-amber-900">
@@ -354,8 +401,11 @@ export function InvoiceReviewClient({
               <p>{quoteLabel ? `Accepted quote ${quoteLabel}` : "No quote linked"}</p>
               {opportunityTitle ? <p>{opportunityTitle}</p> : null}
               <p className="mt-2 font-medium text-foreground">
-                Status: {INVOICE_DRAFT_STATUS_LABELS[data.draft.status]}
+                Status: {INVOICE_DISPLAY_STATUS_LABELS[data.displayStatus]}
               </p>
+              {data.isApproved ? (
+                <p className="mt-1 text-emerald-700">Approved — ready for Xero</p>
+              ) : null}
             </div>
           </div>
         </div>
@@ -369,6 +419,12 @@ export function InvoiceReviewClient({
         {success ? (
           <p className="rounded-lg border border-emerald-300/40 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
             {success}
+          </p>
+        ) : null}
+
+        {data.productionChangedAfterApproval ? (
+          <p className="rounded-lg border border-amber-300/50 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Production changed after invoice approval. Reopen the draft before changing commercial lines.
           </p>
         ) : null}
 
@@ -458,6 +514,7 @@ export function InvoiceReviewClient({
                 jobId={jobId}
                 line={line}
                 onSaved={setSuccess}
+                readOnly={data.isApproved}
               />
             ))
           )}
@@ -480,7 +537,7 @@ export function InvoiceReviewClient({
         </section>
       </div>
 
-      <aside className="xl:sticky xl:top-24 xl:self-start">
+      <aside className="xl:sticky xl:top-24 xl:self-start space-y-4">
         <div className="portal-surface rounded-xl border border-border bg-card p-6 shadow-sm">
           <h2 className="text-lg font-semibold">Review totals</h2>
           <dl className="mt-4 space-y-3 text-sm">
@@ -500,23 +557,114 @@ export function InvoiceReviewClient({
           <p className="mt-4 text-sm text-muted-foreground">
             Unpriced items: {data.unpricedCount}
           </p>
+        </div>
+
+        <div className="portal-surface rounded-xl border border-border bg-card p-6 shadow-sm">
+          <h2 className="text-lg font-semibold">Ready for approval</h2>
+          <ul className="mt-4 space-y-2 text-sm">
+            {data.approvalReadiness.checklist.map((item) => (
+              <li key={item.id} className="flex items-start gap-2">
+                <span
+                  className={
+                    item.passed ? "text-emerald-600" : "text-amber-700"
+                  }
+                >
+                  {item.passed ? "✓" : "○"}
+                </span>
+                <div>
+                  <p className={item.passed ? "text-foreground" : "text-amber-900"}>
+                    {item.label}
+                  </p>
+                  {item.detail ? (
+                    <p className="text-xs text-muted-foreground">{item.detail}</p>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          {!data.canApprove && data.approvalReadiness.blockingReasons.length > 0 ? (
+            <div className="mt-4 rounded-lg border border-amber-300/50 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+              <p className="font-medium">Approval blocked</p>
+              <ul className="mt-2 list-disc space-y-1 pl-4">
+                {data.approvalReadiness.blockingReasons.map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           <div className="mt-5 space-y-2">
-            <Button
-              type="button"
-              className="w-full"
-              disabled={!data.canApprove || isApproving || data.draft.status === "approved"}
-              onClick={() => void approveDraft()}
-            >
-              {data.draft.status === "approved" ? "Approved" : "Approve invoice draft"}
-            </Button>
+            {data.isApproved ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                onClick={() => setShowReopenDialog(true)}
+              >
+                Reopen draft
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                className="w-full"
+                disabled={!data.canApprove || isApproving}
+                onClick={() => void approveDraft()}
+              >
+                {isApproving ? "Approving…" : "Approve draft invoice"}
+              </Button>
+            )}
             <Link href={`/admin/jobs/${jobId}`} className="block">
               <Button type="button" variant="outline" className="w-full">
                 Back to job
               </Button>
             </Link>
+            <Link href="/admin/invoices" className="block">
+              <Button type="button" variant="ghost" className="w-full">
+                All invoices
+              </Button>
+            </Link>
           </div>
         </div>
       </aside>
+
+      {showReopenDialog ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="portal-surface w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-lg">
+            <h3 className="text-lg font-semibold">Reopen invoice draft</h3>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Explain why this approved draft needs further commercial changes.
+            </p>
+            <div className="mt-4 space-y-2">
+              <Label htmlFor="reopen-reason">Reason</Label>
+              <Textarea
+                id="reopen-reason"
+                value={reopenReason}
+                onChange={(event) => setReopenReason(event.target.value)}
+                rows={4}
+                required
+              />
+            </div>
+            <div className="mt-5 flex gap-3">
+              <Button
+                type="button"
+                disabled={isReopening || !reopenReason.trim()}
+                onClick={() => void reopenDraft()}
+              >
+                {isReopening ? "Reopening…" : "Reopen draft"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isReopening}
+                onClick={() => setShowReopenDialog(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

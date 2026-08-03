@@ -25,6 +25,11 @@ import {
   getInvoiceLineSourceLabel,
   isManualPricingSource,
 } from "@/lib/invoice/line-text";
+import { deriveInvoiceDisplayStatus } from "@/lib/invoice/display-status";
+import {
+  buildInvoiceApprovalReadiness,
+  getBillableInvoiceLines,
+} from "@/lib/invoice/validation";
 import { ProductionError, isMissingInvoiceSchemaError, isMissingProductionSchemaError } from "@/lib/production/errors";
 
 function roundMoney(value: number) {
@@ -62,6 +67,118 @@ function calculateDraftTotals(items: InvoiceItemRecord[]) {
     subtotal,
     tax_total: taxTotal,
     total: roundMoney(subtotal + taxTotal),
+  };
+}
+
+function detectProductionChangedAfterApproval(input: {
+  draft: InvoiceDraftRecord;
+  manifestItems: ManifestItemRecord[];
+  invoiceItems: InvoiceItemRecord[];
+}) {
+  if (input.draft.status !== "approved" || !input.draft.approved_at) {
+    return false;
+  }
+
+  const approvedAt = new Date(input.draft.approved_at).getTime();
+  const manifestById = new Map(input.manifestItems.map((item) => [item.id, item]));
+  const activeInvoiceLines = input.invoiceItems.filter((line) => !line.deleted_at);
+  const invoiceProductionIds = new Set(
+    activeInvoiceLines
+      .map((line) => line.production_item_id)
+      .filter((id): id is string => Boolean(id))
+  );
+
+  if (
+    input.manifestItems.some(
+      (item) => new Date(item.updated_at).getTime() > approvedAt
+    )
+  ) {
+    return true;
+  }
+
+  const billableManifestItems = input.manifestItems.filter(shouldIncludeInInvoice);
+  if (billableManifestItems.some((item) => !invoiceProductionIds.has(item.id))) {
+    return true;
+  }
+
+  return activeInvoiceLines.some((line) => {
+    if (!line.production_item_id) {
+      return false;
+    }
+
+    const manifestItem = manifestById.get(line.production_item_id);
+    return !manifestItem || !shouldIncludeInInvoice(manifestItem);
+  });
+}
+
+async function refreshDraftTotalsAndStatus(
+  adminClient: SupabaseClient,
+  draftId: string,
+  preserveApproved = false
+) {
+  const { data: draft, error: draftError } = await adminClient
+    .from("job_invoice_drafts")
+    .select(INVOICE_DRAFT_SELECT)
+    .eq("id", draftId)
+    .maybeSingle();
+
+  if (draftError || !draft) {
+    throw new ProductionError(draftError?.message ?? "Invoice draft not found.", 500);
+  }
+
+  const { data: lines, error: linesError } = await adminClient
+    .from("job_invoice_items")
+    .select(INVOICE_ITEM_SELECT)
+    .eq("invoice_draft_id", draftId)
+    .is("deleted_at", null);
+
+  if (linesError) {
+    throw new ProductionError(linesError.message, 500);
+  }
+
+  const invoiceItems = (lines ?? []) as InvoiceItemRecord[];
+  const totals = calculateDraftTotals(invoiceItems);
+  const unpricedCount = getBillableInvoiceLines(invoiceItems).filter((line) =>
+    UNPRICED_BILLING_STATUSES.includes(
+      line.billing_status as (typeof UNPRICED_BILLING_STATUSES)[number]
+    ) || line.unit_price === null
+  ).length;
+
+  const typedDraft = draft as InvoiceDraftRecord;
+  let nextStatus: InvoiceDraftStatus = typedDraft.status;
+
+  if (!preserveApproved || typedDraft.status !== "approved") {
+    if (
+      typedDraft.status === "pushed_to_xero" ||
+      typedDraft.status === "invoiced" ||
+      typedDraft.status === "cancelled"
+    ) {
+      nextStatus = typedDraft.status;
+    } else if (typedDraft.status === "approved") {
+      nextStatus = "approved";
+    } else {
+      nextStatus = unpricedCount > 0 ? "needs_pricing" : "ready_for_review";
+    }
+  }
+
+  const { data: updatedDraft, error: updateError } = await adminClient
+    .from("job_invoice_drafts")
+    .update({
+      ...totals,
+      status: nextStatus,
+    })
+    .eq("id", draftId)
+    .select(INVOICE_DRAFT_SELECT)
+    .single();
+
+  if (updateError || !updatedDraft) {
+    throw new ProductionError(updateError?.message ?? "Unable to update draft.", 500);
+  }
+
+  return {
+    draft: updatedDraft as InvoiceDraftRecord,
+    unpricedCount,
+    invoiceItems,
   };
 }
 
@@ -263,6 +380,10 @@ export async function reconcileInvoiceDraft(
   }
 
   const items = (manifestItems ?? []) as ManifestItemRecord[];
+  const manifestById = new Map(items.map((item) => [item.id, item]));
+  const canMutateLines = !["approved", "pushed_to_xero", "invoiced"].includes(
+    draft.status
+  );
 
   const { data: existingLines, error: linesError } = await adminClient
     .from("job_invoice_items")
@@ -279,6 +400,26 @@ export async function reconcileInvoiceDraft(
       .filter((line) => line.production_item_id)
       .map((line) => [line.production_item_id as string, line])
   );
+
+  if (canMutateLines) {
+    const now = new Date().toISOString();
+
+    for (const line of existingLines ?? []) {
+      if (!line.production_item_id) {
+        continue;
+      }
+
+      const manifestItem = manifestById.get(line.production_item_id);
+
+      if (!manifestItem || !shouldIncludeInInvoice(manifestItem)) {
+        await adminClient
+          .from("job_invoice_items")
+          .update({ deleted_at: now })
+          .eq("id", line.id);
+        existingByProductionItemId.delete(line.production_item_id);
+      }
+    }
+  }
 
   for (const manifestItem of items) {
     if (!shouldIncludeInInvoice(manifestItem)) {
@@ -312,40 +453,14 @@ export async function reconcileInvoiceDraft(
     });
   }
 
-  const { data: refreshedLines, error: refreshError } = await adminClient
-    .from("job_invoice_items")
-    .select(INVOICE_ITEM_SELECT)
-    .eq("invoice_draft_id", draft.id)
-    .is("deleted_at", null);
-
-  if (refreshError) {
-    throw new ProductionError(refreshError.message, 500);
-  }
-
-  const invoiceItems = (refreshedLines ?? []) as InvoiceItemRecord[];
-  const totals = calculateDraftTotals(invoiceItems);
-  const unpricedCount = invoiceItems.filter((item) =>
-    UNPRICED_BILLING_STATUSES.includes(
-      item.billing_status as (typeof UNPRICED_BILLING_STATUSES)[number]
-    )
-  ).length;
-
-  const nextStatus: InvoiceDraftStatus =
-    unpricedCount > 0 ? "needs_pricing" : "ready_for_review";
-
-  const { data: updatedDraft, error: updateError } = await adminClient
-    .from("job_invoice_drafts")
-    .update({
-      ...totals,
-      status: draft.status === "approved" ? draft.status : nextStatus,
-    })
-    .eq("id", draft.id)
-    .select(INVOICE_DRAFT_SELECT)
-    .single();
-
-  if (updateError || !updatedDraft) {
-    throw new ProductionError(updateError?.message ?? "Unable to update draft.", 500);
-  }
+  const refreshed = await refreshDraftTotalsAndStatus(
+    adminClient,
+    draft.id,
+    draft.status === "approved"
+  );
+  const updatedDraft = refreshed.draft;
+  const invoiceItems = refreshed.invoiceItems;
+  const unpricedCount = refreshed.unpricedCount;
 
   if (job.commercial_status === "not_ready") {
     await adminClient
@@ -366,16 +481,29 @@ export async function reconcileInvoiceDraft(
   });
 
   return {
-    draft: updatedDraft as InvoiceDraftRecord,
+    draft: updatedDraft,
     schemaMissing: false as const,
     error: null,
   };
 }
 
-export async function loadInvoiceReviewData(
+export async function ensureInvoiceDraftForJob(
   adminClient: SupabaseClient,
   jobId: string,
   actorProfileId?: string | null
+) {
+  try {
+    return await reconcileInvoiceDraft(adminClient, jobId, actorProfileId);
+  } catch {
+    return { draft: null, schemaMissing: false, error: "Unable to ensure invoice draft." };
+  }
+}
+
+export async function loadInvoiceReviewData(
+  adminClient: SupabaseClient,
+  jobId: string,
+  actorProfileId?: string | null,
+  companyName?: string | null
 ): Promise<InvoiceReviewData> {
   const reconcileResult = await reconcileInvoiceDraft(
     adminClient,
@@ -393,6 +521,17 @@ export async function loadInvoiceReviewData(
       finalLines: [],
       unpricedCount: 0,
       canApprove: false,
+      approvalReadiness: {
+        canApprove: false,
+        checklist: [],
+        blockingReasons: [
+          reconcileResult.error ?? "Unable to load invoice draft.",
+        ],
+        lineIssues: [],
+      },
+      displayStatus: "draft",
+      productionChangedAfterApproval: false,
+      isApproved: false,
       schemaMissing: reconcileResult.schemaMissing,
       error: reconcileResult.error ?? "Unable to load invoice draft.",
     };
@@ -400,7 +539,8 @@ export async function loadInvoiceReviewData(
 
   const draft = reconcileResult.draft;
 
-  const [{ data: manifestItems }, { data: invoiceItems }] = await Promise.all([
+  const [{ data: manifestItems }, { data: invoiceItems }, { data: company }] =
+    await Promise.all([
     adminClient
       .from("production_items")
       .select(MANIFEST_ITEM_SELECT)
@@ -413,10 +553,19 @@ export async function loadInvoiceReviewData(
       .eq("invoice_draft_id", draft.id)
       .is("deleted_at", null)
       .order("created_at", { ascending: true }),
+    companyName
+      ? Promise.resolve({ data: { company_name: companyName } })
+      : adminClient
+          .from("companies")
+          .select("company_name")
+          .eq("id", draft.company_id)
+          .maybeSingle(),
   ]);
 
   const typedManifest = (manifestItems ?? []) as ManifestItemRecord[];
   const typedInvoiceItems = (invoiceItems ?? []) as InvoiceItemRecord[];
+  const resolvedCompanyName =
+    companyName ?? (company as { company_name?: string } | null)?.company_name ?? null;
 
   const quotedItems = typedManifest.filter(
     (item) =>
@@ -453,11 +602,31 @@ export async function loadInvoiceReviewData(
       };
     });
 
-  const unpricedCount = finalLines.filter((item) =>
-    UNPRICED_BILLING_STATUSES.includes(
-      item.billing_status as (typeof UNPRICED_BILLING_STATUSES)[number]
-    )
+  const unpricedCount = finalLines.filter(
+    (item) =>
+      item.unit_price === null ||
+      UNPRICED_BILLING_STATUSES.includes(
+        item.billing_status as (typeof UNPRICED_BILLING_STATUSES)[number]
+      )
   ).length;
+
+  const approvalReadiness = buildInvoiceApprovalReadiness({
+    draft,
+    invoiceItems: typedInvoiceItems,
+    companyName: resolvedCompanyName,
+    quoteLinked: Boolean(draft.quote_id),
+  });
+
+  const displayStatus = deriveInvoiceDisplayStatus({
+    status: draft.status,
+    unpricedCount,
+  });
+
+  const productionChangedAfterApproval = detectProductionChangedAfterApproval({
+    draft,
+    manifestItems: typedManifest,
+    invoiceItems: typedInvoiceItems,
+  });
 
   return {
     draft,
@@ -467,7 +636,11 @@ export async function loadInvoiceReviewData(
     productionChanges,
     finalLines,
     unpricedCount,
-    canApprove: unpricedCount === 0 && finalLines.length > 0,
+    canApprove: approvalReadiness.canApprove,
+    approvalReadiness,
+    displayStatus,
+    productionChangedAfterApproval,
+    isApproved: draft.status === "approved",
     schemaMissing: false,
     error: null,
   };
@@ -492,6 +665,23 @@ export async function updateInvoiceItem(
 
   if (!existing) {
     throw new ProductionError("Invoice line not found.", 404);
+  }
+
+  const { data: parentDraft, error: draftError } = await adminClient
+    .from("job_invoice_drafts")
+    .select("status")
+    .eq("id", existing.invoice_draft_id)
+    .maybeSingle();
+
+  if (draftError) {
+    throw new ProductionError(draftError.message, 500);
+  }
+
+  if (parentDraft?.status === "approved") {
+    throw new ProductionError(
+      "Production changed after invoice approval. Reopen the draft before editing commercial lines.",
+      409
+    );
   }
 
   const quantity = input.quantity ?? existing.quantity;
@@ -547,26 +737,7 @@ export async function updateInvoiceItem(
     throw new ProductionError(error?.message ?? "Unable to update invoice line.", 500);
   }
 
-  const { data: allLines } = await adminClient
-    .from("job_invoice_items")
-    .select(INVOICE_ITEM_SELECT)
-    .eq("invoice_draft_id", existing.invoice_draft_id)
-    .is("deleted_at", null);
-
-  const totals = calculateDraftTotals((allLines ?? []) as InvoiceItemRecord[]);
-  const unpricedCount = ((allLines ?? []) as InvoiceItemRecord[]).filter((line) =>
-    UNPRICED_BILLING_STATUSES.includes(
-      line.billing_status as (typeof UNPRICED_BILLING_STATUSES)[number]
-    )
-  ).length;
-
-  await adminClient
-    .from("job_invoice_drafts")
-    .update({
-      ...totals,
-      status: unpricedCount > 0 ? "needs_pricing" : "ready_for_review",
-    })
-    .eq("id", existing.invoice_draft_id);
+  await refreshDraftTotalsAndStatus(adminClient, existing.invoice_draft_id);
 
   const job = await loadJobInvoiceContext(adminClient, existing.job_id);
 
@@ -650,44 +821,27 @@ export async function approveInvoiceDraft(
   draftId: string,
   actorProfileId: string
 ) {
-  const { data: draft, error: draftError } = await adminClient
-    .from("job_invoice_drafts")
-    .select(INVOICE_DRAFT_SELECT)
-    .eq("id", draftId)
+  const refreshed = await refreshDraftTotalsAndStatus(adminClient, draftId);
+  const draft = refreshed.draft;
+  const invoiceItems = refreshed.invoiceItems;
+
+  const { data: company } = await adminClient
+    .from("companies")
+    .select("company_name")
+    .eq("id", draft.company_id)
     .maybeSingle();
 
-  if (draftError) {
-    throw new ProductionError(draftError.message, 500);
-  }
+  const readiness = buildInvoiceApprovalReadiness({
+    draft,
+    invoiceItems,
+    companyName: company?.company_name ?? null,
+    quoteLinked: Boolean(draft.quote_id),
+  });
 
-  if (!draft) {
-    throw new ProductionError("Invoice draft not found.", 404);
-  }
-
-  const { data: lines, error: linesError } = await adminClient
-    .from("job_invoice_items")
-    .select(INVOICE_ITEM_SELECT)
-    .eq("invoice_draft_id", draftId)
-    .is("deleted_at", null);
-
-  if (linesError) {
-    throw new ProductionError(linesError.message, 500);
-  }
-
-  const invoiceItems = (lines ?? []) as InvoiceItemRecord[];
-  const unpricedCount = invoiceItems.filter(
-    (item) =>
-      !NON_INVOICE_BILLING_STATUSES.includes(
-        item.billing_status as (typeof NON_INVOICE_BILLING_STATUSES)[number]
-      ) &&
-      UNPRICED_BILLING_STATUSES.includes(
-        item.billing_status as (typeof UNPRICED_BILLING_STATUSES)[number]
-      )
-  ).length;
-
-  if (unpricedCount > 0) {
+  if (!readiness.canApprove) {
     throw new ProductionError(
-      "Cannot approve invoice draft while billable items still require pricing.",
+      readiness.blockingReasons[0] ??
+        "Invoice draft cannot be approved yet.",
       400
     );
   }
@@ -700,6 +854,9 @@ export async function approveInvoiceDraft(
       status: "approved",
       approved_by: actorProfileId,
       approved_at: now,
+      subtotal: draft.subtotal,
+      tax_total: draft.tax_total,
+      total: draft.total,
     })
     .eq("id", draftId)
     .select(INVOICE_DRAFT_SELECT)
@@ -730,6 +887,87 @@ export async function approveInvoiceDraft(
   });
 
   return approvedDraft as InvoiceDraftRecord;
+}
+
+export async function reopenInvoiceDraft(
+  adminClient: SupabaseClient,
+  draftId: string,
+  reason: string,
+  actorProfileId: string
+) {
+  const trimmedReason = reason.trim();
+
+  if (!trimmedReason) {
+    throw new ProductionError("A reason is required to reopen the invoice draft.", 400);
+  }
+
+  const { data: draft, error: draftError } = await adminClient
+    .from("job_invoice_drafts")
+    .select(INVOICE_DRAFT_SELECT)
+    .eq("id", draftId)
+    .maybeSingle();
+
+  if (draftError) {
+    throw new ProductionError(draftError.message, 500);
+  }
+
+  if (!draft) {
+    throw new ProductionError("Invoice draft not found.", 404);
+  }
+
+  if (draft.status !== "approved") {
+    throw new ProductionError("Only approved invoice drafts can be reopened.", 400);
+  }
+
+  const refreshed = await refreshDraftTotalsAndStatus(adminClient, draftId);
+  const nextStatus: InvoiceDraftStatus =
+    refreshed.unpricedCount > 0 ? "needs_pricing" : "ready_for_review";
+  const reopenNote = `[Reopened ${new Date().toISOString().slice(0, 10)}] ${trimmedReason}`;
+  const internalNote = draft.internal_note
+    ? `${draft.internal_note}\n\n${reopenNote}`
+    : reopenNote;
+
+  const { data: reopenedDraft, error: reopenError } = await adminClient
+    .from("job_invoice_drafts")
+    .update({
+      status: nextStatus,
+      approved_by: null,
+      approved_at: null,
+      internal_note: internalNote,
+      subtotal: refreshed.draft.subtotal,
+      tax_total: refreshed.draft.tax_total,
+      total: refreshed.draft.total,
+    })
+    .eq("id", draftId)
+    .select(INVOICE_DRAFT_SELECT)
+    .single();
+
+  if (reopenError || !reopenedDraft) {
+    throw new ProductionError(
+      reopenError?.message ?? "Unable to reopen invoice draft.",
+      500
+    );
+  }
+
+  const job = await loadJobInvoiceContext(adminClient, draft.job_id);
+
+  await adminClient
+    .from("jobs")
+    .update({ commercial_status: "invoice_review" })
+    .eq("id", draft.job_id);
+
+  await logInvoiceActivity(adminClient, {
+    activityType: INVOICE_ACTIVITY_TYPES.invoiceDraftReopened,
+    description: `Invoice draft reopened for ${job.job_reference}: ${trimmedReason}`,
+    companyId: job.company_id,
+    quoteId: job.quote_id,
+    jobId: job.id,
+    invoiceDraftId: draftId,
+    actorProfileId,
+    metadata: { reason: trimmedReason },
+  });
+
+  return reopenedDraft as InvoiceDraftRecord;
 }
 
 export function buildXeroPayloadPreview(input: {

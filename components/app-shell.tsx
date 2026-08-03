@@ -14,6 +14,7 @@ import {
   History,
   LogOut,
   Package,
+  Receipt,
   Settings,
   Target,
   UserCog,
@@ -115,6 +116,11 @@ const crmLinks: NavLink[] = [
     href: "/admin/production",
     label: "Production Board",
     icon: Factory,
+  },
+  {
+    href: "/admin/invoices",
+    label: "Invoices",
+    icon: Receipt,
   },
   {
     href: "/admin/opportunities",

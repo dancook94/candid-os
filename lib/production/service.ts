@@ -146,6 +146,15 @@ async function syncJobStatusFromItems(
     throw new ProductionError(updateError.message, 500);
   }
 
+  if (nextStatus === "completed") {
+    try {
+      const { ensureInvoiceDraftForJob } = await import("@/lib/invoice/service");
+      await ensureInvoiceDraftForJob(adminClient, job.id, actorProfileId);
+    } catch {
+      // Non-critical.
+    }
+  }
+
   try {
     await logProductionActivity(adminClient, {
       activityType: "job_status_changed",

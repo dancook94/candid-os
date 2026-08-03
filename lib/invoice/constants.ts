@@ -65,6 +65,7 @@ export const INVOICE_ACTIVITY_TYPES = {
   invoiceDraftReconciled: "invoice_draft_reconciled",
   invoiceItemPriced: "invoice_item_priced",
   invoiceDraftApproved: "invoice_draft_approved",
+  invoiceDraftReopened: "invoice_draft_reopened",
 } as const;
 
 export const INVOICE_DRAFT_SELECT =
