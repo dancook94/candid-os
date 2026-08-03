@@ -16,6 +16,18 @@ export function isMissingProductionSchemaError(error: {
   );
 }
 
+export function isMissingManifestSchemaError(error: {
+  code?: string;
+  message?: string;
+}) {
+  return (
+    isMissingProductionSchemaError(error) ||
+    Boolean(error.message?.includes("production_requirement_status")) ||
+    Boolean(error.message?.includes("billing_status")) ||
+    Boolean(error.message?.includes("source_type"))
+  );
+}
+
 export class ProductionError extends Error {
   status: number;
 

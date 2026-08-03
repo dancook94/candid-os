@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { AdminJobArtworkPanel } from "@/components/admin-job-artwork-panel";
 import { AdminJobArtworkSourcePanel } from "@/components/admin-job-artwork-source-panel";
 import { AdminJobDropboxPanel } from "@/components/admin-job-dropbox-panel";
-import { ProductionItemsPanel } from "@/components/production/production-items-panel";
+import { ProductionManifestPanel } from "@/components/manifest/production-manifest-panel";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
@@ -22,8 +22,7 @@ import { loadAdminJobDetail } from "@/lib/jobs/loaders";
 import { JOB_STATUS_LABELS } from "@/lib/jobs/constants";
 import { getAdminArtworkSourceLabel } from "@/lib/jobs/artwork-source";
 import { isDropboxConfigured } from "@/lib/dropbox/client";
-import { loadProductionItemsForJob } from "@/lib/production/service";
-import { loadProductionStaffProfiles } from "@/lib/production/staff";
+import { getJobProductionReadiness, loadManifestItemsForJob } from "@/lib/manifest/service";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -83,9 +82,15 @@ export default async function AdminJobDetailPage({
 
   const shellProps = await buildAdminAppShellProps(supabase, profile);
 
-  const [productionResult, productionStaff] = await Promise.all([
-    loadProductionItemsForJob(adminClient, id),
-    loadProductionStaffProfiles(supabase),
+  const [manifestResult, readiness] = await Promise.all([
+    loadManifestItemsForJob(adminClient, id),
+    getJobProductionReadiness(adminClient, id).catch(() => ({
+      activeRequiredCount: 0,
+      satisfiedCount: 0,
+      isReady: false,
+      hasOverride: false,
+      label: "Unable to calculate readiness",
+    })),
   ]);
 
   return (
@@ -95,13 +100,18 @@ export default async function AdminJobDetailPage({
           title={detail.job.project_name}
           description={`${detail.job.job_reference} · ${detail.companyName}`}
           actions={
-            detail.job.quote_id ? (
-              <Link href={`/admin/quotes/${detail.job.quote_id}`}>
-                <Button variant="outline">
-                  View quote{detail.quoteNumber ? ` Q-${detail.quoteNumber}` : ""}
-                </Button>
+            <div className="flex flex-wrap gap-2">
+              <Link href={`/admin/jobs/${detail.job.id}/invoice`}>
+                <Button variant="outline">Prepare invoice</Button>
               </Link>
-            ) : null
+              {detail.job.quote_id ? (
+                <Link href={`/admin/quotes/${detail.job.quote_id}`}>
+                  <Button variant="outline">
+                    View quote{detail.quoteNumber ? ` Q-${detail.quoteNumber}` : ""}
+                  </Button>
+                </Link>
+              ) : null}
+            </div>
           }
         />
 
@@ -195,11 +205,12 @@ export default async function AdminJobDetailPage({
 
         <Card className="portal-surface mb-6 overflow-hidden">
           <CardContent className="pt-6">
-            <ProductionItemsPanel
+            <ProductionManifestPanel
               jobId={detail.job.id}
-              items={productionResult.items}
-              staff={productionStaff}
-              schemaMissing={productionResult.schemaMissing}
+              items={manifestResult.items}
+              readiness={readiness}
+              schemaMissing={manifestResult.schemaMissing}
+              manifestMigrationMissing={manifestResult.manifestMigrationMissing}
             />
           </CardContent>
         </Card>

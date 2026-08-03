@@ -13,6 +13,7 @@ import {
 } from "@/lib/jobs/notifications";
 import type { DropboxSetupStatus, JobRecord } from "@/lib/jobs/types";
 import { resolveQuoteRequestIdForQuote } from "@/lib/quote-request-link";
+import { ensureProductionManifestForJob } from "@/lib/manifest/service";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type QuoteForJob = {
@@ -337,6 +338,18 @@ export async function ensureJobForAcceptedQuote({
       existingJob as JobRecord
     );
 
+    try {
+      await ensureProductionManifestForJob(adminClient, job.id, actorProfileId);
+    } catch (error) {
+      if (process.env.NODE_ENV === "development") {
+        console.error("[jobs] failed to reconcile production manifest", {
+          quoteId,
+          jobId: job.id,
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     return {
       job,
       created: false,
@@ -484,6 +497,18 @@ export async function ensureJobForAcceptedQuote({
   } catch (error) {
     if (process.env.NODE_ENV === "development") {
       console.error("[jobs] failed to log job_created_from_accepted_quote", {
+        quoteId,
+        jobId: job.id,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  try {
+    await ensureProductionManifestForJob(adminClient, job.id, actorProfileId);
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[jobs] failed to create production manifest", {
         quoteId,
         jobId: job.id,
         message: error instanceof Error ? error.message : String(error),
