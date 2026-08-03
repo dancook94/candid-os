@@ -22,6 +22,7 @@ import {
 } from "@/lib/printfactory/matching-queue";
 import { createItemSuggestionsForJob } from "@/lib/printfactory/matching-service";
 import { refreshJobProductionReadiness } from "@/lib/printfactory/readiness-service";
+import { checkPrintfactorySchemaReadiness, printfactorySchemaErrorToReadiness } from "@/lib/printfactory/schema-readiness";
 
 export type PrintfactorySyncResult = {
   ok: boolean;
@@ -247,6 +248,15 @@ export async function syncPrintfactoryJobs(
     });
   }
 
+  const schemaReadiness = await checkPrintfactorySchemaReadiness(adminClient);
+
+  if (!schemaReadiness.ready) {
+    return emptyResult({
+      error: schemaReadiness.message,
+      errorCode: "migration_required",
+    });
+  }
+
   let apiJobs: PrintfactoryApiJob[];
 
   try {
@@ -397,9 +407,12 @@ export async function syncPrintfactoryJobs(
     };
   } catch (error) {
     if (isMissingPrintfactorySchemaError(error as { message?: string; code?: string })) {
+      const schemaReadiness = await checkPrintfactorySchemaReadiness(adminClient);
+
       return emptyResult({
         error:
-          "PrintFactory tables are missing. Apply supabase/migrations/20260803220000_printfactory_production_board_phase2.sql and 20260803230000_printfactory_matching_enhancements.sql",
+          schemaReadiness.message ??
+          "PrintFactory matching schema is not ready.",
         errorCode: "migration_required",
       });
     }
@@ -415,6 +428,17 @@ export async function loadPrintfactoryMatchingRecords(
   adminClient: SupabaseClient,
   tab: ExceptionQueueTab
 ) {
+  const schemaReadiness = await checkPrintfactorySchemaReadiness(adminClient);
+
+  if (!schemaReadiness.ready) {
+    return {
+      records: [],
+      schemaMissing: true as const,
+      schemaMissingMessage: schemaReadiness.message,
+      tabCounts: null,
+    };
+  }
+
   const { data, error } = await adminClient
     .from("printfactory_jobs")
     .select(`
@@ -430,8 +454,28 @@ export async function loadPrintfactoryMatchingRecords(
     .limit(500);
 
   if (error) {
+    const schemaFromError = printfactorySchemaErrorToReadiness(error);
+
+    if (schemaFromError) {
+      return {
+        records: [],
+        schemaMissing: true as const,
+        schemaMissingMessage: schemaFromError.message,
+        tabCounts: null,
+      };
+    }
+
     if (isMissingPrintfactorySchemaError(error)) {
-      return { records: [], schemaMissing: true as const, tabCounts: null };
+      const refreshedReadiness = await checkPrintfactorySchemaReadiness(adminClient);
+
+      return {
+        records: [],
+        schemaMissing: true as const,
+        schemaMissingMessage:
+          refreshedReadiness.message ??
+          "PrintFactory matching schema is not ready.",
+        tabCounts: null,
+      };
     }
 
     throw error;
@@ -441,5 +485,10 @@ export async function loadPrintfactoryMatchingRecords(
   const tabCounts = countPrintfactoryRecordsByTab(allRecords);
   const records = filterPrintfactoryRecordsByTab(allRecords, tab);
 
-  return { records, schemaMissing: false as const, tabCounts };
+  return {
+    records,
+    schemaMissing: false as const,
+    schemaMissingMessage: null,
+    tabCounts,
+  };
 }

@@ -53,10 +53,8 @@ export default async function PrintfactoryMatchingPage({
   const adminClient = createAdminClient();
   const connection = getPrintfactoryConnectionStatus();
 
-  const { records, schemaMissing, tabCounts } = await loadPrintfactoryMatchingRecords(
-    adminClient,
-    tab
-  );
+  const { records, schemaMissing, schemaMissingMessage, tabCounts } =
+    await loadPrintfactoryMatchingRecords(adminClient, tab);
 
   return (
     <AppShell {...shellProps}>
@@ -85,6 +83,7 @@ export default async function PrintfactoryMatchingPage({
           records={records as never[]}
           tabCounts={tabCounts}
           schemaMissing={schemaMissing}
+          schemaMissingMessage={schemaMissingMessage}
           jobFilter={jobFilter}
           connectionStatus={connection}
           tabLabels={EXCEPTION_QUEUE_TAB_LABELS}

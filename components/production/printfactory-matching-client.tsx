@@ -61,6 +61,7 @@ type PrintfactoryMatchingClientProps = {
   records: MatchingRecord[];
   tabCounts: Record<ExceptionQueueTab, number> | null;
   schemaMissing: boolean;
+  schemaMissingMessage?: string | null;
   jobFilter?: string;
   connectionStatus: PrintfactoryConnectionStatus;
   tabLabels: Record<ExceptionQueueTab, string>;
@@ -71,6 +72,7 @@ export function PrintfactoryMatchingClient({
   records,
   tabCounts,
   schemaMissing,
+  schemaMissingMessage,
   jobFilter,
   connectionStatus,
   tabLabels,
@@ -218,15 +220,8 @@ export function PrintfactoryMatchingClient({
     return (
       <Card className="portal-surface border-amber-300">
         <CardContent className="py-8 text-sm text-muted-foreground">
-          Apply{" "}
-          <code className="text-xs">
-            supabase/migrations/20260803220000_printfactory_production_board_phase2.sql
-          </code>{" "}
-          and{" "}
-          <code className="text-xs">
-            supabase/migrations/20260803230000_printfactory_matching_enhancements.sql
-          </code>{" "}
-          before using PrintFactory matching.
+          {schemaMissingMessage ??
+            "PrintFactory matching unavailable: required schema objects are missing."}
         </CardContent>
       </Card>
     );
