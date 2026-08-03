@@ -20,6 +20,7 @@ import type {
 } from "@/lib/invoice/types";
 import {
   buildQuoteLineDiagnostics,
+  normalizeQuoteLineDiagnostic,
   partitionManifestItemsForReview,
   quoteVersionVatRateToPercent,
   type AcceptedQuoteLine,
@@ -711,7 +712,7 @@ export async function loadInvoiceReviewData(
           manifestItems: typedManifest,
           invoiceItems: typedInvoiceItems,
           taxRatePercent: acceptedQuoteContext.taxRatePercent,
-        })
+        }).map(normalizeQuoteLineDiagnostic)
       : null;
 
   const approvalReadiness = buildInvoiceApprovalReadiness({

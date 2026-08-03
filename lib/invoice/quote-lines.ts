@@ -17,6 +17,12 @@ export type AcceptedQuoteLine = {
   sort_order: number;
 };
 
+export type QuoteLineSourceGroup =
+  | "originally_quoted"
+  | "production_changes"
+  | "final_invoice"
+  | "unknown";
+
 export type QuoteLineDiagnostic = {
   quoteItemId: string;
   title: string;
@@ -24,12 +30,81 @@ export type QuoteLineDiagnostic = {
   matchedManifestItemId: string | null;
   requirementStatus: string | null;
   billingStatus: string | null;
-  sourceGroup: "originally_quoted" | "production_changes" | "unlinked";
+  sourceGroup: QuoteLineSourceGroup;
   includedInOriginallyQuoted: boolean;
   includedInProductionChanges: boolean;
   includedInFinalInvoice: boolean;
   excludedReason: string | null;
 };
+
+export function resolveManifestSourceGroup(
+  manifestItem: ManifestItemRecord | null
+): QuoteLineSourceGroup {
+  if (!manifestItem) {
+    return "unknown";
+  }
+
+  if (isOriginallyQuotedManifestItem(manifestItem)) {
+    return "originally_quoted";
+  }
+
+  return "production_changes";
+}
+
+export function formatSourceGroup(value?: QuoteLineSourceGroup | string | null) {
+  if (!value) {
+    return "Unknown";
+  }
+
+  return value.replaceAll("_", " ");
+}
+
+type LegacyQuoteLineDiagnostic = Partial<QuoteLineDiagnostic> & {
+  quoteItemId?: string;
+  title?: string;
+  included?: boolean;
+};
+
+export function normalizeQuoteLineDiagnostic(
+  diagnostic: LegacyQuoteLineDiagnostic
+): QuoteLineDiagnostic {
+  const includedInOriginallyQuoted = diagnostic.includedInOriginallyQuoted ?? false;
+  const includedInProductionChanges = diagnostic.includedInProductionChanges ?? false;
+  const includedInFinalInvoice = diagnostic.includedInFinalInvoice ?? false;
+  const legacyIncluded = diagnostic.included;
+
+  let sourceGroup = diagnostic.sourceGroup;
+  if (!sourceGroup) {
+    if (includedInOriginallyQuoted || legacyIncluded === true) {
+      sourceGroup = "originally_quoted";
+    } else if (includedInProductionChanges) {
+      sourceGroup = "production_changes";
+    } else if (includedInFinalInvoice) {
+      sourceGroup = "final_invoice";
+    } else if (legacyIncluded === false) {
+      sourceGroup = "unknown";
+    } else {
+      sourceGroup = "unknown";
+    }
+  }
+
+  return {
+    quoteItemId: diagnostic.quoteItemId ?? "unknown-quote-item",
+    title: diagnostic.title ?? "Unknown line",
+    grossValue: diagnostic.grossValue ?? 0,
+    matchedManifestItemId: diagnostic.matchedManifestItemId ?? null,
+    requirementStatus: diagnostic.requirementStatus ?? null,
+    billingStatus: diagnostic.billingStatus ?? null,
+    sourceGroup,
+    includedInOriginallyQuoted:
+      includedInOriginallyQuoted || sourceGroup === "originally_quoted",
+    includedInProductionChanges:
+      includedInProductionChanges || sourceGroup === "production_changes",
+    includedInFinalInvoice:
+      includedInFinalInvoice || sourceGroup === "final_invoice",
+    excludedReason: diagnostic.excludedReason ?? null,
+  };
+}
 
 export function isOriginallyQuotedManifestItem(item: ManifestItemRecord) {
   return item.source_type === "quoted" || Boolean(item.quote_item_id);
@@ -166,17 +241,19 @@ export function buildQuoteLineDiagnostics(input: {
         quoteItem.id,
         manifestByQuoteItemId
       );
-      const matchedManifest = quotedLinks[0] ?? null;
+      const matchedManifest =
+        quotedLinks[0] ??
+        (manifestByQuoteItemId.get(quoteItem.id) ?? [])[0] ??
+        null;
       const cancelled = isQuoteItemCancelled(quoteItem.id, manifestByQuoteItemId);
       const grossValue = calculateInvoiceLineTotals({
         quantity: quoteItem.quantity,
         unitPrice: quoteItem.unit_price,
         taxRate: input.taxRatePercent,
       }).grossTotal;
-      const includedInOriginallyQuoted = Boolean(matchedManifest);
-      const includedInProductionChanges = matchedManifest
-        ? isProductionChangeManifestItem(matchedManifest)
-        : false;
+      const sourceGroup = resolveManifestSourceGroup(matchedManifest);
+      const includedInOriginallyQuoted = sourceGroup === "originally_quoted";
+      const includedInProductionChanges = sourceGroup === "production_changes";
       const includedInFinalInvoice =
         !cancelled && invoicedQuoteItemIds.has(quoteItem.id);
 
@@ -189,23 +266,19 @@ export function buildQuoteLineDiagnostics(input: {
         excludedReason = "Active quoted item not yet on final invoice draft.";
       }
 
-      return {
+      return normalizeQuoteLineDiagnostic({
         quoteItemId: quoteItem.id,
         title: quoteItem.title,
         grossValue,
         matchedManifestItemId: matchedManifest?.id ?? null,
         requirementStatus: matchedManifest?.production_requirement_status ?? null,
         billingStatus: matchedManifest?.billing_status ?? null,
-        sourceGroup: matchedManifest
-          ? isOriginallyQuotedManifestItem(matchedManifest)
-            ? "originally_quoted"
-            : "production_changes"
-          : "unlinked",
+        sourceGroup,
         includedInOriginallyQuoted,
         includedInProductionChanges,
         includedInFinalInvoice,
         excludedReason,
-      };
+      });
     });
 }
 
