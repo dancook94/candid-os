@@ -1,6 +1,13 @@
 import { NON_INVOICE_BILLING_STATUSES } from "@/lib/invoice/constants";
 import type { InvoiceItemRecord } from "@/lib/invoice/types";
 import {
+  acceptedQuoteLineToSyntheticInvoiceLine,
+  buildManifestByQuoteItemId,
+  isActiveAcceptedQuoteLine,
+  isQuoteItemCancelled,
+  type AcceptedQuoteLine,
+} from "@/lib/invoice/quote-lines";
+import {
   calculateInvoiceDraftTotals,
   calculateInvoiceLineTotals,
   normalizeInvoiceItemNumericFields,
@@ -120,56 +127,38 @@ export function calculateInvoiceTotalGroups(
   };
 }
 
-function manifestItemToSyntheticInvoiceLine(
-  manifestItem: ManifestItemRecord
-): InvoiceItemRecord {
-  const quantity = manifestItem.quantity ?? manifestItem.quoted_quantity ?? 1;
-  const unitPrice = manifestItem.quote_unit_price;
-  const billingStatus =
-    unitPrice === null ? ("price_required" as const) : manifestItem.billing_status;
-
-  return normalizeInvoiceItemNumericFields({
-    id: manifestItem.id,
-    invoice_draft_id: "",
-    job_id: manifestItem.job_id,
-    production_item_id: manifestItem.id,
-    quote_item_id: manifestItem.quote_item_id,
-    item_name: manifestItem.item_name,
-    description: manifestItem.description,
-    quantity,
-    unit: manifestItem.unit,
-    unit_price: unitPrice,
-    line_total: 0,
-    tax_rate: 20,
-    billing_status: billingStatus,
-    pricing_source: "accepted_quote",
-    pricing_note: null,
-    manually_edited: false,
-    created_at: manifestItem.created_at,
-    updated_at: manifestItem.updated_at,
-    deleted_at: null,
-  });
-}
-
-export function calculateQuoteTotalAudit(
-  manifestItems: ManifestItemRecord[]
-): QuoteTotalAudit {
-  const quotedItems = manifestItems.filter((item) => item.source_type === "quoted");
-  const activeQuoted = quotedItems.filter(isActiveQuotedManifestItem);
-  const cancelledQuoted = quotedItems.filter(
-    (item) =>
-      item.billing_status === "cancelled" ||
-      item.production_requirement_status === "cancelled"
-  );
+export function calculateQuoteTotalAudit(input: {
+  quoteItems: AcceptedQuoteLine[];
+  manifestItems: ManifestItemRecord[];
+  taxRatePercent: number;
+}): QuoteTotalAudit {
+  const billableQuoteItems = input.quoteItems.filter((item) => !item.is_optional);
+  const manifestByQuoteItemId = buildManifestByQuoteItemId(input.manifestItems);
 
   const beforeCancellations = totalsFromInvoiceLines(
-    quotedItems.map(manifestItemToSyntheticInvoiceLine)
+    billableQuoteItems.map((quoteItem) =>
+      acceptedQuoteLineToSyntheticInvoiceLine(quoteItem, input.taxRatePercent)
+    )
   );
+
+  const cancelledQuoteItems = billableQuoteItems.filter((quoteItem) =>
+    isQuoteItemCancelled(quoteItem.id, manifestByQuoteItemId)
+  );
+
   const cancellations = totalsFromInvoiceLines(
-    cancelledQuoted.map(manifestItemToSyntheticInvoiceLine)
+    cancelledQuoteItems.map((quoteItem) =>
+      acceptedQuoteLineToSyntheticInvoiceLine(quoteItem, input.taxRatePercent)
+    )
   );
+
+  const activeQuoteItems = billableQuoteItems.filter((quoteItem) =>
+    isActiveAcceptedQuoteLine(quoteItem, manifestByQuoteItemId)
+  );
+
   const adjustedOriginal = totalsFromInvoiceLines(
-    activeQuoted.map(manifestItemToSyntheticInvoiceLine)
+    activeQuoteItems.map((quoteItem) =>
+      acceptedQuoteLineToSyntheticInvoiceLine(quoteItem, input.taxRatePercent)
+    )
   );
 
   return {
@@ -180,15 +169,29 @@ export function calculateQuoteTotalAudit(
 }
 
 export function findMissingQuotedInvoiceLines(input: {
+  quoteItems: AcceptedQuoteLine[];
   manifestItems: ManifestItemRecord[];
   invoiceItems: InvoiceItemRecord[];
 }) {
-  const activeQuoted = input.manifestItems.filter(isActiveQuotedManifestItem);
-  const invoiceProductionIds = new Set(
+  const manifestByQuoteItemId = buildManifestByQuoteItemId(input.manifestItems);
+  const invoicedQuoteItemIds = new Set(
     input.invoiceItems
-      .filter((line) => !line.deleted_at && line.production_item_id)
-      .map((line) => line.production_item_id as string)
+      .filter((line) => !line.deleted_at && line.quote_item_id)
+      .map((line) => line.quote_item_id as string)
   );
 
-  return activeQuoted.filter((item) => !invoiceProductionIds.has(item.id));
+  const missingQuoteItems = input.quoteItems.filter(
+    (quoteItem) =>
+      isActiveAcceptedQuoteLine(quoteItem, manifestByQuoteItemId) &&
+      !invoicedQuoteItemIds.has(quoteItem.id)
+  );
+
+  return missingQuoteItems
+    .map((quoteItem) => {
+      const quotedLinks = (manifestByQuoteItemId.get(quoteItem.id) ?? []).filter(
+        (item) => item.source_type === "quoted"
+      );
+      return quotedLinks.find((item) => shouldIncludeManifestItemInInvoice(item)) ?? null;
+    })
+    .filter((item): item is ManifestItemRecord => Boolean(item));
 }

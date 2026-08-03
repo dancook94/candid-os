@@ -18,7 +18,12 @@ import type {
   QuoteTotalAudit,
   XeroPayloadPreview,
 } from "@/lib/invoice/types";
-import { ensureProductionManifestForJob } from "@/lib/manifest/service";
+import {
+  buildQuoteLineDiagnostics,
+  quoteVersionVatRateToPercent,
+  type AcceptedQuoteLine,
+} from "@/lib/invoice/quote-lines";
+import { ensureProductionManifestForJob, loadAcceptedQuoteItems } from "@/lib/manifest/service";
 import { MANIFEST_ITEM_SELECT } from "@/lib/manifest/constants";
 import type { ManifestItemRecord } from "@/lib/manifest/types";
 import {
@@ -292,7 +297,7 @@ async function loadJobInvoiceContext(adminClient: SupabaseClient, jobId: string)
   const { data: job, error } = await adminClient
     .from("jobs")
     .select(
-      "id, company_id, quote_id, job_reference, commercial_status, project_name"
+      "id, company_id, quote_id, quote_version_id, job_reference, commercial_status, project_name"
     )
     .eq("id", jobId)
     .maybeSingle();
@@ -309,9 +314,35 @@ async function loadJobInvoiceContext(adminClient: SupabaseClient, jobId: string)
     id: string;
     company_id: string;
     quote_id: string;
+    quote_version_id: string | null;
     job_reference: string;
     commercial_status: string;
     project_name: string;
+  };
+}
+
+async function loadAcceptedQuoteContext(
+  adminClient: SupabaseClient,
+  quoteVersionId: string | null
+): Promise<{ quoteItems: AcceptedQuoteLine[]; taxRatePercent: number }> {
+  if (!quoteVersionId) {
+    return { quoteItems: [], taxRatePercent: 20 };
+  }
+
+  const [{ data: quoteVersion }, quoteItems] = await Promise.all([
+    adminClient
+      .from("quote_versions")
+      .select("vat_rate")
+      .eq("id", quoteVersionId)
+      .maybeSingle(),
+    loadAcceptedQuoteItems(adminClient, quoteVersionId),
+  ]);
+
+  return {
+    quoteItems: quoteItems as AcceptedQuoteLine[],
+    taxRatePercent: quoteVersionVatRateToPercent(
+      (quoteVersion as { vat_rate?: number | null } | null)?.vat_rate
+    ),
   };
 }
 
@@ -574,6 +605,7 @@ export async function loadInvoiceReviewData(
         cancellations: { subtotal: 0, tax_total: 0, total: 0 },
         adjustedOriginal: { subtotal: 0, tax_total: 0, total: 0 },
       },
+      quoteLineDiagnostics: null,
       schemaMissing: reconcileResult.schemaMissing,
       error: reconcileResult.error ?? "Unable to load invoice draft.",
     };
@@ -581,8 +613,12 @@ export async function loadInvoiceReviewData(
 
   const draft = reconcileResult.draft;
 
-  const [{ data: manifestItems }, { data: invoiceItems }, { data: company }] =
-    await Promise.all([
+  const [
+    { data: manifestItems },
+    { data: invoiceItems },
+    { data: company },
+    job,
+  ] = await Promise.all([
     adminClient
       .from("production_items")
       .select(MANIFEST_ITEM_SELECT)
@@ -602,7 +638,13 @@ export async function loadInvoiceReviewData(
           .select("company_name")
           .eq("id", draft.company_id)
           .maybeSingle(),
+    loadJobInvoiceContext(adminClient, jobId),
   ]);
+
+  const acceptedQuoteContext = await loadAcceptedQuoteContext(
+    adminClient,
+    job.quote_version_id
+  );
 
   const typedManifest = (manifestItems ?? []) as ManifestItemRecord[];
   const typedInvoiceItems = (invoiceItems ?? []).map((item) =>
@@ -668,11 +710,24 @@ export async function loadInvoiceReviewData(
 
   const unpricedCount = finalLines.filter(invoiceLineNeedsPricing).length;
   const totalGroups = calculateInvoiceTotalGroups(typedInvoiceItems, manifestById);
-  const quoteAudit = calculateQuoteTotalAudit(typedManifest);
+  const quoteAudit = calculateQuoteTotalAudit({
+    quoteItems: acceptedQuoteContext.quoteItems,
+    manifestItems: typedManifest,
+    taxRatePercent: acceptedQuoteContext.taxRatePercent,
+  });
+  const quoteLineDiagnostics =
+    process.env.NODE_ENV === "development"
+      ? buildQuoteLineDiagnostics({
+          quoteItems: acceptedQuoteContext.quoteItems,
+          manifestItems: typedManifest,
+          taxRatePercent: acceptedQuoteContext.taxRatePercent,
+        })
+      : null;
 
   const approvalReadiness = buildInvoiceApprovalReadiness({
     draft,
     invoiceItems: typedInvoiceItems,
+    quoteItems: acceptedQuoteContext.quoteItems,
     manifestItems: typedManifest,
     companyName: resolvedCompanyName,
     quoteLinked: Boolean(draft.quote_id),
@@ -704,6 +759,7 @@ export async function loadInvoiceReviewData(
     isApproved: draft.status === "approved",
     totalGroups,
     quoteAudit,
+    quoteLineDiagnostics,
     schemaMissing: false,
     error: null,
   };
@@ -927,7 +983,8 @@ export async function approveInvoiceDraft(
   const draft = refreshed.draft;
   const invoiceItems = refreshed.invoiceItems;
 
-  const [{ data: company }, { data: manifestItems }] = await Promise.all([
+  const [job, { data: company }, { data: manifestItems }] = await Promise.all([
+    loadJobInvoiceContext(adminClient, draft.job_id),
     adminClient
       .from("companies")
       .select("company_name")
@@ -940,9 +997,15 @@ export async function approveInvoiceDraft(
       .is("deleted_at", null),
   ]);
 
+  const acceptedQuoteContext = await loadAcceptedQuoteContext(
+    adminClient,
+    job.quote_version_id
+  );
+
   const readiness = buildInvoiceApprovalReadiness({
     draft,
     invoiceItems,
+    quoteItems: acceptedQuoteContext.quoteItems,
     manifestItems: (manifestItems ?? []) as ManifestItemRecord[],
     companyName: company?.company_name ?? null,
     quoteLinked: Boolean(draft.quote_id),
@@ -978,8 +1041,6 @@ export async function approveInvoiceDraft(
       500
     );
   }
-
-  const job = await loadJobInvoiceContext(adminClient, draft.job_id);
 
   await adminClient
     .from("jobs")

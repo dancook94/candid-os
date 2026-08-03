@@ -1,3 +1,4 @@
+import type { AcceptedQuoteLine } from "@/lib/invoice/quote-lines";
 import type { ManifestItemRecord } from "@/lib/manifest/types";
 import { NON_INVOICE_BILLING_STATUSES } from "@/lib/invoice/constants";
 import type { InvoiceDraftRecord, InvoiceItemRecord } from "@/lib/invoice/types";
@@ -89,6 +90,7 @@ function validateBillableLine(line: InvoiceItemRecord): string[] {
 export function buildInvoiceApprovalReadiness(input: {
   draft: InvoiceDraftRecord;
   invoiceItems: InvoiceItemRecord[];
+  quoteItems?: AcceptedQuoteLine[];
   manifestItems?: ManifestItemRecord[];
   companyName: string | null;
   quoteLinked: boolean;
@@ -112,12 +114,14 @@ export function buildInvoiceApprovalReadiness(input: {
   const calculatedTotals = calculateInvoiceDraftTotals(input.invoiceItems);
   const totalsMatch = draftTotalsMatchItems(input.draft, input.invoiceItems);
 
-  const missingQuotedLines = input.manifestItems
-    ? findMissingQuotedInvoiceLines({
-        manifestItems: input.manifestItems,
-        invoiceItems: input.invoiceItems,
-      })
-    : [];
+  const missingQuotedLines =
+    input.manifestItems && input.quoteItems
+      ? findMissingQuotedInvoiceLines({
+          quoteItems: input.quoteItems,
+          manifestItems: input.manifestItems,
+          invoiceItems: input.invoiceItems,
+        })
+      : [];
 
   const manifestById = new Map(
     (input.manifestItems ?? []).map((item) => [item.id, item])

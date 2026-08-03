@@ -746,7 +746,36 @@ export function InvoiceReviewClient({
             Accepted quote before cancellations: {formatGbp(data.quoteAudit.beforeCancellations.total)}
             {" · "}
             Less cancellations: {formatGbp(data.quoteAudit.cancellations.total)}
+            {" · "}
+            Adjusted original quote: {formatGbp(data.quoteAudit.adjustedOriginal.total)}
           </p>
+        ) : null}
+
+        {data.quoteLineDiagnostics && data.quoteLineDiagnostics.length > 0 ? (
+          <div className="portal-surface rounded-xl border border-dashed border-amber-300/60 bg-amber-50/30 p-4 text-xs">
+            <p className="font-medium text-amber-900">Quote line diagnostics (development only)</p>
+            <ul className="mt-3 space-y-2 text-amber-950">
+              {data.quoteLineDiagnostics.map((line) => (
+                <li key={line.quoteItemId} className="rounded-md border border-amber-200/70 bg-white/60 p-3">
+                  <p className="font-medium">{line.title}</p>
+                  <p className="mt-1 text-muted-foreground">Quote item: {line.quoteItemId}</p>
+                  <p className="text-muted-foreground">
+                    Gross: {formatGbp(line.grossValue)}
+                    {" · "}
+                    Manifest: {line.matchedManifestItemId ?? "none"}
+                    {" · "}
+                    Requirement: {line.requirementStatus ?? "—"}
+                    {" · "}
+                    Billing: {line.billingStatus ?? "—"}
+                  </p>
+                  <p className="mt-1">
+                    {line.included ? "Included in adjusted original quote" : "Excluded"}
+                    {line.excludedReason ? ` — ${line.excludedReason}` : ""}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          </div>
         ) : null}
 
         <TotalGroupPanel title="Production changes" totals={displayChangeTotals} />

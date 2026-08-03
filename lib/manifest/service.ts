@@ -62,6 +62,13 @@ async function loadJob(adminClient: SupabaseClient, jobId: string): Promise<JobR
   return data as JobRow;
 }
 
+export async function loadAcceptedQuoteItems(
+  adminClient: SupabaseClient,
+  quoteVersionId: string
+): Promise<QuoteItemRow[]> {
+  return loadQuoteItems(adminClient, quoteVersionId);
+}
+
 async function loadQuoteItems(
   adminClient: SupabaseClient,
   quoteVersionId: string
@@ -113,6 +120,61 @@ function defaultRequirementForQuoteLine(title: string) {
     requires_printfactory: false,
     billing_status: "billable" as const,
   };
+}
+
+async function reconcileManifestQuoteItemLinks(
+  adminClient: SupabaseClient,
+  jobId: string,
+  quoteItems: QuoteItemRow[]
+) {
+  const { data: manifestItems, error } = await adminClient
+    .from("production_items")
+    .select("id, item_name, quote_item_id, source_type")
+    .eq("job_id", jobId)
+    .is("deleted_at", null);
+
+  if (error) {
+    throw new ProductionError(error.message, 500);
+  }
+
+  const linkedQuoteItemIds = new Set(
+    (manifestItems ?? [])
+      .map((item) => item.quote_item_id)
+      .filter((id): id is string => Boolean(id))
+  );
+
+  for (const manifestItem of manifestItems ?? []) {
+    if (manifestItem.source_type !== "quoted" || manifestItem.quote_item_id) {
+      continue;
+    }
+
+    const titleMatches = quoteItems.filter(
+      (quoteItem) =>
+        quoteItem.title.trim().toLowerCase() ===
+        String(manifestItem.item_name).trim().toLowerCase()
+    );
+
+    if (titleMatches.length !== 1) {
+      continue;
+    }
+
+    const candidate = titleMatches[0];
+
+    if (linkedQuoteItemIds.has(candidate.id)) {
+      continue;
+    }
+
+    const { error: updateError } = await adminClient
+      .from("production_items")
+      .update({ quote_item_id: candidate.id })
+      .eq("id", manifestItem.id);
+
+    if (updateError) {
+      throw new ProductionError(updateError.message, 500);
+    }
+
+    linkedQuoteItemIds.add(candidate.id);
+  }
 }
 
 export async function loadManifestItemsForJob(
@@ -168,6 +230,12 @@ export async function reconcileProductionManifestForJob(
       schemaMissing: false,
       error: null,
     };
+  }
+
+  try {
+    await reconcileManifestQuoteItemLinks(adminClient, jobId, quoteItems);
+  } catch {
+    // Link repair is best-effort; manifest reconcile proceeds.
   }
 
   const { data: existingItems, error: existingError } = await adminClient

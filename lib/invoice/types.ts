@@ -3,6 +3,7 @@ import type {
   PricingSource,
 } from "@/lib/invoice/constants";
 import type { InvoiceDisplayStatus } from "@/lib/invoice/display-status";
+import type { QuoteLineDiagnostic } from "@/lib/invoice/quote-lines";
 import type { InvoiceApprovalReadiness } from "@/lib/invoice/validation";
 import type { ManifestBillingStatus } from "@/lib/manifest/constants";
 import type { ManifestItemRecord } from "@/lib/manifest/types";
@@ -88,6 +89,7 @@ export type InvoiceReviewData = {
   isApproved: boolean;
   totalGroups: InvoiceTotalGroups;
   quoteAudit: QuoteTotalAudit;
+  quoteLineDiagnostics: QuoteLineDiagnostic[] | null;
   schemaMissing: boolean;
   error: string | null;
 };
