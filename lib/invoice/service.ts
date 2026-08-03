@@ -20,6 +20,7 @@ import type {
 } from "@/lib/invoice/types";
 import {
   buildQuoteLineDiagnostics,
+  partitionManifestItemsForReview,
   quoteVersionVatRateToPercent,
   type AcceptedQuoteLine,
 } from "@/lib/invoice/quote-lines";
@@ -653,20 +654,8 @@ export async function loadInvoiceReviewData(
   const resolvedCompanyName =
     companyName ?? (company as { company_name?: string } | null)?.company_name ?? null;
 
-  const quotedItems = typedManifest.filter(
-    (item) =>
-      item.source_type === "quoted" &&
-      item.production_requirement_status !== "cancelled" &&
-      item.billing_status !== "cancelled"
-  );
-  const productionChanges = typedManifest.filter(
-    (item) =>
-      item.source_type !== "quoted" ||
-      item.billing_status === "cancelled" ||
-      item.production_requirement_status === "cancelled" ||
-      item.billing_status === "reprint_no_charge" ||
-      item.billing_status === "no_charge"
-  );
+  const { originallyQuoted: quotedItems, productionChanges } =
+    partitionManifestItemsForReview(typedManifest);
   const manifestById = new Map(typedManifest.map((item) => [item.id, item]));
 
   const finalLines: InvoiceLineView[] = typedInvoiceItems
@@ -720,6 +709,7 @@ export async function loadInvoiceReviewData(
       ? buildQuoteLineDiagnostics({
           quoteItems: acceptedQuoteContext.quoteItems,
           manifestItems: typedManifest,
+          invoiceItems: typedInvoiceItems,
           taxRatePercent: acceptedQuoteContext.taxRatePercent,
         })
       : null;

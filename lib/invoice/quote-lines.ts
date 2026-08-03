@@ -24,9 +24,27 @@ export type QuoteLineDiagnostic = {
   matchedManifestItemId: string | null;
   requirementStatus: string | null;
   billingStatus: string | null;
-  included: boolean;
+  sourceGroup: "originally_quoted" | "production_changes" | "unlinked";
+  includedInOriginallyQuoted: boolean;
+  includedInProductionChanges: boolean;
+  includedInFinalInvoice: boolean;
   excludedReason: string | null;
 };
+
+export function isOriginallyQuotedManifestItem(item: ManifestItemRecord) {
+  return item.source_type === "quoted" || Boolean(item.quote_item_id);
+}
+
+export function isProductionChangeManifestItem(item: ManifestItemRecord) {
+  return !isOriginallyQuotedManifestItem(item);
+}
+
+export function partitionManifestItemsForReview(manifestItems: ManifestItemRecord[]) {
+  const originallyQuoted = manifestItems.filter(isOriginallyQuotedManifestItem);
+  const productionChanges = manifestItems.filter(isProductionChangeManifestItem);
+
+  return { originallyQuoted, productionChanges };
+}
 
 export function quoteVersionVatRateToPercent(vatRate: number | null | undefined) {
   if (vatRate === null || vatRate === undefined) {
@@ -131,9 +149,15 @@ export function acceptedQuoteLineToSyntheticInvoiceLine(
 export function buildQuoteLineDiagnostics(input: {
   quoteItems: AcceptedQuoteLine[];
   manifestItems: ManifestItemRecord[];
+  invoiceItems: InvoiceItemRecord[];
   taxRatePercent: number;
 }): QuoteLineDiagnostic[] {
   const manifestByQuoteItemId = buildManifestByQuoteItemId(input.manifestItems);
+  const invoicedQuoteItemIds = new Set(
+    input.invoiceItems
+      .filter((line) => !line.deleted_at && line.quote_item_id)
+      .map((line) => line.quote_item_id as string)
+  );
 
   return input.quoteItems
     .filter((item) => !item.is_optional)
@@ -149,6 +173,21 @@ export function buildQuoteLineDiagnostics(input: {
         unitPrice: quoteItem.unit_price,
         taxRate: input.taxRatePercent,
       }).grossTotal;
+      const includedInOriginallyQuoted = Boolean(matchedManifest);
+      const includedInProductionChanges = matchedManifest
+        ? isProductionChangeManifestItem(matchedManifest)
+        : false;
+      const includedInFinalInvoice =
+        !cancelled && invoicedQuoteItemIds.has(quoteItem.id);
+
+      let excludedReason: string | null = null;
+      if (cancelled) {
+        excludedReason = "Cancelled quoted item excluded from final invoice.";
+      } else if (!matchedManifest) {
+        excludedReason = "No quoted manifest item linked yet.";
+      } else if (!includedInFinalInvoice) {
+        excludedReason = "Active quoted item not yet on final invoice draft.";
+      }
 
       return {
         quoteItemId: quoteItem.id,
@@ -157,12 +196,15 @@ export function buildQuoteLineDiagnostics(input: {
         matchedManifestItemId: matchedManifest?.id ?? null,
         requirementStatus: matchedManifest?.production_requirement_status ?? null,
         billingStatus: matchedManifest?.billing_status ?? null,
-        included: !cancelled,
-        excludedReason: cancelled
-          ? "Linked quoted manifest item is cancelled."
-          : matchedManifest
-            ? null
-            : "No quoted manifest item linked yet.",
+        sourceGroup: matchedManifest
+          ? isOriginallyQuotedManifestItem(matchedManifest)
+            ? "originally_quoted"
+            : "production_changes"
+          : "unlinked",
+        includedInOriginallyQuoted,
+        includedInProductionChanges,
+        includedInFinalInvoice,
+        excludedReason,
       };
     });
 }

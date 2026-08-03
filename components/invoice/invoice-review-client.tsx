@@ -25,6 +25,7 @@ import {
   formatManifestPreviewDescription,
 } from "@/lib/invoice/line-text";
 import { calculateInvoiceTotalGroups } from "@/lib/invoice/total-groups";
+import { isManifestQuoteItemCancelled } from "@/lib/invoice/quote-lines";
 import type {
   InvoiceLineView,
   InvoiceReviewData,
@@ -34,6 +35,7 @@ import type {
 import {
   MANIFEST_BILLING_STATUS_LABELS,
   MANIFEST_SOURCE_TYPE_LABELS,
+  PRODUCTION_REQUIREMENT_STATUS_LABELS,
 } from "@/lib/manifest/constants";
 import { formatGbp } from "@/lib/format-currency";
 
@@ -638,27 +640,65 @@ export function InvoiceReviewClient({
           <h2 className="text-lg font-semibold">Originally quoted</h2>
           <div className="mt-4 space-y-3">
             {data.quotedItems.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No quoted manifest items.</p>
+              <p className="text-sm text-muted-foreground">
+                No items from the accepted quote.
+              </p>
             ) : (
-              data.quotedItems.map((item) => (
-                <div key={item.id} className="rounded-lg border border-border/70 p-4 text-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-medium">{item.item_name}</p>
-                    <span className="text-xs text-muted-foreground">
-                      {MANIFEST_SOURCE_TYPE_LABELS[item.source_type]}
-                    </span>
-                  </div>
-                  {item.description ? (
-                    <p className="mt-2 whitespace-pre-wrap text-muted-foreground">
-                      {item.description}
+              data.quotedItems.map((item) => {
+                const isCancelled = isManifestQuoteItemCancelled(item);
+
+                return (
+                  <div
+                    key={item.id}
+                    className={
+                      isCancelled
+                        ? "rounded-lg border border-border/50 bg-muted/25 p-4 text-sm text-muted-foreground"
+                        : "rounded-lg border border-border/70 p-4 text-sm"
+                    }
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className={isCancelled ? "font-medium text-foreground/80" : "font-medium"}>
+                        {item.item_name}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {isCancelled ? (
+                          <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                            Cancelled by customer
+                          </span>
+                        ) : null}
+                        <span className="text-xs text-muted-foreground">
+                          {MANIFEST_SOURCE_TYPE_LABELS[item.source_type]}
+                        </span>
+                      </div>
+                    </div>
+                    {item.description ? (
+                      <p className="mt-2 whitespace-pre-wrap text-muted-foreground">
+                        {item.description}
+                      </p>
+                    ) : null}
+                    <p className="mt-2 text-muted-foreground">
+                      Qty {item.quoted_quantity ?? item.quantity ?? "—"}
+                      {item.quote_unit_price !== null
+                        ? ` · ${formatGbp(item.quote_unit_price)} each`
+                        : ""}
                     </p>
-                  ) : null}
-                  <p className="mt-2 text-muted-foreground">
-                    Qty {item.quoted_quantity ?? item.quantity ?? "—"} ·{" "}
-                    {MANIFEST_BILLING_STATUS_LABELS[item.billing_status]}
-                  </p>
-                </div>
-              ))
+                    <p className="mt-1 text-muted-foreground">
+                      Requirement:{" "}
+                      {PRODUCTION_REQUIREMENT_STATUS_LABELS[item.production_requirement_status]}
+                      {" · "}
+                      Billing: {MANIFEST_BILLING_STATUS_LABELS[item.billing_status]}
+                    </p>
+                    {isCancelled ? (
+                      <p className="mt-2 text-xs text-muted-foreground">
+                        Excluded from final invoice
+                        {item.customer_change_reason
+                          ? ` · ${item.customer_change_reason}`
+                          : ""}
+                      </p>
+                    ) : null}
+                  </div>
+                );
+              })
             )}
           </div>
         </section>
@@ -758,19 +798,30 @@ export function InvoiceReviewClient({
               {data.quoteLineDiagnostics.map((line) => (
                 <li key={line.quoteItemId} className="rounded-md border border-amber-200/70 bg-white/60 p-3">
                   <p className="font-medium">{line.title}</p>
-                  <p className="mt-1 text-muted-foreground">Quote item: {line.quoteItemId}</p>
+                  <p className="mt-1 text-muted-foreground">
+                    Quote item: {line.quoteItemId}
+                  </p>
                   <p className="text-muted-foreground">
                     Gross: {formatGbp(line.grossValue)}
                     {" · "}
                     Manifest: {line.matchedManifestItemId ?? "none"}
                     {" · "}
+                    Source group: {line.sourceGroup.replaceAll("_", " ")}
+                  </p>
+                  <p className="text-muted-foreground">
                     Requirement: {line.requirementStatus ?? "—"}
                     {" · "}
                     Billing: {line.billingStatus ?? "—"}
                   </p>
+                  <p className="mt-1 text-muted-foreground">
+                    Originally quoted: {line.includedInOriginallyQuoted ? "yes" : "no"}
+                    {" · "}
+                    Production changes: {line.includedInProductionChanges ? "yes" : "no"}
+                    {" · "}
+                    Final invoice: {line.includedInFinalInvoice ? "yes" : "no"}
+                  </p>
                   <p className="mt-1">
-                    {line.included ? "Included in adjusted original quote" : "Excluded"}
-                    {line.excludedReason ? ` — ${line.excludedReason}` : ""}
+                    {line.excludedReason ?? "Included in final invoice draft."}
                   </p>
                 </li>
               ))}
