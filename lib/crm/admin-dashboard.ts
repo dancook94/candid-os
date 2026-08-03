@@ -196,15 +196,18 @@ export async function fetchAdminDashboardCrm(
     supabase
       .from("opportunities")
       .select("id", { count: "exact", head: true })
-      .not("stage", "in", TERMINAL_STAGE_FILTER),
+      .not("stage", "in", TERMINAL_STAGE_FILTER)
+      .is("archived_at", null),
     supabase
       .from("opportunities")
       .select("estimated_value")
-      .not("stage", "in", TERMINAL_STAGE_FILTER),
+      .not("stage", "in", TERMINAL_STAGE_FILTER)
+      .is("archived_at", null),
     supabase
       .from("opportunities")
       .select("id, next_follow_up_at")
-      .not("stage", "in", TERMINAL_STAGE_FILTER),
+      .not("stage", "in", TERMINAL_STAGE_FILTER)
+      .is("archived_at", null),
     supabase
       .from("tasks")
       .select("opportunity_id")
@@ -231,6 +234,7 @@ export async function fetchAdminDashboardCrm(
         "id, title, stage, estimated_value, owner_profile_id, updated_at, next_follow_up_at, company_id"
       )
       .not("stage", "in", TERMINAL_STAGE_FILTER)
+      .is("archived_at", null)
       .order("updated_at", { ascending: false })
       .limit(5),
     supabase

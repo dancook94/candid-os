@@ -2,13 +2,18 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { verifyApprovedCrmStaff } from "@/lib/crm-auth";
-import { markJobReadyToPrintOverride } from "@/lib/manifest/service";
-import { refreshJobProductionReadiness } from "@/lib/printfactory/readiness-service";
+import {
+  applyJobProductionBoardStageChange,
+  isValidJobProductionBoardStage,
+} from "@/lib/production/job-board-service";
+import type { JobProductionBoardStage } from "@/lib/production/job-board-constants";
 import { ProductionError } from "@/lib/production/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
-type ReadyToPrintBody = {
+type StageChangeBody = {
+  stage?: string;
+  previousStage?: string;
   reason?: string;
 };
 
@@ -24,48 +29,42 @@ export async function POST(
     return NextResponse.json({ error: auth.message }, { status: auth.status });
   }
 
-  let body: ReadyToPrintBody;
+  let body: StageChangeBody;
 
   try {
-    body = (await request.json()) as ReadyToPrintBody;
+    body = (await request.json()) as StageChangeBody;
   } catch {
     return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  if (!body.reason?.trim()) {
-    return NextResponse.json({ error: "Reason is required." }, { status: 400 });
+  const newStage = body.stage;
+
+  if (!newStage || !isValidJobProductionBoardStage(newStage)) {
+    return NextResponse.json({ error: "Invalid stage." }, { status: 400 });
   }
 
   const adminClient = createAdminClient();
 
   try {
-    await markJobReadyToPrintOverride(
+    const result = await applyJobProductionBoardStageChange(
       adminClient,
       jobId,
-      body.reason.trim(),
-      auth.userId
+      newStage as JobProductionBoardStage,
+      auth.userId,
+      body.reason
     );
 
-    const readinessResult = await refreshJobProductionReadiness(
-      adminClient,
-      jobId,
-      auth.userId
-    );
-
-    revalidatePath(`/admin/jobs/${jobId}`);
     revalidatePath("/admin/production");
+    revalidatePath(`/admin/jobs/${jobId}`);
 
-    return NextResponse.json({
-      ok: true,
-      ...readinessResult,
-    });
+    return NextResponse.json(result);
   } catch (error) {
     if (error instanceof ProductionError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
 
     return NextResponse.json(
-      { error: "Unable to mark job ready to print." },
+      { error: "Unable to update production board stage." },
       { status: 500 }
     );
   }

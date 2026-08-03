@@ -18,6 +18,11 @@ import type {
 } from "@/lib/manifest/types";
 import { ProductionError, isMissingManifestSchemaError, isMissingProductionSchemaError } from "@/lib/production/errors";
 import { deriveCustomerSafeStatus } from "@/lib/production/status-sync";
+import {
+  generateItemReferenceForSourceType,
+  generateQuotedItemReference,
+  reconcileMissingItemReferences,
+} from "@/lib/manifest/item-reference";
 import type { ProductionStatus } from "@/lib/production/constants";
 
 type QuoteItemRow = {
@@ -86,24 +91,6 @@ async function loadQuoteItems(
   }
 
   return (data ?? []) as QuoteItemRow[];
-}
-
-async function generateItemReference(
-  adminClient: SupabaseClient,
-  jobId: string,
-  jobReference: string
-) {
-  const { count, error } = await adminClient
-    .from("production_items")
-    .select("id", { count: "exact", head: true })
-    .eq("job_id", jobId);
-
-  if (error) {
-    throw new ProductionError(error.message, 500);
-  }
-
-  const sequence = String((count ?? 0) + 1).padStart(2, "0");
-  return `${jobReference}-${sequence}`;
 }
 
 function defaultRequirementForQuoteLine(title: string) {
@@ -279,7 +266,7 @@ export async function reconcileProductionManifestForJob(
     }
 
     const defaults = defaultRequirementForQuoteLine(quoteItem.title);
-    const itemReference = await generateItemReference(
+    const itemReference = await generateQuotedItemReference(
       adminClient,
       jobId,
       job.job_reference
@@ -375,10 +362,11 @@ export async function addManifestItem(
     input.billingStatus ??
     (sourceType === "reprint" ? "reprint_no_charge" : "price_required");
 
-  const itemReference = await generateItemReference(
+  const itemReference = await generateItemReferenceForSourceType(
     adminClient,
     jobId,
-    job.job_reference
+    job.job_reference,
+    sourceType
   );
 
   const productionStatus = input.productionStatus ?? "artwork";
@@ -696,10 +684,11 @@ export async function duplicateManifestItem(
   }
 
   const job = await loadJob(adminClient, existing.job_id);
-  const itemReference = await generateItemReference(
+  const itemReference = await generateItemReferenceForSourceType(
     adminClient,
     existing.job_id,
-    job.job_reference
+    job.job_reference,
+    "manual"
   );
 
   const {

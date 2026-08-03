@@ -409,6 +409,7 @@ export async function ensureJobForAcceptedQuote({
       dropbox_folder_path: null,
       dropbox_folder_id: null,
       dropbox_setup_status: "pending",
+      production_board_stage: "accepted_quotes",
     })
     .select(JOB_LIST_COLUMNS)
     .single();

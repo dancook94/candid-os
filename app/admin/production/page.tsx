@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Factory } from "lucide-react";
 
-import { ProductionBoard } from "@/components/production/production-board";
+import { JobProductionBoard } from "@/components/production/job-production-board";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
@@ -22,7 +22,7 @@ import {
   PRODUCTION_PRIORITIES,
   PRODUCTION_PRIORITY_LABELS,
 } from "@/lib/production/constants";
-import { fetchProductionBoard } from "@/lib/production/service";
+import { fetchJobProductionBoard } from "@/lib/production/job-board-service";
 import {
   loadProductionFilterOptions,
   loadProductionStaffProfiles,
@@ -50,7 +50,7 @@ export default async function AdminProductionPage({
 
   const [boardResult, { data: activeCompanies }, staff, filterOptions] =
     await Promise.all([
-      fetchProductionBoard(adminClient, filters),
+      fetchJobProductionBoard(adminClient, filters),
       supabase
         .from("companies")
         .select("id, company_name")
@@ -68,10 +68,10 @@ export default async function AdminProductionPage({
         <PageHeader
           eyebrow="Production"
           title="Production Board"
-          description="Track individual production items through the workshop."
+          description="Track whole jobs through production from accepted quote to dispatch."
           actions={
             <Link href="/admin/production/printfactory-unmatched">
-              <Button variant="outline">PrintFactory unmatched</Button>
+              <Button variant="outline">PrintFactory Matching</Button>
             </Link>
           }
         />
@@ -212,8 +212,8 @@ export default async function AdminProductionPage({
             <CardContent className="py-8">
               <EmptyState
                 icon={<Factory className="h-5 w-5" aria-hidden />}
-                title="Production items migration not applied"
-                description="Apply supabase/migrations/20260803190000_production_items_foundation.sql in Supabase before using the Production Board."
+                title="Production Board migration not applied"
+                description="Apply supabase/migrations/20260803220000_printfactory_production_board_phase2.sql (and earlier production migrations) in Supabase before using the Production Board."
               />
               {process.env.NODE_ENV === "development" && boardResult.detail ? (
                 <p className="mt-4 text-center text-xs text-muted-foreground">
@@ -243,13 +243,13 @@ export default async function AdminProductionPage({
                 icon={<Factory className="h-5 w-5" aria-hidden />}
                 title={
                   hasFilters
-                    ? "No production items match your filters"
-                    : "No production items yet"
+                    ? "No jobs match your filters"
+                    : "No jobs on the board yet"
                 }
                 description={
                   hasFilters
                     ? "Try adjusting your search or filters."
-                    : "Add production items from a job detail page to populate the board."
+                    : "Accepted quotes create jobs automatically in Accepted Quotes."
                 }
                 action={
                   hasFilters ? (
@@ -269,7 +269,7 @@ export default async function AdminProductionPage({
           <>
             <div className="mb-4 text-sm text-muted-foreground">
               {boardResult.data.totalCount}{" "}
-              {boardResult.data.totalCount === 1 ? "item" : "items"}
+              {boardResult.data.totalCount === 1 ? "job" : "jobs"}
               {hasFilters ? (
                 <>
                   {" "}
@@ -283,7 +283,7 @@ export default async function AdminProductionPage({
                 </>
               ) : null}
             </div>
-            <ProductionBoard initialData={boardResult.data} />
+            <JobProductionBoard initialData={boardResult.data} />
           </>
         ) : null}
       </div>

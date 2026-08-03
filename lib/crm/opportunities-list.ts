@@ -18,6 +18,7 @@ export const OPPORTUNITY_LIST_SORT_OPTIONS = [
 export const OPPORTUNITY_LIST_SCOPE_OPTIONS = [
   "all",
   "active",
+  "archived",
   "won",
   "lost",
 ] as const;
@@ -354,7 +355,9 @@ export async function fetchOpportunitiesList(
   let query = supabase.from("opportunities").select("*");
 
   if (filters.scope === "active") {
-    query = query.not("stage", "in", '("won","lost")');
+    query = query.not("stage", "in", '("won","lost")').is("archived_at", null);
+  } else if (filters.scope === "archived") {
+    query = query.not("archived_at", "is", null);
   } else if (filters.scope === "won") {
     query = query.eq("stage", "won");
   } else if (filters.scope === "lost") {
@@ -376,7 +379,8 @@ export async function fetchOpportunitiesList(
   if (filters.overdueFollowUp) {
     query = query
       .lt("next_follow_up_at", new Date().toISOString())
-      .not("stage", "in", '("won","lost")');
+      .not("stage", "in", '("won","lost")')
+      .is("archived_at", null);
   }
 
   if (filters.search) {

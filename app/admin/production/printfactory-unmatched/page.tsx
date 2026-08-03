@@ -1,48 +1,108 @@
 import Link from "next/link";
-import { Link2Off } from "lucide-react";
 
+import { PrintfactoryMatchingClient } from "@/components/production/printfactory-matching-client";
 import { AppShell } from "@/components/app-shell";
-import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { buildCrmAppShellProps } from "@/lib/admin-shell-props";
 import { requireCrmPageAccess } from "@/lib/crm-page-access";
+import { getPrintfactoryConnectionStatus } from "@/lib/printfactory/client";
+import { loadPrintfactoryMatchingRecords } from "@/lib/printfactory/sync";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
-export default async function PrintfactoryUnmatchedPage() {
+type MatchingTab =
+  | "needs_job_match"
+  | "needs_item_match"
+  | "confirmed"
+  | "ignored";
+
+type PrintfactoryMatchingPageProps = {
+  searchParams: Promise<{
+    tab?: string;
+    job?: string;
+  }>;
+};
+
+function parseTab(value: string | undefined): MatchingTab {
+  if (
+    value === "needs_item_match" ||
+    value === "confirmed" ||
+    value === "ignored"
+  ) {
+    return value;
+  }
+
+  return "needs_job_match";
+}
+
+export default async function PrintfactoryMatchingPage({
+  searchParams,
+}: PrintfactoryMatchingPageProps) {
+  const params = await searchParams;
+  const tab = parseTab(params.tab);
+  const jobFilter = params.job?.trim() || undefined;
+
   const supabase = await createClient();
   const profile = await requireCrmPageAccess(
     supabase,
     "/admin/production/printfactory-unmatched"
   );
   const shellProps = await buildCrmAppShellProps(supabase, profile);
+  const adminClient = createAdminClient();
+  const connection = getPrintfactoryConnectionStatus();
+
+  const { records, schemaMissing } = await loadPrintfactoryMatchingRecords(
+    adminClient,
+    tab
+  );
+
+  const needsItemMatchRecords =
+    tab === "needs_item_match"
+      ? records.filter((record) => {
+          const links = (record.printfactory_job_manifest_items ?? []) as Array<{
+            link_status: string;
+          }>;
+
+          const hasConfirmed = links.some(
+            (link) => link.link_status === "confirmed"
+          );
+
+          return !hasConfirmed;
+        })
+      : records;
 
   return (
     <AppShell {...shellProps}>
-      <div className="mx-auto max-w-3xl">
+      <div className="mx-auto max-w-6xl">
         <PageHeader
           eyebrow="Production"
-          title="PrintFactory unmatched"
-          description="Review PrintFactory jobs that could not be automatically matched to Candid production items."
+          title="PrintFactory Matching"
+          description="Review PrintFactory jobs, match them to Candid jobs via Synology paths, and confirm manifest item links manually."
           actions={
             <Link href="/admin/production">
-              <Button variant="outline">Back to board</Button>
+              <Button variant="outline">Production Board</Button>
             </Link>
           }
         />
 
-        <Card className="portal-surface">
-          <CardContent className="py-12">
-            <EmptyState
-              icon={<Link2Off className="h-5 w-5" aria-hidden />}
-              title="PrintFactory sync is not enabled yet"
-              description="When PrintFactory integration is connected, unmatched jobs will appear here with source paths, suggested Candid job matches, and actions to match or ignore. Matching will use Synology source paths containing the Candid job reference — not customer name or project title alone."
-            />
-          </CardContent>
-        </Card>
+        {!connection.configured ? (
+          <div className="mb-6 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            PrintFactory is not configured. Set{" "}
+            <code className="text-xs">PRINTFACTORY_API_BASE_URL</code> and{" "}
+            <code className="text-xs">PRINTFACTORY_API_TOKEN</code> before syncing.
+          </div>
+        ) : null}
+
+        <PrintfactoryMatchingClient
+          initialTab={tab}
+          records={needsItemMatchRecords as never[]}
+          schemaMissing={schemaMissing}
+          jobFilter={jobFilter}
+          connectionStatus={connection}
+        />
       </div>
     </AppShell>
   );

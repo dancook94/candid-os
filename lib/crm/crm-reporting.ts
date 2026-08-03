@@ -35,7 +35,8 @@ export async function fetchCrmSummaryMetrics(
     supabase
       .from("opportunities")
       .select("estimated_value")
-      .not("stage", "in", terminalFilter),
+      .not("stage", "in", terminalFilter)
+      .is("archived_at", null),
     supabase
       .from("opportunities")
       .select("estimated_value")
@@ -46,7 +47,8 @@ export async function fetchCrmSummaryMetrics(
       .from("opportunities")
       .select("id", { count: "exact", head: true })
       .lt("next_follow_up_at", now)
-      .not("stage", "in", terminalFilter),
+      .not("stage", "in", terminalFilter)
+      .is("archived_at", null),
     supabase
       .from("tasks")
       .select("id", { count: "exact", head: true })

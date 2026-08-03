@@ -250,9 +250,14 @@ function OriginallyQuotedItemCard({
       }
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className={isCancelled ? "font-medium text-foreground/80" : "font-medium"}>
-          {item.item_name}
-        </p>
+        <div>
+          {item.item_reference ? (
+            <p className="text-xs text-muted-foreground">{item.item_reference}</p>
+          ) : null}
+          <p className={isCancelled ? "font-medium text-foreground/80" : "font-medium"}>
+            {item.item_name}
+          </p>
+        </div>
         <span className="text-xs text-muted-foreground">
           {MANIFEST_SOURCE_TYPE_LABELS[item.source_type]}
         </span>
@@ -323,7 +328,12 @@ function AdditionalWorkItemCard({
   return (
     <div className="rounded-lg border border-[var(--candid-yellow)]/30 bg-yellow-50/20 p-4 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="font-medium">{item.item_name}</p>
+        <div>
+          {item.item_reference ? (
+            <p className="text-xs text-muted-foreground">{item.item_reference}</p>
+          ) : null}
+          <p className="font-medium">{item.item_name}</p>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="rounded-full border border-[var(--candid-yellow)]/40 bg-yellow-50 px-2 py-0.5 text-xs font-medium text-amber-900">
             {MANIFEST_SOURCE_TYPE_LABELS[item.source_type]}
