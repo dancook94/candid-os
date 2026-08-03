@@ -1,7 +1,10 @@
-import {
-  NON_INVOICE_BILLING_STATUSES,
-} from "@/lib/invoice/constants";
+import type { ManifestItemRecord } from "@/lib/manifest/types";
+import { NON_INVOICE_BILLING_STATUSES } from "@/lib/invoice/constants";
 import type { InvoiceDraftRecord, InvoiceItemRecord } from "@/lib/invoice/types";
+import {
+  findMissingQuotedInvoiceLines,
+  isOriginalQuoteInvoiceLine,
+} from "@/lib/invoice/total-groups";
 import {
   calculateInvoiceDraftTotals,
   calculateInvoiceLineTotals,
@@ -86,6 +89,7 @@ function validateBillableLine(line: InvoiceItemRecord): string[] {
 export function buildInvoiceApprovalReadiness(input: {
   draft: InvoiceDraftRecord;
   invoiceItems: InvoiceItemRecord[];
+  manifestItems?: ManifestItemRecord[];
   companyName: string | null;
   quoteLinked: boolean;
 }): InvoiceApprovalReadiness {
@@ -108,7 +112,37 @@ export function buildInvoiceApprovalReadiness(input: {
   const calculatedTotals = calculateInvoiceDraftTotals(input.invoiceItems);
   const totalsMatch = draftTotalsMatchItems(input.draft, input.invoiceItems);
 
+  const missingQuotedLines = input.manifestItems
+    ? findMissingQuotedInvoiceLines({
+        manifestItems: input.manifestItems,
+        invoiceItems: input.invoiceItems,
+      })
+    : [];
+
+  const manifestById = new Map(
+    (input.manifestItems ?? []).map((item) => [item.id, item])
+  );
+  const originalInvoiceLines = billableLines.filter((line) => {
+    const manifestItem = line.production_item_id
+      ? manifestById.get(line.production_item_id) ?? null
+      : null;
+    return isOriginalQuoteInvoiceLine(line, manifestItem);
+  });
+
   const checklist: ApprovalChecklistItem[] = [
+    {
+      id: "original_quote_lines",
+      label: "Active accepted quote lines included",
+      passed: missingQuotedLines.length === 0,
+      detail:
+        missingQuotedLines.length > 0
+          ? `${missingQuotedLines.length} quote line(s) missing from the invoice draft.`
+          : originalInvoiceLines.length > 0
+            ? `${originalInvoiceLines.length} original quote line(s) on invoice`
+            : input.manifestItems?.some((item) => item.source_type === "quoted")
+              ? "No active quoted items remain billable."
+              : "No quoted items on this job.",
+    },
     {
       id: "customer",
       label: "Customer confirmed",
@@ -207,6 +241,12 @@ export function buildInvoiceApprovalReadiness(input: {
   for (const issue of lineIssues) {
     blockingReasons.push(
       `${issue.itemName}: ${issue.reasons.join(" ")}`
+    );
+  }
+
+  if (missingQuotedLines.length > 0) {
+    blockingReasons.push(
+      `${missingQuotedLines.length} active accepted quote line(s) are missing from the invoice draft.`
     );
   }
 

@@ -12,7 +12,6 @@ import {
 } from "@/lib/invoice/constants";
 import { INVOICE_DISPLAY_STATUS_LABELS } from "@/lib/invoice/display-status";
 import {
-  calculateInvoiceDraftTotals,
   calculateInvoiceLineTotals,
   calculatePersistedLineNetTotal,
   invoiceLineNeedsPricing,
@@ -21,8 +20,17 @@ import {
   parseQuantityValue,
   resolveBillingStatusAfterPricing,
 } from "@/lib/invoice/money";
-import { buildXeroLineDescription, formatManifestPreviewDescription } from "@/lib/invoice/line-text";
-import type { InvoiceLineView, InvoiceReviewData, XeroPayloadPreview } from "@/lib/invoice/types";
+import {
+  buildXeroLineDescription,
+  formatManifestPreviewDescription,
+} from "@/lib/invoice/line-text";
+import { calculateInvoiceTotalGroups } from "@/lib/invoice/total-groups";
+import type {
+  InvoiceLineView,
+  InvoiceReviewData,
+  InvoiceTotalGroup,
+  XeroPayloadPreview,
+} from "@/lib/invoice/types";
 import {
   MANIFEST_BILLING_STATUS_LABELS,
   MANIFEST_SOURCE_TYPE_LABELS,
@@ -66,6 +74,52 @@ function buildLiveLineSnapshot(line: InvoiceLineView): LiveLineSnapshot {
     billingStatus: line.billing_status,
     deletedAt: line.deleted_at,
   };
+}
+
+function TotalGroupPanel({
+  title,
+  totals,
+  emphasized = false,
+}: {
+  title: string;
+  totals: InvoiceTotalGroup;
+  emphasized?: boolean;
+}) {
+  return (
+    <div
+      className={
+        emphasized
+          ? "portal-surface rounded-xl border-2 border-foreground/10 bg-card p-6 shadow-sm"
+          : "portal-surface rounded-xl border border-border bg-card p-6 shadow-sm"
+      }
+    >
+      <h2 className={emphasized ? "text-lg font-semibold" : "text-base font-semibold"}>
+        {title}
+      </h2>
+      <dl className="mt-4 space-y-3 text-sm">
+        <div className="flex justify-between">
+          <dt className="text-muted-foreground">Subtotal</dt>
+          <dd className="font-medium">{formatGbp(totals.subtotal)}</dd>
+        </div>
+        <div className="flex justify-between">
+          <dt className="text-muted-foreground">VAT</dt>
+          <dd className="font-medium">{formatGbp(totals.tax_total)}</dd>
+        </div>
+        <div
+          className={
+            emphasized
+              ? "flex justify-between border-t border-border pt-3 text-base"
+              : "flex justify-between border-t border-border pt-3"
+          }
+        >
+          <dt className={emphasized ? "font-semibold" : "text-muted-foreground"}>Total</dt>
+          <dd className={emphasized ? "font-semibold" : "font-medium"}>
+            {formatGbp(totals.total)}
+          </dd>
+        </div>
+      </dl>
+    </div>
+  );
 }
 
 function buildLineDraft(line: InvoiceLineView): LineDraft {
@@ -355,6 +409,11 @@ export function InvoiceReviewClient({
     Record<string, LiveLineSnapshot>
   >({});
 
+  const manifestById = useMemo(
+    () => new Map(data.manifestItems.map((item) => [item.id, item])),
+    [data.manifestItems]
+  );
+
   const effectiveInvoiceItems = useMemo(() => {
     if (data.schemaMissing || data.error) {
       return [];
@@ -390,9 +449,9 @@ export function InvoiceReviewClient({
     });
   }, [data, liveLineSnapshots]);
 
-  const liveDraftTotals = useMemo(
-    () => calculateInvoiceDraftTotals(effectiveInvoiceItems),
-    [effectiveInvoiceItems]
+  const liveTotalGroups = useMemo(
+    () => calculateInvoiceTotalGroups(effectiveInvoiceItems, manifestById),
+    [effectiveInvoiceItems, manifestById]
   );
 
   const liveUnpricedCount = useMemo(
@@ -400,13 +459,13 @@ export function InvoiceReviewClient({
     [effectiveInvoiceItems]
   );
 
-  const displayTotals = data.isApproved
-    ? {
-        subtotal: data.draft.subtotal,
-        tax_total: data.draft.tax_total,
-        total: data.draft.total,
-      }
-    : liveDraftTotals;
+  const displayTotals = data.isApproved ? data.totalGroups.finalInvoice : liveTotalGroups.finalInvoice;
+  const displayOriginalTotals = data.isApproved
+    ? data.totalGroups.originalQuote
+    : liveTotalGroups.originalQuote;
+  const displayChangeTotals = data.isApproved
+    ? data.totalGroups.productionChanges
+    : liveTotalGroups.productionChanges;
 
   const displayUnpricedCount = data.isApproved ? data.unpricedCount : liveUnpricedCount;
 
@@ -419,9 +478,20 @@ export function InvoiceReviewClient({
       return xeroPreview;
     }
 
+    const billableLines = effectiveInvoiceItems.filter(
+      (line) =>
+        !line.deleted_at &&
+        !invoiceLineNeedsPricing(line) &&
+        line.billing_status !== "cancelled" &&
+        line.billing_status !== "no_charge" &&
+        line.billing_status !== "reprint_no_charge"
+    );
+
+    const totals = data.isApproved ? data.totalGroups.finalInvoice : liveTotalGroups.finalInvoice;
+
     return {
       ...xeroPreview,
-      lineItems: data.finalLines.map((line) => ({
+      lineItems: billableLines.map((line) => ({
         itemName: line.item_name,
         description: buildXeroLineDescription(line),
         quantity: line.quantity,
@@ -429,8 +499,11 @@ export function InvoiceReviewClient({
         taxRate: line.tax_rate,
         lineTotal: line.line_total,
       })),
+      subtotal: totals.subtotal,
+      taxTotal: totals.tax_total,
+      total: totals.total,
     };
-  }, [data, xeroPreview]);
+  }, [data, effectiveInvoiceItems, liveTotalGroups.finalInvoice, xeroPreview]);
 
   async function approveDraft() {
     setIsApproving(true);
@@ -666,26 +739,27 @@ export function InvoiceReviewClient({
       </div>
 
       <aside className="xl:sticky xl:top-24 xl:self-start space-y-4">
-        <div className="portal-surface rounded-xl border border-border bg-card p-6 shadow-sm">
-          <h2 className="text-lg font-semibold">Review totals</h2>
-          <dl className="mt-4 space-y-3 text-sm">
-            <div className="flex justify-between">
-              <dt className="text-muted-foreground">Subtotal</dt>
-              <dd className="font-medium">{formatGbp(displayTotals.subtotal)}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-muted-foreground">VAT</dt>
-              <dd className="font-medium">{formatGbp(displayTotals.tax_total)}</dd>
-            </div>
-            <div className="flex justify-between border-t border-border pt-3 text-base">
-              <dt className="font-semibold">Total</dt>
-              <dd className="font-semibold">{formatGbp(displayTotals.total)}</dd>
-            </div>
-          </dl>
-          <p className="mt-4 text-sm text-muted-foreground">
-            Unpriced items: {displayUnpricedCount}
+        <TotalGroupPanel title="Original accepted quote" totals={displayOriginalTotals} />
+
+        {data.quoteAudit.cancellations.total > 0 ? (
+          <p className="px-1 text-xs text-muted-foreground">
+            Accepted quote before cancellations: {formatGbp(data.quoteAudit.beforeCancellations.total)}
+            {" · "}
+            Less cancellations: {formatGbp(data.quoteAudit.cancellations.total)}
           </p>
-        </div>
+        ) : null}
+
+        <TotalGroupPanel title="Production changes" totals={displayChangeTotals} />
+
+        <TotalGroupPanel
+          title="Final invoice total"
+          totals={displayTotals}
+          emphasized
+        />
+
+        <p className="px-1 text-sm text-muted-foreground">
+          Unpriced items: {displayUnpricedCount}
+        </p>
 
         <div className="portal-surface rounded-xl border border-border bg-card p-6 shadow-sm">
           <h2 className="text-lg font-semibold">Ready for approval</h2>

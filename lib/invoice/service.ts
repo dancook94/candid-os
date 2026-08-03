@@ -14,10 +14,19 @@ import type {
   InvoiceItemUpdateInput,
   InvoiceLineView,
   InvoiceReviewData,
+  InvoiceTotalGroups,
+  QuoteTotalAudit,
   XeroPayloadPreview,
 } from "@/lib/invoice/types";
+import { ensureProductionManifestForJob } from "@/lib/manifest/service";
 import { MANIFEST_ITEM_SELECT } from "@/lib/manifest/constants";
 import type { ManifestItemRecord } from "@/lib/manifest/types";
+import {
+  calculateInvoiceTotalGroups,
+  calculateQuoteTotalAudit,
+  findMissingQuotedInvoiceLines,
+  shouldIncludeManifestItemInInvoice,
+} from "@/lib/invoice/total-groups";
 import {
   buildInvoiceLineFromManifestItem,
   buildXeroLineDescription,
@@ -195,9 +204,7 @@ async function refreshDraftTotalsAndStatus(
 }
 
 function shouldIncludeInInvoice(manifestItem: ManifestItemRecord) {
-  return !NON_INVOICE_BILLING_STATUSES.includes(
-    manifestItem.billing_status as (typeof NON_INVOICE_BILLING_STATUSES)[number]
-  );
+  return shouldIncludeManifestItemInInvoice(manifestItem);
 }
 
 function defaultPricingForManifestItem(item: ManifestItemRecord) {
@@ -388,6 +395,12 @@ export async function reconcileInvoiceDraft(
     return { draft: null, schemaMissing, error: "Invoice tables not configured." };
   }
 
+  try {
+    await ensureProductionManifestForJob(adminClient, jobId, actorProfileId);
+  } catch {
+    // Manifest sync is best-effort; invoice reconcile proceeds with existing items.
+  }
+
   const { data: manifestItems, error: manifestError } = await adminClient
     .from("production_items")
     .select(MANIFEST_ITEM_SELECT)
@@ -551,6 +564,16 @@ export async function loadInvoiceReviewData(
       displayStatus: "draft",
       productionChangedAfterApproval: false,
       isApproved: false,
+      totalGroups: {
+        originalQuote: { subtotal: 0, tax_total: 0, total: 0 },
+        productionChanges: { subtotal: 0, tax_total: 0, total: 0 },
+        finalInvoice: { subtotal: 0, tax_total: 0, total: 0 },
+      },
+      quoteAudit: {
+        beforeCancellations: { subtotal: 0, tax_total: 0, total: 0 },
+        cancellations: { subtotal: 0, tax_total: 0, total: 0 },
+        adjustedOriginal: { subtotal: 0, tax_total: 0, total: 0 },
+      },
       schemaMissing: reconcileResult.schemaMissing,
       error: reconcileResult.error ?? "Unable to load invoice draft.",
     };
@@ -621,13 +644,36 @@ export async function loadInvoiceReviewData(
         sourceLabel: getInvoiceLineSourceLabel(line, manifestItem),
         canResetFromSource: Boolean(manifestItem),
       };
+    })
+    .sort((left, right) => {
+      const leftManifest = left.production_item_id
+        ? manifestById.get(left.production_item_id) ?? null
+        : null;
+      const rightManifest = right.production_item_id
+        ? manifestById.get(right.production_item_id) ?? null
+        : null;
+      const leftIsQuote =
+        leftManifest?.source_type === "quoted" ||
+        left.pricing_source === "accepted_quote";
+      const rightIsQuote =
+        rightManifest?.source_type === "quoted" ||
+        right.pricing_source === "accepted_quote";
+
+      if (leftIsQuote !== rightIsQuote) {
+        return leftIsQuote ? -1 : 1;
+      }
+
+      return left.created_at.localeCompare(right.created_at);
     });
 
   const unpricedCount = finalLines.filter(invoiceLineNeedsPricing).length;
+  const totalGroups = calculateInvoiceTotalGroups(typedInvoiceItems, manifestById);
+  const quoteAudit = calculateQuoteTotalAudit(typedManifest);
 
   const approvalReadiness = buildInvoiceApprovalReadiness({
     draft,
     invoiceItems: typedInvoiceItems,
+    manifestItems: typedManifest,
     companyName: resolvedCompanyName,
     quoteLinked: Boolean(draft.quote_id),
   });
@@ -656,6 +702,8 @@ export async function loadInvoiceReviewData(
     displayStatus,
     productionChangedAfterApproval,
     isApproved: draft.status === "approved",
+    totalGroups,
+    quoteAudit,
     schemaMissing: false,
     error: null,
   };
@@ -859,19 +907,43 @@ export async function approveInvoiceDraft(
   draftId: string,
   actorProfileId: string
 ) {
+  const { data: draftRow, error: draftLoadError } = await adminClient
+    .from("job_invoice_drafts")
+    .select("job_id")
+    .eq("id", draftId)
+    .maybeSingle();
+
+  if (draftLoadError) {
+    throw new ProductionError(draftLoadError.message, 500);
+  }
+
+  if (!draftRow) {
+    throw new ProductionError("Invoice draft not found.", 404);
+  }
+
+  await reconcileInvoiceDraft(adminClient, draftRow.job_id, actorProfileId);
+
   const refreshed = await refreshDraftTotalsAndStatus(adminClient, draftId);
   const draft = refreshed.draft;
   const invoiceItems = refreshed.invoiceItems;
 
-  const { data: company } = await adminClient
-    .from("companies")
-    .select("company_name")
-    .eq("id", draft.company_id)
-    .maybeSingle();
+  const [{ data: company }, { data: manifestItems }] = await Promise.all([
+    adminClient
+      .from("companies")
+      .select("company_name")
+      .eq("id", draft.company_id)
+      .maybeSingle(),
+    adminClient
+      .from("production_items")
+      .select(MANIFEST_ITEM_SELECT)
+      .eq("job_id", draft.job_id)
+      .is("deleted_at", null),
+  ]);
 
   const readiness = buildInvoiceApprovalReadiness({
     draft,
     invoiceItems,
+    manifestItems: (manifestItems ?? []) as ManifestItemRecord[],
     companyName: company?.company_name ?? null,
     quoteLinked: Boolean(draft.quote_id),
   });

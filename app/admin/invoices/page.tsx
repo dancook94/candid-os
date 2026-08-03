@@ -304,7 +304,9 @@ export default async function AdminInvoicesPage({
                       <th>Quote</th>
                       <th>PO</th>
                       <th>Status</th>
-                      <th>Total</th>
+                      <th>Original quote</th>
+                      <th>Changes</th>
+                      <th>Final total</th>
                       <th>Unpriced</th>
                       <th>Production complete</th>
                       <th>Approved</th>
@@ -350,6 +352,12 @@ export default async function AdminInvoicesPage({
                               {invoice.unpricedCount} need pricing
                             </p>
                           ) : null}
+                        </td>
+                        <td className="p-4 text-muted-foreground">
+                          {formatGbp(invoice.originalQuoteTotal)}
+                        </td>
+                        <td className="p-4 text-muted-foreground">
+                          {formatGbp(invoice.changesTotal)}
                         </td>
                         <td className="p-4 font-medium">{formatGbp(invoice.total)}</td>
                         <td className="p-4 text-muted-foreground">{invoice.unpricedCount}</td>

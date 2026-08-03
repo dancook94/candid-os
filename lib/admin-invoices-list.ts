@@ -11,7 +11,10 @@ import {
 } from "@/lib/invoice/display-status";
 import type { InvoiceDraftRecord, InvoiceItemRecord } from "@/lib/invoice/types";
 import { invoiceLineNeedsPricing, normalizeInvoiceItemNumericFields } from "@/lib/invoice/money";
+import { calculateInvoiceTotalGroups } from "@/lib/invoice/total-groups";
 import { getBillableInvoiceLines } from "@/lib/invoice/validation";
+import { MANIFEST_ITEM_SELECT } from "@/lib/manifest/constants";
+import type { ManifestItemRecord } from "@/lib/manifest/types";
 import {
   isMissingInvoiceSchemaError,
   isMissingProductionSchemaError,
@@ -70,6 +73,8 @@ export type AdminInvoiceListRow = {
   subtotal: number;
   taxTotal: number;
   total: number;
+  originalQuoteTotal: number;
+  changesTotal: number;
   unpricedCount: number;
   productionCompletedAt: string | null;
   approvedAt: string | null;
@@ -279,7 +284,8 @@ export async function fetchAdminInvoicesList(
     ),
   ];
 
-  const [itemsResult, jobsResult, companiesResult, quotesResult] = await Promise.all([
+  const [itemsResult, jobsResult, companiesResult, quotesResult, manifestResult] =
+    await Promise.all([
     adminClient
       .from("job_invoice_items")
       .select(INVOICE_ITEM_SELECT)
@@ -295,19 +301,26 @@ export async function fetchAdminInvoicesList(
     quoteIds.length
       ? adminClient.from("quotes").select("id, quote_number").in("id", quoteIds)
       : Promise.resolve({ data: [], error: null }),
+    adminClient
+      .from("production_items")
+      .select(MANIFEST_ITEM_SELECT)
+      .in("job_id", jobIds)
+      .is("deleted_at", null),
   ]);
 
   if (
     itemsResult.error ||
     jobsResult.error ||
     companiesResult.error ||
-    quotesResult.error
+    quotesResult.error ||
+    manifestResult.error
   ) {
     const message =
       itemsResult.error?.message ??
       jobsResult.error?.message ??
       companiesResult.error?.message ??
       quotesResult.error?.message ??
+      manifestResult.error?.message ??
       "Unable to load invoice drafts.";
 
     if (process.env.NODE_ENV === "development") {
@@ -350,6 +363,13 @@ export async function fetchAdminInvoicesList(
     ])
   );
 
+  const manifestByJobId = new Map<string, ManifestItemRecord[]>();
+  for (const item of (manifestResult.data ?? []) as ManifestItemRecord[]) {
+    const bucket = manifestByJobId.get(item.job_id) ?? [];
+    bucket.push(item);
+    manifestByJobId.set(item.job_id, bucket);
+  }
+
   const productionCompletedAtByJobId = new Map<string, string | null>();
   if (jobIds.length > 0) {
     const { data: productionItems } = await adminClient
@@ -385,7 +405,10 @@ export async function fetchAdminInvoicesList(
   }
 
   const rows: AdminInvoiceListRow[] = typedDrafts.map((draft) => {
-    const items = itemsByDraftId.get(draft.id) ?? [];
+    const items = (itemsByDraftId.get(draft.id) ?? []).map(normalizeInvoiceItemNumericFields);
+    const jobManifest = manifestByJobId.get(draft.job_id) ?? [];
+    const manifestById = new Map(jobManifest.map((item) => [item.id, item]));
+    const totalGroups = calculateInvoiceTotalGroups(items, manifestById);
     const unpricedCount = countUnpricedItems(items);
     const displayStatus = deriveInvoiceDisplayStatus({
       status: draft.status,
@@ -410,9 +433,11 @@ export async function fetchAdminInvoicesList(
       draftStatus: draft.status,
       displayStatus,
       commercialStatus: job?.commercial_status ?? "not_ready",
-      subtotal: draft.subtotal,
-      taxTotal: draft.tax_total,
-      total: draft.total,
+      subtotal: totalGroups.finalInvoice.subtotal,
+      taxTotal: totalGroups.finalInvoice.tax_total,
+      total: totalGroups.finalInvoice.total,
+      originalQuoteTotal: totalGroups.originalQuote.total,
+      changesTotal: totalGroups.productionChanges.total,
       unpricedCount,
       productionCompletedAt,
       approvedAt: draft.approved_at,

@@ -68,9 +68,9 @@ export default async function AdminJobInvoicePage({
         purchaseOrderNumber: invoiceData.draft.purchase_order_number,
         currency: invoiceData.draft.currency,
         invoiceItems: invoiceData.invoiceItems,
-        subtotal: invoiceData.draft.subtotal,
-        taxTotal: invoiceData.draft.tax_total,
-        total: invoiceData.draft.total,
+        subtotal: invoiceData.totalGroups.finalInvoice.subtotal,
+        taxTotal: invoiceData.totalGroups.finalInvoice.tax_total,
+        total: invoiceData.totalGroups.finalInvoice.total,
       })
     : {
         contactName: detail.companyName,

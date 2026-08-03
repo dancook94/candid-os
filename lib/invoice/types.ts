@@ -55,6 +55,24 @@ export type InvoiceLineView = InvoiceItemRecord & {
   canResetFromSource: boolean;
 };
 
+export type InvoiceTotalGroup = {
+  subtotal: number;
+  tax_total: number;
+  total: number;
+};
+
+export type InvoiceTotalGroups = {
+  originalQuote: InvoiceTotalGroup;
+  productionChanges: InvoiceTotalGroup;
+  finalInvoice: InvoiceTotalGroup;
+};
+
+export type QuoteTotalAudit = {
+  beforeCancellations: InvoiceTotalGroup;
+  cancellations: InvoiceTotalGroup;
+  adjustedOriginal: InvoiceTotalGroup;
+};
+
 export type InvoiceReviewData = {
   draft: InvoiceDraftRecord;
   invoiceItems: InvoiceItemRecord[];
@@ -68,6 +86,8 @@ export type InvoiceReviewData = {
   displayStatus: InvoiceDisplayStatus;
   productionChangedAfterApproval: boolean;
   isApproved: boolean;
+  totalGroups: InvoiceTotalGroups;
+  quoteAudit: QuoteTotalAudit;
   schemaMissing: boolean;
   error: string | null;
 };
