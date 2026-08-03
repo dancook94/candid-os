@@ -8,6 +8,7 @@ import {
   Building2,
   CheckSquare,
   ClipboardList,
+  Factory,
   FileText,
   Gauge,
   History,
@@ -97,6 +98,11 @@ const adminLinks = [
     icon: Package,
   },
   {
+    href: "/admin/production",
+    label: "Production Board",
+    icon: Factory,
+  },
+  {
     href: "/admin/settings",
     label: "Settings",
     icon: Settings,
@@ -104,6 +110,11 @@ const adminLinks = [
 ];
 
 const crmLinks = [
+  {
+    href: "/admin/production",
+    label: "Production Board",
+    icon: Factory,
+  },
   {
     href: "/admin/opportunities",
     label: "Opportunities",

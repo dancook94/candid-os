@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { AdminJobArtworkPanel } from "@/components/admin-job-artwork-panel";
 import { AdminJobArtworkSourcePanel } from "@/components/admin-job-artwork-source-panel";
 import { AdminJobDropboxPanel } from "@/components/admin-job-dropbox-panel";
+import { ProductionItemsPanel } from "@/components/production/production-items-panel";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
@@ -21,6 +22,8 @@ import { loadAdminJobDetail } from "@/lib/jobs/loaders";
 import { JOB_STATUS_LABELS } from "@/lib/jobs/constants";
 import { getAdminArtworkSourceLabel } from "@/lib/jobs/artwork-source";
 import { isDropboxConfigured } from "@/lib/dropbox/client";
+import { loadProductionItemsForJob } from "@/lib/production/service";
+import { loadProductionStaffProfiles } from "@/lib/production/staff";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -79,6 +82,11 @@ export default async function AdminJobDetailPage({
   }
 
   const shellProps = await buildAdminAppShellProps(supabase, profile);
+
+  const [productionResult, productionStaff] = await Promise.all([
+    loadProductionItemsForJob(adminClient, id),
+    loadProductionStaffProfiles(supabase),
+  ]);
 
   return (
     <AppShell {...shellProps}>
@@ -181,6 +189,17 @@ export default async function AdminJobDetailPage({
             <AdminJobArtworkSourcePanel
               jobId={detail.job.id}
               artworkSource={detail.job.artwork_source}
+            />
+          </CardContent>
+        </Card>
+
+        <Card className="portal-surface mb-6 overflow-hidden">
+          <CardContent className="pt-6">
+            <ProductionItemsPanel
+              jobId={detail.job.id}
+              items={productionResult.items}
+              staff={productionStaff}
+              schemaMissing={productionResult.schemaMissing}
             />
           </CardContent>
         </Card>
