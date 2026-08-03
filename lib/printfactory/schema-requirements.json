@@ -1,0 +1,17 @@
+{
+  "tables": [
+    "printfactory_jobs",
+    "printfactory_job_manifest_items",
+    "printfactory_mapping_rules"
+  ],
+  "jobsColumns": [
+    "raw_metadata",
+    "job_match_status",
+    "job_match_method",
+    "job_match_confidence",
+    "extracted_job_reference",
+    "candid_job_id",
+    "source_file_path",
+    "source_file_name"
+  ]
+}

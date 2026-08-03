@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
 
+import { checkPrintfactorySchemaReadiness } from "../lib/printfactory/schema-readiness.ts";
+
 function loadEnvLocal() {
   try {
     const raw = readFileSync(join(process.cwd(), ".env.local"), "utf8");
@@ -42,46 +44,45 @@ const admin = createClient(url, key, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-const REQUIRED_COLUMNS = [
-  "raw_metadata",
-  "job_match_status",
-  "job_match_method",
-  "job_match_confidence",
-  "extracted_job_reference",
-  "candid_job_id",
-  "source_file_path",
-  "source_file_name",
-];
-
-async function probeTable(tableName) {
-  const { error } = await admin.from(tableName).select("id").limit(0);
-  return error;
-}
-
-async function probeColumn(column) {
-  const { error } = await admin.from("printfactory_jobs").select(column).limit(0);
-  return error;
-}
-
-const jobsTableError = await probeTable("printfactory_jobs");
-const linkTableError = await probeTable("printfactory_job_manifest_items");
-const mappingRulesTableError = await probeTable("printfactory_mapping_rules");
-
-const columnErrors = {};
-for (const column of REQUIRED_COLUMNS) {
-  const error = await probeColumn(column);
-  if (error) columnErrors[column] = error.message;
-}
+const result = await checkPrintfactorySchemaReadiness(admin);
 
 console.log(
   JSON.stringify(
     {
-      printfactory_jobs: jobsTableError?.message ?? "ok",
-      printfactory_job_manifest_items: linkTableError?.message ?? "ok",
-      printfactory_mapping_rules: mappingRulesTableError?.message ?? "ok",
-      columnErrors,
+      ready: result.ready,
+      missingTables: result.missingTables,
+      missingColumns: result.missingColumns,
+      queryErrors: result.queryErrors,
+      message: result.message,
+      printfactory_jobs:
+        result.missingTables.includes("public.printfactory_jobs") ||
+        result.missingColumns.some((column) =>
+          column.startsWith("public.printfactory_jobs.")
+        )
+          ? "missing"
+          : "ok",
+      printfactory_job_manifest_items: result.missingTables.includes(
+        "public.printfactory_job_manifest_items"
+      )
+        ? "missing"
+        : "ok",
+      printfactory_mapping_rules: result.missingTables.includes(
+        "public.printfactory_mapping_rules"
+      )
+        ? "missing"
+        : "ok",
+      columnErrors: Object.fromEntries(
+        result.missingColumns
+          .filter((column) => column.startsWith("public.printfactory_jobs."))
+          .map((column) => [
+            column.replace("public.printfactory_jobs.", ""),
+            "missing",
+          ])
+      ),
     },
     null,
     2
   )
 );
+
+process.exit(result.ready ? 0 : 1);

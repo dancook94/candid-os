@@ -23,20 +23,3 @@ export class PrintfactoryError extends Error {
     this.status = status;
   }
 }
-
-export function isMissingPrintfactorySchemaError(error: {
-  message?: string;
-  code?: string;
-} | null) {
-  if (!error) {
-    return false;
-  }
-
-  const message = error.message?.toLowerCase() ?? "";
-
-  return (
-    error.code === "42P01" ||
-    message.includes("printfactory_jobs") ||
-    message.includes("does not exist")
-  );
-}

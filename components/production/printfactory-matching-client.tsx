@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatCrmDateTime } from "@/lib/crm/format-datetime";
 import type { PrintfactoryConnectionStatus } from "@/lib/printfactory/client";
 import type { ExceptionQueueTab } from "@/lib/printfactory/matching-queue";
+import type { PrintfactoryDataQueryError } from "@/lib/printfactory/schema-readiness";
 
 type MatchingRecord = {
   id: string;
@@ -62,6 +63,7 @@ type PrintfactoryMatchingClientProps = {
   tabCounts: Record<ExceptionQueueTab, number> | null;
   schemaMissing: boolean;
   schemaMissingMessage?: string | null;
+  dataQueryError?: PrintfactoryDataQueryError | null;
   jobFilter?: string;
   connectionStatus: PrintfactoryConnectionStatus;
   tabLabels: Record<ExceptionQueueTab, string>;
@@ -73,6 +75,7 @@ export function PrintfactoryMatchingClient({
   tabCounts,
   schemaMissing,
   schemaMissingMessage,
+  dataQueryError,
   jobFilter,
   connectionStatus,
   tabLabels,
@@ -222,6 +225,26 @@ export function PrintfactoryMatchingClient({
         <CardContent className="py-8 text-sm text-muted-foreground">
           {schemaMissingMessage ??
             "PrintFactory matching unavailable: required schema objects are missing."}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (dataQueryError) {
+    return (
+      <Card className="portal-surface border-destructive/30">
+        <CardContent className="space-y-2 py-8 text-sm">
+          <p className="font-medium text-foreground">
+            PrintFactory matching data could not be loaded.
+          </p>
+          <p className="text-muted-foreground">{dataQueryError.message}</p>
+          {process.env.NODE_ENV === "development" ? (
+            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 font-mono text-xs text-muted-foreground">
+              <p>code: {dataQueryError.code ?? "—"}</p>
+              {dataQueryError.details ? <p>details: {dataQueryError.details}</p> : null}
+              {dataQueryError.hint ? <p>hint: {dataQueryError.hint}</p> : null}
+            </div>
+          ) : null}
         </CardContent>
       </Card>
     );

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { unstable_noStore as noStore } from "next/cache";
 
 import {
   fetchPrintfactoryJobsFromApi,
@@ -9,7 +10,7 @@ import {
   PRINTFACTORY_ACTIVITY_TYPES,
   PRINTFACTORY_JOB_SELECT,
 } from "@/lib/printfactory/constants";
-import { PrintfactoryError, isMissingPrintfactorySchemaError } from "@/lib/printfactory/errors";
+import { PrintfactoryError } from "@/lib/printfactory/errors";
 import { logPrintfactoryActivity } from "@/lib/printfactory/activity";
 import {
   matchPrintfactoryJobToCandidJob,
@@ -22,7 +23,12 @@ import {
 } from "@/lib/printfactory/matching-queue";
 import { createItemSuggestionsForJob } from "@/lib/printfactory/matching-service";
 import { refreshJobProductionReadiness } from "@/lib/printfactory/readiness-service";
-import { checkPrintfactorySchemaReadiness, printfactorySchemaErrorToReadiness } from "@/lib/printfactory/schema-readiness";
+import {
+  checkPrintfactorySchemaReadiness,
+  logMatchingDataQueryDev,
+  toPrintfactoryDataQueryError,
+  type PrintfactoryDataQueryError,
+} from "@/lib/printfactory/schema-readiness";
 
 export type PrintfactorySyncResult = {
   ok: boolean;
@@ -406,13 +412,11 @@ export async function syncPrintfactoryJobs(
       summaryMessage,
     };
   } catch (error) {
-    if (isMissingPrintfactorySchemaError(error as { message?: string; code?: string })) {
-      const schemaReadiness = await checkPrintfactorySchemaReadiness(adminClient);
+    const schemaReadiness = await checkPrintfactorySchemaReadiness(adminClient);
 
+    if (!schemaReadiness.ready) {
       return emptyResult({
-        error:
-          schemaReadiness.message ??
-          "PrintFactory matching schema is not ready.",
+        error: schemaReadiness.message ?? "PrintFactory matching schema is not ready.",
         errorCode: "migration_required",
       });
     }
@@ -428,6 +432,10 @@ export async function loadPrintfactoryMatchingRecords(
   adminClient: SupabaseClient,
   tab: ExceptionQueueTab
 ) {
+  if (process.env.NODE_ENV === "development") {
+    noStore();
+  }
+
   const schemaReadiness = await checkPrintfactorySchemaReadiness(adminClient);
 
   if (!schemaReadiness.ready) {
@@ -435,6 +443,7 @@ export async function loadPrintfactoryMatchingRecords(
       records: [],
       schemaMissing: true as const,
       schemaMissingMessage: schemaReadiness.message,
+      dataQueryError: null as PrintfactoryDataQueryError | null,
       tabCounts: null,
     };
   }
@@ -443,7 +452,9 @@ export async function loadPrintfactoryMatchingRecords(
     .from("printfactory_jobs")
     .select(`
     ${PRINTFACTORY_JOB_SELECT},
-    jobs(id, job_reference, project_name, company_id, companies(company_name)),
+    jobs:jobs!printfactory_jobs_candid_job_id_fkey(
+      id, job_reference, project_name, company_id, companies(company_name)
+    ),
     printfactory_job_manifest_items(
       id, production_item_id, link_status, match_method, match_confidence,
       suggestion_reason, suggestion_details, confirmed_at,
@@ -454,31 +465,16 @@ export async function loadPrintfactoryMatchingRecords(
     .limit(500);
 
   if (error) {
-    const schemaFromError = printfactorySchemaErrorToReadiness(error);
+    const dataQueryError = toPrintfactoryDataQueryError(error);
+    logMatchingDataQueryDev(dataQueryError);
 
-    if (schemaFromError) {
-      return {
-        records: [],
-        schemaMissing: true as const,
-        schemaMissingMessage: schemaFromError.message,
-        tabCounts: null,
-      };
-    }
-
-    if (isMissingPrintfactorySchemaError(error)) {
-      const refreshedReadiness = await checkPrintfactorySchemaReadiness(adminClient);
-
-      return {
-        records: [],
-        schemaMissing: true as const,
-        schemaMissingMessage:
-          refreshedReadiness.message ??
-          "PrintFactory matching schema is not ready.",
-        tabCounts: null,
-      };
-    }
-
-    throw error;
+    return {
+      records: [],
+      schemaMissing: false as const,
+      schemaMissingMessage: null,
+      dataQueryError,
+      tabCounts: null,
+    };
   }
 
   const allRecords = data ?? [];
@@ -489,6 +485,7 @@ export async function loadPrintfactoryMatchingRecords(
     records,
     schemaMissing: false as const,
     schemaMissingMessage: null,
+    dataQueryError: null as PrintfactoryDataQueryError | null,
     tabCounts,
   };
 }
