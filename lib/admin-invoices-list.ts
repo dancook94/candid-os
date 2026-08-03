@@ -3,7 +3,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import {
   INVOICE_DRAFT_SELECT,
   INVOICE_ITEM_SELECT,
-  UNPRICED_BILLING_STATUSES,
 } from "@/lib/invoice/constants";
 import {
   deriveInvoiceDisplayStatus,
@@ -11,6 +10,7 @@ import {
   type InvoiceDisplayStatus,
 } from "@/lib/invoice/display-status";
 import type { InvoiceDraftRecord, InvoiceItemRecord } from "@/lib/invoice/types";
+import { invoiceLineNeedsPricing, normalizeInvoiceItemNumericFields } from "@/lib/invoice/money";
 import { getBillableInvoiceLines } from "@/lib/invoice/validation";
 import {
   isMissingInvoiceSchemaError,
@@ -162,12 +162,8 @@ export function hasActiveAdminInvoicesFilters(filters: AdminInvoicesListFilters)
 }
 
 function countUnpricedItems(items: InvoiceItemRecord[]) {
-  return getBillableInvoiceLines(items).filter(
-    (item) =>
-      item.unit_price === null ||
-      UNPRICED_BILLING_STATUSES.includes(
-        item.billing_status as (typeof UNPRICED_BILLING_STATUSES)[number]
-      )
+  return getBillableInvoiceLines(items.map(normalizeInvoiceItemNumericFields)).filter(
+    invoiceLineNeedsPricing
   ).length;
 }
 

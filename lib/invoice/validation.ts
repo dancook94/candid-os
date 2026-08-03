@@ -1,8 +1,16 @@
 import {
   NON_INVOICE_BILLING_STATUSES,
-  UNPRICED_BILLING_STATUSES,
 } from "@/lib/invoice/constants";
 import type { InvoiceDraftRecord, InvoiceItemRecord } from "@/lib/invoice/types";
+import {
+  calculateInvoiceDraftTotals,
+  calculateInvoiceLineTotals,
+  draftTotalsMatchItems,
+  invoiceLineNeedsPricing,
+  normalizeInvoiceItemNumericFields,
+  parseMoneyValue,
+  parseQuantityValue,
+} from "@/lib/invoice/money";
 
 export type ApprovalChecklistItem = {
   id: string;
@@ -29,36 +37,47 @@ export function getBillableInvoiceLines(items: InvoiceItemRecord[]) {
 }
 
 function validateBillableLine(line: InvoiceItemRecord): string[] {
+  const normalized = normalizeInvoiceItemNumericFields(line);
   const issues: string[] = [];
 
-  if (!line.item_name?.trim()) {
+  if (!normalized.item_name?.trim()) {
     issues.push("Item title is required.");
   }
 
-  if (!line.description?.trim() && !line.item_name?.trim()) {
+  if (!normalized.description?.trim() && !normalized.item_name?.trim()) {
     issues.push("Description or item title is required.");
   }
 
-  if (!(line.quantity > 0)) {
+  if (!(normalized.quantity > 0)) {
     issues.push("Quantity must be greater than zero.");
   }
 
-  if (line.unit_price === null || line.unit_price === undefined) {
+  if (normalized.unit_price === null) {
     issues.push("Unit price is missing.");
-  } else if (line.unit_price < 0) {
+  } else if (normalized.unit_price < 0) {
     issues.push("Unit price cannot be negative.");
   }
 
-  if (line.tax_rate === null || line.tax_rate === undefined || line.tax_rate < 0) {
+  if (normalized.tax_rate < 0) {
     issues.push("VAT rate is missing or invalid.");
   }
 
-  if (
-    UNPRICED_BILLING_STATUSES.includes(
-      line.billing_status as (typeof UNPRICED_BILLING_STATUSES)[number]
-    )
-  ) {
+  if (invoiceLineNeedsPricing(normalized)) {
     issues.push("Billing status is still price required.");
+  }
+
+  const expectedNet = calculateInvoiceLineTotals({
+    quantity: normalized.quantity,
+    unitPrice: normalized.unit_price,
+    taxRate: normalized.tax_rate,
+  }).netTotal;
+
+  if (
+    normalized.unit_price !== null &&
+    !invoiceLineNeedsPricing(normalized) &&
+    Math.abs(normalized.line_total - expectedNet) > 0.01
+  ) {
+    issues.push("Line total does not match quantity and unit price.");
   }
 
   return issues;
@@ -79,13 +98,15 @@ export function buildInvoiceApprovalReadiness(input: {
     }))
     .filter((entry) => entry.reasons.length > 0);
 
-  const unpricedLines = billableLines.filter(
-    (line) =>
-      line.unit_price === null ||
-      UNPRICED_BILLING_STATUSES.includes(
-        line.billing_status as (typeof UNPRICED_BILLING_STATUSES)[number]
-      )
-  );
+  const unpricedLines = billableLines.filter(invoiceLineNeedsPricing);
+  const normalizedDraft = {
+    ...input.draft,
+    subtotal: parseMoneyValue(input.draft.subtotal) ?? 0,
+    tax_total: parseMoneyValue(input.draft.tax_total) ?? 0,
+    total: parseMoneyValue(input.draft.total) ?? 0,
+  };
+  const calculatedTotals = calculateInvoiceDraftTotals(input.invoiceItems);
+  const totalsMatch = draftTotalsMatchItems(input.draft, input.invoiceItems);
 
   const checklist: ApprovalChecklistItem[] = [
     {
@@ -146,12 +167,18 @@ export function buildInvoiceApprovalReadiness(input: {
       id: "totals",
       label: "Totals calculate successfully",
       passed:
-        input.draft.subtotal >= 0 &&
-        input.draft.tax_total >= 0 &&
-        input.draft.total >= 0 &&
-        Math.abs(
-          input.draft.total - (input.draft.subtotal + input.draft.tax_total)
-        ) < 0.02,
+        totalsMatch &&
+        unpricedLines.length === 0 &&
+        normalizedDraft.subtotal >= 0 &&
+        normalizedDraft.tax_total >= 0 &&
+        normalizedDraft.total >= 0,
+      detail: !totalsMatch
+        ? `Saved draft total ${normalizedDraft.total.toFixed(2)} does not match calculated total ${calculatedTotals.total.toFixed(2)}.`
+        : unpricedLines.length > 0
+          ? "Totals will update once all billable lines are priced."
+          : calculatedTotals.total > 0
+            ? `Subtotal ${calculatedTotals.subtotal.toFixed(2)}, VAT ${calculatedTotals.tax_total.toFixed(2)}, total ${calculatedTotals.total.toFixed(2)}.`
+            : undefined,
     },
   ];
 

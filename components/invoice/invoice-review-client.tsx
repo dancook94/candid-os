@@ -11,6 +11,16 @@ import {
   PRICING_SOURCE_LABELS,
 } from "@/lib/invoice/constants";
 import { INVOICE_DISPLAY_STATUS_LABELS } from "@/lib/invoice/display-status";
+import {
+  calculateInvoiceDraftTotals,
+  calculateInvoiceLineTotals,
+  calculatePersistedLineNetTotal,
+  invoiceLineNeedsPricing,
+  normalizeInvoiceItemNumericFields,
+  parseMoneyValue,
+  parseQuantityValue,
+  resolveBillingStatusAfterPricing,
+} from "@/lib/invoice/money";
 import { buildXeroLineDescription, formatManifestPreviewDescription } from "@/lib/invoice/line-text";
 import type { InvoiceLineView, InvoiceReviewData, XeroPayloadPreview } from "@/lib/invoice/types";
 import {
@@ -38,6 +48,26 @@ type LineDraft = {
   taxRate: string;
 };
 
+type LiveLineSnapshot = {
+  id: string;
+  quantity: string;
+  unitPrice: string;
+  taxRate: string;
+  billingStatus: InvoiceLineView["billing_status"];
+  deletedAt: string | null;
+};
+
+function buildLiveLineSnapshot(line: InvoiceLineView): LiveLineSnapshot {
+  return {
+    id: line.id,
+    quantity: String(line.quantity),
+    unitPrice: line.unit_price === null ? "" : String(line.unit_price),
+    taxRate: String(line.tax_rate),
+    billingStatus: line.billing_status,
+    deletedAt: line.deleted_at,
+  };
+}
+
 function buildLineDraft(line: InvoiceLineView): LineDraft {
   return {
     itemName: line.item_name,
@@ -53,17 +83,46 @@ function InvoiceLineEditor({
   jobId,
   line,
   onSaved,
+  onDraftChange,
   readOnly = false,
 }: {
   jobId: string;
   line: InvoiceLineView;
   onSaved: (message: string) => void;
+  onDraftChange?: (lineId: string, snapshot: LiveLineSnapshot) => void;
   readOnly?: boolean;
 }) {
   const [draft, setDraft] = useState<LineDraft>(() => buildLineDraft(line));
   const [isSaving, setIsSaving] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
   const [error, setError] = useState("");
+
+  const liveTotals = useMemo(
+    () =>
+      calculateInvoiceLineTotals({
+        quantity: draft.quantity,
+        unitPrice: draft.unitPrice === "" ? null : draft.unitPrice,
+        taxRate: draft.taxRate,
+      }),
+    [draft.quantity, draft.unitPrice, draft.taxRate]
+  );
+
+  function updateDraft(next: LineDraft) {
+    setDraft(next);
+    const unitPrice =
+      next.unitPrice === "" ? null : parseMoneyValue(next.unitPrice);
+    onDraftChange?.(line.id, {
+      id: line.id,
+      quantity: next.quantity,
+      unitPrice: next.unitPrice,
+      taxRate: next.taxRate,
+      billingStatus: resolveBillingStatusAfterPricing(
+        line.billing_status,
+        unitPrice
+      ) as InvoiceLineView["billing_status"],
+      deletedAt: line.deleted_at,
+    });
+  }
 
   async function saveLine() {
     setIsSaving(true);
@@ -92,7 +151,7 @@ function InvoiceLineEditor({
         throw new Error(result.error ?? "Unable to save invoice line.");
       }
 
-      onSaved("Invoice line saved.");
+      onSaved("Invoice changes saved.");
       window.location.reload();
     } catch (saveError) {
       setError(
@@ -145,9 +204,14 @@ function InvoiceLineEditor({
             <p className="mt-1 text-xs text-amber-700">Manually edited</p>
           ) : null}
         </div>
-        <p className="text-base font-semibold text-foreground">
-          {formatGbp(line.line_total)}
-        </p>
+        <div className="text-right">
+          <p className="text-base font-semibold text-foreground">
+            {formatGbp(liveTotals.grossTotal)}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Net {formatGbp(liveTotals.netTotal)} · VAT {formatGbp(liveTotals.vatAmount)}
+          </p>
+        </div>
       </div>
 
       <div className="space-y-4">
@@ -158,7 +222,7 @@ function InvoiceLineEditor({
             value={draft.itemName}
             disabled={readOnly}
             onChange={(event) =>
-              setDraft((current) => ({ ...current, itemName: event.target.value }))
+              updateDraft({ ...draft, itemName: event.target.value })
             }
           />
         </div>
@@ -170,7 +234,7 @@ function InvoiceLineEditor({
             value={draft.description}
             disabled={readOnly}
             onChange={(event) =>
-              setDraft((current) => ({ ...current, description: event.target.value }))
+              updateDraft({ ...draft, description: event.target.value })
             }
             rows={6}
             className="min-h-[9rem] resize-y"
@@ -189,7 +253,7 @@ function InvoiceLineEditor({
               value={draft.quantity}
               disabled={readOnly}
               onChange={(event) =>
-                setDraft((current) => ({ ...current, quantity: event.target.value }))
+                updateDraft({ ...draft, quantity: event.target.value })
               }
             />
           </div>
@@ -200,7 +264,7 @@ function InvoiceLineEditor({
               value={draft.unit}
               disabled={readOnly}
               onChange={(event) =>
-                setDraft((current) => ({ ...current, unit: event.target.value }))
+                updateDraft({ ...draft, unit: event.target.value })
               }
             />
           </div>
@@ -214,7 +278,7 @@ function InvoiceLineEditor({
               value={draft.unitPrice}
               disabled={readOnly}
               onChange={(event) =>
-                setDraft((current) => ({ ...current, unitPrice: event.target.value }))
+                updateDraft({ ...draft, unitPrice: event.target.value })
               }
             />
           </div>
@@ -228,7 +292,7 @@ function InvoiceLineEditor({
               value={draft.taxRate}
               disabled={readOnly}
               onChange={(event) =>
-                setDraft((current) => ({ ...current, taxRate: event.target.value }))
+                updateDraft({ ...draft, taxRate: event.target.value })
               }
             />
           </div>
@@ -259,7 +323,7 @@ function InvoiceLineEditor({
               disabled={isSaving || isResetting || !draft.itemName.trim()}
               onClick={() => void saveLine()}
             >
-              {isSaving ? "Saving…" : "Save line"}
+              {isSaving ? "Saving…" : "Save changes"}
             </Button>
           ) : null}
         </div>
@@ -286,6 +350,69 @@ export function InvoiceReviewClient({
   const [isReopening, setIsReopening] = useState(false);
   const [showReopenDialog, setShowReopenDialog] = useState(false);
   const [reopenReason, setReopenReason] = useState("");
+
+  const [liveLineSnapshots, setLiveLineSnapshots] = useState<
+    Record<string, LiveLineSnapshot>
+  >({});
+
+  const effectiveInvoiceItems = useMemo(() => {
+    if (data.schemaMissing || data.error) {
+      return [];
+    }
+
+    return data.finalLines.map((line) => {
+      const live = liveLineSnapshots[line.id];
+      const quantity = parseQuantityValue(live?.quantity ?? line.quantity);
+      const unitPrice = live
+        ? live.unitPrice === ""
+          ? null
+          : parseMoneyValue(live.unitPrice)
+        : line.unit_price;
+      const taxRate = parseMoneyValue(live?.taxRate ?? line.tax_rate) ?? 0;
+      const billingStatus = resolveBillingStatusAfterPricing(
+        live?.billingStatus ?? line.billing_status,
+        unitPrice
+      ) as InvoiceLineView["billing_status"];
+      const lineTotal = calculatePersistedLineNetTotal({
+        quantity,
+        unitPrice,
+        billingStatus,
+      });
+
+      return normalizeInvoiceItemNumericFields({
+        ...line,
+        quantity,
+        unit_price: unitPrice,
+        tax_rate: taxRate,
+        billing_status: billingStatus,
+        line_total: lineTotal,
+      });
+    });
+  }, [data, liveLineSnapshots]);
+
+  const liveDraftTotals = useMemo(
+    () => calculateInvoiceDraftTotals(effectiveInvoiceItems),
+    [effectiveInvoiceItems]
+  );
+
+  const liveUnpricedCount = useMemo(
+    () => effectiveInvoiceItems.filter(invoiceLineNeedsPricing).length,
+    [effectiveInvoiceItems]
+  );
+
+  const displayTotals = data.isApproved
+    ? {
+        subtotal: data.draft.subtotal,
+        tax_total: data.draft.tax_total,
+        total: data.draft.total,
+      }
+    : liveDraftTotals;
+
+  const displayUnpricedCount = data.isApproved ? data.unpricedCount : liveUnpricedCount;
+
+  function handleLineDraftChange(lineId: string, snapshot: LiveLineSnapshot) {
+    setLiveLineSnapshots((current) => ({ ...current, [lineId]: snapshot }));
+  }
 
   const previewFromDrafts = useMemo(() => {
     if (data.schemaMissing || data.error) {
@@ -428,9 +555,9 @@ export function InvoiceReviewClient({
           </p>
         ) : null}
 
-        {data.unpricedCount > 0 ? (
+        {displayUnpricedCount > 0 ? (
           <p className="rounded-lg border border-amber-300/50 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            {data.unpricedCount} billable item(s) still require pricing before approval.
+            {displayUnpricedCount} billable item(s) still require pricing before approval.
           </p>
         ) : null}
 
@@ -514,6 +641,7 @@ export function InvoiceReviewClient({
                 jobId={jobId}
                 line={line}
                 onSaved={setSuccess}
+                onDraftChange={handleLineDraftChange}
                 readOnly={data.isApproved}
               />
             ))
@@ -543,19 +671,19 @@ export function InvoiceReviewClient({
           <dl className="mt-4 space-y-3 text-sm">
             <div className="flex justify-between">
               <dt className="text-muted-foreground">Subtotal</dt>
-              <dd className="font-medium">{formatGbp(data.draft.subtotal)}</dd>
+              <dd className="font-medium">{formatGbp(displayTotals.subtotal)}</dd>
             </div>
             <div className="flex justify-between">
               <dt className="text-muted-foreground">VAT</dt>
-              <dd className="font-medium">{formatGbp(data.draft.tax_total)}</dd>
+              <dd className="font-medium">{formatGbp(displayTotals.tax_total)}</dd>
             </div>
             <div className="flex justify-between border-t border-border pt-3 text-base">
               <dt className="font-semibold">Total</dt>
-              <dd className="font-semibold">{formatGbp(data.draft.total)}</dd>
+              <dd className="font-semibold">{formatGbp(displayTotals.total)}</dd>
             </div>
           </dl>
           <p className="mt-4 text-sm text-muted-foreground">
-            Unpriced items: {data.unpricedCount}
+            Unpriced items: {displayUnpricedCount}
           </p>
         </div>
 

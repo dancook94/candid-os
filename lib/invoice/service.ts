@@ -6,7 +6,6 @@ import {
   INVOICE_DRAFT_SELECT,
   INVOICE_ITEM_SELECT,
   NON_INVOICE_BILLING_STATUSES,
-  UNPRICED_BILLING_STATUSES,
 } from "@/lib/invoice/constants";
 import type { InvoiceDraftStatus, PricingSource } from "@/lib/invoice/constants";
 import type {
@@ -30,44 +29,59 @@ import {
   buildInvoiceApprovalReadiness,
   getBillableInvoiceLines,
 } from "@/lib/invoice/validation";
+import {
+  calculateInvoiceDraftTotals,
+  calculatePersistedLineNetTotal,
+  invoiceLineNeedsPricing,
+  normalizeInvoiceItemNumericFields,
+  parseMoneyValue,
+  parseQuantityValue,
+  resolveBillingStatusAfterPricing,
+  roundMoney,
+} from "@/lib/invoice/money";
 import { ProductionError, isMissingInvoiceSchemaError, isMissingProductionSchemaError } from "@/lib/production/errors";
 
-function roundMoney(value: number) {
-  return Math.round(value * 100) / 100;
-}
+async function repairInvoiceLineTotals(
+  adminClient: SupabaseClient,
+  items: InvoiceItemRecord[]
+) {
+  const repaired: InvoiceItemRecord[] = [];
 
-function calculateLineTotal(quantity: number, unitPrice: number | null) {
-  if (unitPrice === null) {
-    return 0;
+  for (const rawItem of items) {
+    const normalized = normalizeInvoiceItemNumericFields(rawItem);
+    const needsRepair =
+      normalized.quantity !== parseQuantityValue(rawItem.quantity) ||
+      normalized.unit_price !== parseMoneyValue(rawItem.unit_price) ||
+      normalized.tax_rate !== (parseMoneyValue(rawItem.tax_rate) ?? 0) ||
+      normalized.line_total !== parseMoneyValue(rawItem.line_total) ||
+      normalized.billing_status !== rawItem.billing_status;
+
+    if (!needsRepair) {
+      repaired.push(normalized);
+      continue;
+    }
+
+    const { data: updated, error } = await adminClient
+      .from("job_invoice_items")
+      .update({
+        quantity: normalized.quantity,
+        unit_price: normalized.unit_price,
+        tax_rate: normalized.tax_rate,
+        line_total: normalized.line_total,
+        billing_status: normalized.billing_status,
+      })
+      .eq("id", rawItem.id)
+      .select(INVOICE_ITEM_SELECT)
+      .single();
+
+    if (error || !updated) {
+      throw new ProductionError(error?.message ?? "Unable to repair invoice line.", 500);
+    }
+
+    repaired.push(normalizeInvoiceItemNumericFields(updated as InvoiceItemRecord));
   }
 
-  return roundMoney(quantity * unitPrice);
-}
-
-function calculateDraftTotals(items: InvoiceItemRecord[]) {
-  const billableItems = items.filter(
-    (item) =>
-      !item.deleted_at &&
-      !NON_INVOICE_BILLING_STATUSES.includes(
-        item.billing_status as (typeof NON_INVOICE_BILLING_STATUSES)[number]
-      )
-  );
-
-  const subtotal = roundMoney(
-    billableItems.reduce((sum, item) => sum + item.line_total, 0)
-  );
-  const taxTotal = roundMoney(
-    billableItems.reduce(
-      (sum, item) => sum + item.line_total * (item.tax_rate / 100),
-      0
-    )
-  );
-
-  return {
-    subtotal,
-    tax_total: taxTotal,
-    total: roundMoney(subtotal + taxTotal),
-  };
+  return repaired;
 }
 
 function detectProductionChangedAfterApproval(input: {
@@ -136,13 +150,11 @@ async function refreshDraftTotalsAndStatus(
     throw new ProductionError(linesError.message, 500);
   }
 
-  const invoiceItems = (lines ?? []) as InvoiceItemRecord[];
-  const totals = calculateDraftTotals(invoiceItems);
-  const unpricedCount = getBillableInvoiceLines(invoiceItems).filter((line) =>
-    UNPRICED_BILLING_STATUSES.includes(
-      line.billing_status as (typeof UNPRICED_BILLING_STATUSES)[number]
-    ) || line.unit_price === null
-  ).length;
+  const rawItems = (lines ?? []) as InvoiceItemRecord[];
+  const invoiceItems = await repairInvoiceLineTotals(adminClient, rawItems);
+  const totals = calculateInvoiceDraftTotals(invoiceItems);
+  const unpricedCount = getBillableInvoiceLines(invoiceItems).filter(invoiceLineNeedsPricing)
+    .length;
 
   const typedDraft = draft as InvoiceDraftRecord;
   let nextStatus: InvoiceDraftStatus = typedDraft.status;
@@ -202,11 +214,18 @@ function defaultPricingForManifestItem(item: ManifestItemRecord) {
   }
 
   if (item.source_type === "quoted" && item.quote_unit_price !== null) {
-    const quantity = item.quantity ?? item.quoted_quantity ?? 1;
-    const unitPrice = item.quote_unit_price;
+    const quantity = parseQuantityValue(item.quantity ?? item.quoted_quantity ?? 1);
+    const unitPrice = parseMoneyValue(item.quote_unit_price);
     return {
       unit_price: unitPrice,
-      line_total: calculateLineTotal(quantity, unitPrice),
+      line_total: calculatePersistedLineNetTotal({
+        quantity,
+        unitPrice,
+        billingStatus:
+          item.billing_status === "price_required"
+            ? "ready_to_invoice"
+            : item.billing_status,
+      }),
       pricing_source: "accepted_quote" as PricingSource,
       billing_status:
         item.billing_status === "price_required"
@@ -563,7 +582,9 @@ export async function loadInvoiceReviewData(
   ]);
 
   const typedManifest = (manifestItems ?? []) as ManifestItemRecord[];
-  const typedInvoiceItems = (invoiceItems ?? []) as InvoiceItemRecord[];
+  const typedInvoiceItems = (invoiceItems ?? []).map((item) =>
+    normalizeInvoiceItemNumericFields(item as InvoiceItemRecord)
+  );
   const resolvedCompanyName =
     companyName ?? (company as { company_name?: string } | null)?.company_name ?? null;
 
@@ -602,13 +623,7 @@ export async function loadInvoiceReviewData(
       };
     });
 
-  const unpricedCount = finalLines.filter(
-    (item) =>
-      item.unit_price === null ||
-      UNPRICED_BILLING_STATUSES.includes(
-        item.billing_status as (typeof UNPRICED_BILLING_STATUSES)[number]
-      )
-  ).length;
+  const unpricedCount = finalLines.filter(invoiceLineNeedsPricing).length;
 
   const approvalReadiness = buildInvoiceApprovalReadiness({
     draft,
@@ -684,23 +699,49 @@ export async function updateInvoiceItem(
     );
   }
 
-  const quantity = input.quantity ?? existing.quantity;
+  const quantity = input.quantity !== undefined
+    ? parseQuantityValue(input.quantity)
+    : parseQuantityValue(existing.quantity);
   const unitPrice =
-    input.unitPrice !== undefined ? input.unitPrice : existing.unit_price;
-  const billingStatus = input.billingStatus ?? existing.billing_status;
+    input.unitPrice !== undefined
+      ? parseMoneyValue(input.unitPrice)
+      : parseMoneyValue(existing.unit_price);
+  const taxRate =
+    input.taxRate !== undefined
+      ? parseMoneyValue(input.taxRate) ?? 0
+      : parseMoneyValue(existing.tax_rate) ?? 0;
+
+  if (input.quantity !== undefined && quantity <= 0) {
+    throw new ProductionError("Quantity must be greater than zero.", 400);
+  }
+
+  if (input.unitPrice !== undefined && input.unitPrice !== null && unitPrice === null) {
+    throw new ProductionError("Unit price must be a valid number.", 400);
+  }
+
+  if (input.taxRate !== undefined && taxRate < 0) {
+    throw new ProductionError("VAT rate cannot be negative.", 400);
+  }
+
+  const billingStatus = resolveBillingStatusAfterPricing(
+    input.billingStatus ?? existing.billing_status,
+    unitPrice
+  );
   const itemName = input.itemName?.trim() ?? existing.item_name;
   const description =
     input.description !== undefined ? input.description : existing.description;
-  const lineTotal =
-    billingStatus === "price_required" || unitPrice === null
-      ? 0
-      : calculateLineTotal(quantity, unitPrice);
+  const lineTotal = calculatePersistedLineNetTotal({
+    quantity,
+    unitPrice,
+    billingStatus,
+  });
 
   const textChanged =
     itemName !== existing.item_name ||
     (description ?? "") !== (existing.description ?? "");
   const priceChanged =
-    input.unitPrice !== undefined && input.unitPrice !== existing.unit_price;
+    input.unitPrice !== undefined &&
+    unitPrice !== parseMoneyValue(existing.unit_price);
   const manuallyEdited =
     input.manuallyEdited ??
     (existing.manually_edited || textChanged || priceChanged);
@@ -720,11 +761,8 @@ export async function updateInvoiceItem(
       unit: input.unit ?? existing.unit,
       unit_price: unitPrice,
       line_total: lineTotal,
-      tax_rate: input.taxRate ?? existing.tax_rate,
-      billing_status:
-        unitPrice !== null && billingStatus === "price_required"
-          ? "ready_to_invoice"
-          : billingStatus,
+      tax_rate: taxRate,
+      billing_status: billingStatus,
       pricing_source: pricingSource,
       pricing_note: input.pricingNote ?? existing.pricing_note,
       manually_edited: manuallyEdited,
