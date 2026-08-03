@@ -43,7 +43,13 @@ type AppShellProps = {
   userAvatarUrl?: string | null;
 };
 
-const customerLinks = [
+type NavLink = {
+  href: string;
+  label: string;
+  icon: typeof Gauge;
+};
+
+const customerLinks: NavLink[] = [
   {
     href: "/dashboard",
     label: "Dashboard",
@@ -66,7 +72,7 @@ const customerLinks = [
   },
 ];
 
-const adminLinks = [
+const adminLinks: NavLink[] = [
   {
     href: "/admin",
     label: "Admin dashboard",
@@ -98,18 +104,13 @@ const adminLinks = [
     icon: Package,
   },
   {
-    href: "/admin/production",
-    label: "Production Board",
-    icon: Factory,
-  },
-  {
     href: "/admin/settings",
     label: "Settings",
     icon: Settings,
   },
 ];
 
-const crmLinks = [
+const crmLinks: NavLink[] = [
   {
     href: "/admin/production",
     label: "Production Board",
@@ -132,19 +133,39 @@ const crmLinks = [
   },
 ];
 
-const staffManagementLink = {
+const staffManagementLink: NavLink = {
   href: "/admin/staff",
   label: "Staff",
   icon: UserCog,
 };
 
-const staffLinks = [
+const staffLinks: NavLink[] = [
   {
     href: "/staff",
     label: "Workspace",
     icon: Gauge,
   },
 ];
+
+function assertUniqueNavHrefs(links: NavLink[], context: string) {
+  if (process.env.NODE_ENV !== "development") {
+    return;
+  }
+
+  const seen = new Map<string, string>();
+
+  for (const link of links) {
+    const existingLabel = seen.get(link.href);
+
+    if (existingLabel) {
+      console.warn(
+        `[AppShell] Duplicate navigation href "${link.href}" (${existingLabel} and ${link.label}) in ${context}.`
+      );
+    } else {
+      seen.set(link.href, link.label);
+    }
+  }
+}
 
 export function AppShell({
   children,
@@ -178,6 +199,16 @@ export function AppShell({
       : userRole === "staff"
         ? [...staffLinks, ...(showCrmNav ? crmLinks : [])]
         : customerLinks;
+
+  assertUniqueNavHrefs(
+    links,
+    userRole === "admin"
+      ? "admin navigation"
+      : userRole === "staff"
+        ? "staff navigation"
+        : "customer navigation"
+  );
+
   const homeHref =
     userRole === "admin" ? "/admin" : userRole === "staff" ? "/staff" : "/dashboard";
   const portalLabel =
