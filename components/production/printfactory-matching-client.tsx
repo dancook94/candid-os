@@ -132,12 +132,17 @@ export function PrintfactoryMatchingClient({
       });
       const payload = (await response.json()) as {
         ok?: boolean;
+        partial?: boolean;
         error?: string;
         summaryMessage?: string;
       };
 
-      if (!response.ok) {
+      if (!response.ok && !payload.partial) {
         throw new Error(payload.error ?? "Sync failed.");
+      }
+
+      if (payload.partial && payload.error) {
+        setSyncError(payload.error);
       }
 
       setSyncMessage(payload.summaryMessage ?? "Sync completed.");
@@ -277,9 +282,9 @@ export function PrintfactoryMatchingClient({
       </Card>
 
       {syncMessage ? (
-        <p className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+        <pre className="whitespace-pre-wrap rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
           {syncMessage}
-        </p>
+        </pre>
       ) : null}
       {syncError ? (
         <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">

@@ -10,6 +10,10 @@ import {
   logRawPrintfactoryRecordsDev,
   normalizePrintfactoryRawJob,
 } from "@/lib/printfactory/normalize";
+import {
+  buildInitialSyncWindow,
+  getPrintfactorySyncLimits,
+} from "@/lib/printfactory/sync-config";
 
 export type PrintfactoryApiJob = {
   guid: string;
@@ -44,12 +48,35 @@ export type PrintfactoryJobListRequestBody = {
   Take: number;
 };
 
-const DEFAULT_LIST_WINDOW_DAYS = Number.parseInt(
-  process.env.PRINTFACTORY_SYNC_DAYS ?? "30",
-  10
-) || 30;
-const DEFAULT_PAGE_SIZE = 100;
 const DEV_RESPONSE_LOG_LIMIT = 2048;
+
+export type PrintfactoryJobListMetadata = {
+  accountTotal: number | null;
+  filteredTotal: number | null;
+  pageRecordCount: number;
+};
+
+export type PrintfactoryBoundedFetchResult = {
+  jobs: PrintfactoryApiJob[];
+  pagesFetched: number;
+  recordsReceived: number;
+  recordsProcessed: number;
+  accountTotal: number | null;
+  filteredTotal: number | null;
+  hasMore: boolean;
+  nextSkip: number | null;
+  requestBodies: PrintfactoryJobListRequestBody[];
+  elapsedMs: number;
+};
+
+export type FetchPrintfactoryJobsOptions = {
+  skip?: number;
+  dateTimeFrom?: string;
+  dateTimeTo?: string;
+  maxRecords?: number;
+  maxPages?: number;
+  pageSize?: number;
+};
 
 function truncateJsonForDevLog(payload: unknown, limit = DEV_RESPONSE_LOG_LIMIT) {
   try {
@@ -147,36 +174,84 @@ export function getPrintfactoryConnectionStatus(): PrintfactoryConnectionStatus 
   };
 }
 
-function defaultJobListWindow(): Pick<
-  PrintfactoryJobListRequestBody,
-  "DateTimeFrom" | "DateTimeTo"
-> {
-  const dateTimeTo = new Date();
-  const dateTimeFrom = new Date(dateTimeTo);
-  dateTimeFrom.setDate(dateTimeFrom.getDate() - DEFAULT_LIST_WINDOW_DAYS);
+function defaultJobListWindow(dateTimeFrom?: string, dateTimeTo?: string) {
+  if (dateTimeFrom && dateTimeTo) {
+    return { DateTimeFrom: dateTimeFrom, DateTimeTo: dateTimeTo };
+  }
 
-  return {
-    DateTimeFrom: dateTimeFrom.toISOString(),
-    DateTimeTo: dateTimeTo.toISOString(),
-  };
+  return buildInitialSyncWindow(getPrintfactorySyncLimits());
 }
 
-/** In development, omit date filters only when PRINTFACTORY_SYNC_UNFILTERED=1. */
-function buildJobListRequestBody(skip: number): PrintfactoryJobListRequestBody {
+function buildJobListRequestBody(
+  skip: number,
+  take: number,
+  dateTimeFrom?: string,
+  dateTimeTo?: string
+): PrintfactoryJobListRequestBody {
   if (
     process.env.NODE_ENV === "development" &&
     process.env.PRINTFACTORY_SYNC_UNFILTERED === "1"
   ) {
     return {
       Skip: skip,
-      Take: DEFAULT_PAGE_SIZE,
+      Take: take,
     };
   }
 
+  const window = defaultJobListWindow(dateTimeFrom, dateTimeTo);
+
   return {
-    ...defaultJobListWindow(),
+    ...window,
     Skip: skip,
-    Take: DEFAULT_PAGE_SIZE,
+    Take: take,
+  };
+}
+
+function pickNumericMetadata(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+export function extractPrintfactoryJobListMetadata(
+  payload: unknown,
+  pageRecordCount: number
+): PrintfactoryJobListMetadata {
+  if (!isRecord(payload)) {
+    return {
+      accountTotal: null,
+      filteredTotal: null,
+      pageRecordCount,
+    };
+  }
+
+  const accountTotal = pickNumericMetadata(
+    payload.TotalRecordCount ??
+      payload.totalRecordCount ??
+      payload.TotalCount ??
+      payload.totalCount
+  );
+
+  const filteredTotal = pickNumericMetadata(
+    payload.FilteredRecordCount ??
+      payload.filteredRecordCount ??
+      payload.RecordCount ??
+      payload.recordCount ??
+      payload.TotalFiltered ??
+      payload.totalFiltered
+  );
+
+  return {
+    accountTotal,
+    filteredTotal,
+    pageRecordCount,
   };
 }
 
@@ -428,7 +503,7 @@ async function fetchPrintfactoryJobListPage(
   body: PrintfactoryJobListRequestBody
 ): Promise<{
   jobs: PrintfactoryApiJob[];
-  rawCount: number;
+  metadata: PrintfactoryJobListMetadata;
   firstRecordKeys: string[];
   diagnostics: PrintfactoryExtractDiagnostics;
 }> {
@@ -501,20 +576,23 @@ async function fetchPrintfactoryJobListPage(
   }
 
   const extracted = extractJobsArrayWithDiagnostics(payload);
-  logRawPrintfactoryRecordsDev(extracted.items);
-  const jobs = extracted.items
+  const pageItems = extracted.items.slice(0, body.Take);
+  logRawPrintfactoryRecordsDev(pageItems);
+  const jobs = pageItems
     .map((raw) => normalizeApiJob(raw))
     .filter((job): job is PrintfactoryApiJob => job !== null);
 
-  const droppedWithoutGuid = extracted.rawArrayLength - jobs.length;
+  const metadata = extractPrintfactoryJobListMetadata(payload, pageItems.length);
+  const droppedWithoutGuid = pageItems.length - jobs.length;
   const diagnostics: PrintfactoryExtractDiagnostics = {
     ...extracted,
+    rawArrayLength: pageItems.length,
     normalizedCount: jobs.length,
     droppedWithoutGuid,
   };
 
   const firstRecordKeys =
-    extracted.items.length > 0 ? Object.keys(extracted.items[0] ?? {}) : [];
+    pageItems.length > 0 ? Object.keys(pageItems[0] ?? {}) : [];
 
   let diagnosis:
     | "empty_array"
@@ -545,19 +623,29 @@ async function fetchPrintfactoryJobListPage(
     contentType,
     diagnosis,
     ...diagnostics,
+    ...metadata,
+    responseArrayLength: extracted.rawArrayLength,
     firstRecordKeys,
     recordCount: jobs.length,
   });
 
   return {
     jobs,
-    rawCount: extracted.rawArrayLength,
+    metadata,
     firstRecordKeys,
     diagnostics,
   };
 }
 
-export async function fetchPrintfactoryJobsFromApi(): Promise<PrintfactoryApiJob[]> {
+export async function fetchPrintfactoryJobsBounded(
+  options: FetchPrintfactoryJobsOptions = {}
+): Promise<PrintfactoryBoundedFetchResult> {
+  const limits = getPrintfactorySyncLimits();
+  const maxRecords = options.maxRecords ?? limits.maxRecordsPerSync;
+  const maxPages = options.maxPages ?? limits.maxPagesPerSync;
+  const pageSize = options.pageSize ?? limits.pageSize;
+  const startedAt = Date.now();
+
   const status = getPrintfactoryConnectionStatus();
 
   if (!status.configured) {
@@ -572,33 +660,109 @@ export async function fetchPrintfactoryJobsFromApi(): Promise<PrintfactoryApiJob
 
   await checkPrintfactoryServerStatus();
 
-  const allJobs: PrintfactoryApiJob[] = [];
-  let skip = 0;
+  const jobs: PrintfactoryApiJob[] = [];
+  const requestBodies: PrintfactoryJobListRequestBody[] = [];
+  let skip = options.skip ?? 0;
+  let pagesFetched = 0;
+  let accountTotal: number | null = null;
+  let filteredTotal: number | null = null;
+  let hasMore = false;
+  let nextSkip: number | null = null;
 
-  while (true) {
-    const body = buildJobListRequestBody(skip);
+  while (pagesFetched < maxPages && jobs.length < maxRecords) {
+    const take = Math.min(pageSize, maxRecords - jobs.length);
+    const body = buildJobListRequestBody(
+      skip,
+      take,
+      options.dateTimeFrom,
+      options.dateTimeTo
+    );
 
     const page = await fetchPrintfactoryJobListPage(token, body);
-    allJobs.push(...page.jobs);
+    requestBodies.push(body);
+    pagesFetched += 1;
 
-    if (page.rawCount < DEFAULT_PAGE_SIZE) {
-      break;
+    accountTotal = page.metadata.accountTotal ?? accountTotal;
+    filteredTotal = page.metadata.filteredTotal ?? filteredTotal;
+
+    jobs.push(...page.jobs);
+
+    const pageFull = page.metadata.pageRecordCount >= take;
+    const dateFilterApplied = Boolean(body.DateTimeFrom || body.DateTimeTo);
+
+    let morePagesLikely: boolean;
+
+    if (dateFilterApplied) {
+      // TotalRecordCount is often account-wide metadata; do not paginate on it alone.
+      if (filteredTotal != null) {
+        morePagesLikely = skip + page.metadata.pageRecordCount < filteredTotal;
+      } else {
+        morePagesLikely = pageFull;
+      }
+    } else if (filteredTotal != null) {
+      morePagesLikely = skip + page.metadata.pageRecordCount < filteredTotal;
+    } else if (accountTotal != null) {
+      morePagesLikely = skip + page.metadata.pageRecordCount < accountTotal;
+    } else {
+      morePagesLikely = pageFull;
     }
 
-    skip += DEFAULT_PAGE_SIZE;
+    const hitSyncCap = jobs.length >= maxRecords || pagesFetched >= maxPages;
 
-    if (skip > 10_000) {
-      break;
+    if (morePagesLikely && !hitSyncCap) {
+      hasMore = true;
+      nextSkip = skip + take;
+      skip += take;
+      continue;
     }
+
+    hasMore = morePagesLikely || hitSyncCap;
+    nextSkip = hasMore ? skip + take : null;
+    break;
   }
+
+  if (hasMore && nextSkip == null) {
+    nextSkip = skip;
+  }
+
+  const result: PrintfactoryBoundedFetchResult = {
+    jobs,
+    pagesFetched,
+    recordsReceived: jobs.length,
+    recordsProcessed: jobs.length,
+    accountTotal,
+    filteredTotal,
+    hasMore,
+    nextSkip,
+    requestBodies,
+    elapsedMs: Date.now() - startedAt,
+  };
 
   logPrintfactoryDev("job-list-complete", {
     url: buildPrintfactoryJobListUrl(status.baseUrl),
     method: "POST",
-    totalRecordCount: allJobs.length,
-    syncWindowDays: DEFAULT_LIST_WINDOW_DAYS,
+    pagesFetched: result.pagesFetched,
+    recordsReceived: result.recordsReceived,
+    recordsProcessed: result.recordsProcessed,
+    accountTotal: result.accountTotal,
+    filteredTotal: result.filteredTotal,
+    pageRecordCount: result.recordsReceived,
+    hasMore: result.hasMore,
+    nextSkip: result.nextSkip,
+    syncWindowDays: limits.syncWindowDays,
+    maxRecordsPerSync: maxRecords,
+    maxPagesPerSync: maxPages,
+    pageSize,
+    elapsedMs: result.elapsedMs,
+    lastRequestBody: requestBodies.at(-1) ?? null,
     unfilteredDevMode: process.env.PRINTFACTORY_SYNC_UNFILTERED === "1",
   });
 
-  return allJobs;
+  return result;
+}
+
+/** @deprecated Use fetchPrintfactoryJobsBounded for sync. */
+export async function fetchPrintfactoryJobsFromApi(): Promise<PrintfactoryApiJob[]> {
+  const result = await fetchPrintfactoryJobsBounded();
+  return result.jobs;
 }

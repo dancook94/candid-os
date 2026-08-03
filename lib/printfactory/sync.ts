@@ -2,9 +2,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { unstable_noStore as noStore } from "next/cache";
 
 import {
-  fetchPrintfactoryJobsFromApi,
+  fetchPrintfactoryJobsBounded,
   getPrintfactoryConnectionStatus,
-  type PrintfactoryApiJob,
 } from "@/lib/printfactory/client";
 import {
   PRINTFACTORY_ACTIVITY_TYPES,
@@ -13,27 +12,42 @@ import {
 import { PrintfactoryError } from "@/lib/printfactory/errors";
 import { logPrintfactoryActivity } from "@/lib/printfactory/activity";
 import {
-  matchPrintfactoryJobToCandidJob,
-  shouldPreserveExistingJobMatch,
-} from "@/lib/printfactory/job-matching";
-import {
   countPrintfactoryRecordsByTab,
   filterPrintfactoryRecordsByTab,
   type ExceptionQueueTab,
 } from "@/lib/printfactory/matching-queue";
-import { createItemSuggestionsForJob } from "@/lib/printfactory/matching-service";
-import { refreshJobProductionReadiness } from "@/lib/printfactory/readiness-service";
 import {
   checkPrintfactorySchemaReadiness,
   logMatchingDataQueryDev,
   toPrintfactoryDataQueryError,
   type PrintfactoryDataQueryError,
 } from "@/lib/printfactory/schema-readiness";
+import {
+  buildIncrementalSyncWindow,
+  buildInitialSyncWindow,
+  getPrintfactorySyncLimits,
+} from "@/lib/printfactory/sync-config";
+import {
+  batchMatchPrintfactoryJobs,
+  batchUpsertPrintfactoryJobs,
+  loadExistingPrintfactoryRows,
+} from "@/lib/printfactory/sync-processor";
+import {
+  loadPrintfactorySyncState,
+  savePrintfactorySyncState,
+} from "@/lib/printfactory/sync-state";
+import {
+  createSyncStageTimer,
+  type SyncStageName,
+  type SyncStageTiming,
+} from "@/lib/printfactory/sync-timing";
 
 export type PrintfactorySyncResult = {
   ok: boolean;
+  partial: boolean;
   imported: number;
   updated: number;
+  alreadyCurrent: number;
   parentJobsAutoMatched: number;
   parentJobSuggestions: number;
   itemSuggestions: number;
@@ -41,6 +55,16 @@ export type PrintfactorySyncResult = {
   needsAttention: number;
   ignored: number;
   errors: number;
+  pagesFetched: number;
+  recordsReceived: number;
+  recordsProcessed: number;
+  accountTotal: number | null;
+  filteredTotal: number | null;
+  hasMore: boolean;
+  nextCursor: number | null;
+  elapsedMs: number;
+  failingStage: SyncStageName | null;
+  stageTimings: SyncStageTiming[];
   /** @deprecated use parentJobsAutoMatched */
   matched: number;
   /** @deprecated use needsAttention */
@@ -57,163 +81,82 @@ export type PrintfactorySyncResult = {
   summaryMessage: string | null;
 };
 
-type ExistingPrintfactoryRow = {
-  id: string;
-  printfactory_job_guid: string;
-  candid_job_id: string | null;
-  job_match_status: string;
-};
-
-async function loadExistingByGuid(
-  adminClient: SupabaseClient,
-  guids: string[]
-) {
-  if (guids.length === 0) {
-    return new Map<string, ExistingPrintfactoryRow>();
-  }
-
-  const { data, error } = await adminClient
-    .from("printfactory_jobs")
-    .select("id, printfactory_job_guid, candid_job_id, job_match_status")
-    .in("printfactory_job_guid", guids);
-
-  if (error) {
-    throw error;
-  }
-
-  return new Map(
-    (data ?? []).map((row) => [
-      row.printfactory_job_guid as string,
-      row as ExistingPrintfactoryRow,
-    ])
-  );
-}
-
-async function upsertPrintfactoryJob(
-  adminClient: SupabaseClient,
-  apiJob: PrintfactoryApiJob,
-  existing: ExistingPrintfactoryRow | undefined,
-  now: string
-) {
-  const baseRow = {
-    printfactory_job_guid: apiJob.guid,
-    job_name: apiJob.name,
-    source_file_path: apiJob.sourceFilePath,
-    source_file_name: apiJob.sourceFileName,
-    document_name: apiJob.documentName,
-    device: apiJob.device,
-    media_type: apiJob.mediaType,
-    producer: apiJob.producer,
-    printfactory_status: apiJob.status,
-    progress: apiJob.progress,
-    created_at_printfactory: apiJob.createdAt,
-    updated_at_printfactory: apiJob.updatedAt,
-    raw_metadata: apiJob.rawMetadata ?? null,
-    last_seen_at: now,
-  };
-
-  if (existing) {
-    const { data, error } = await adminClient
-      .from("printfactory_jobs")
-      .update(baseRow)
-      .eq("id", existing.id)
-      .select("*")
-      .single();
-
-    if (error) {
-      throw error;
-    }
-
-    return { row: data, created: false };
-  }
-
-  const { data, error } = await adminClient
-    .from("printfactory_jobs")
-    .insert({
-      ...baseRow,
-      first_seen_at: now,
-    })
-    .select("*")
-    .single();
-
-  if (error) {
-    throw error;
-  }
-
-  return { row: data, created: true };
-}
-
-async function applyJobMatchingIfNeeded(
-  adminClient: SupabaseClient,
-  row: Record<string, unknown>
-) {
-  const jobMatchStatus = row.job_match_status as string;
-
-  if (shouldPreserveExistingJobMatch(jobMatchStatus)) {
-    return row;
-  }
-
-  const match = await matchPrintfactoryJobToCandidJob(adminClient, {
-    sourceFilePath: row.source_file_path as string | null,
-    sourceFileName: row.source_file_name as string | null,
-    jobName: row.job_name as string | null,
-    documentName: row.document_name as string | null,
-  });
-
-  const { data, error } = await adminClient
-    .from("printfactory_jobs")
-    .update({
-      candid_job_id: match.candidJobId,
-      suggested_candid_job_id: match.suggestedCandidJobId,
-      job_match_status: match.jobMatchStatus,
-      job_match_method: match.jobMatchMethod,
-      job_match_confidence: match.jobMatchConfidence,
-      extracted_job_reference: match.extractedJobReference,
-      match_suggestion_reason: match.matchSuggestionReason,
-      match_suggestion_details: match.matchSuggestionDetails,
-    })
-    .eq("id", row.id)
-    .select("*")
-    .single();
-
-  if (error) {
-    throw error;
-  }
-
-  return data;
-}
-
 function buildSyncSummaryMessage(stats: {
+  recordsReceived: number;
   imported: number;
-  updated: number;
+  alreadyCurrent: number;
   parentJobsAutoMatched: number;
   parentJobSuggestions: number;
   needsAttention: number;
+  pagesFetched: number;
+  hasMore: boolean;
+  partial: boolean;
+  failingStage: SyncStageName | null;
+  committedImported: number;
+  committedUpdated: number;
 }) {
-  const total = stats.imported + stats.updated;
-
-  if (total === 0) {
-    return "No PrintFactory jobs returned from sync.";
+  if (stats.recordsReceived === 0) {
+    return "No PrintFactory jobs returned in the sync window.";
   }
 
-  const parts = [
-    `Synced ${total} job${total === 1 ? "" : "s"}`,
-    `${stats.parentJobsAutoMatched} parent job${stats.parentJobsAutoMatched === 1 ? "" : "s"} matched automatically`,
+  const lines = [
+    stats.partial && stats.failingStage
+      ? `Sync partially completed (${stats.failingStage} failed after commit).`
+      : "Sync complete:",
+    `- ${stats.recordsReceived} record${stats.recordsReceived === 1 ? "" : "s"} received`,
+    `- ${stats.imported} imported`,
+    `- ${stats.alreadyCurrent} already current`,
+    `- ${stats.parentJobsAutoMatched} job${stats.parentJobsAutoMatched === 1 ? "" : "s"} matched automatically`,
+    `- ${stats.needsAttention} need${stats.needsAttention === 1 ? "s" : ""} attention`,
+    `- ${stats.pagesFetched} page${stats.pagesFetched === 1 ? "" : "s"} fetched`,
+    `- More records available: ${stats.hasMore ? "Yes" : "No"}`,
   ];
 
+  if (stats.partial && stats.failingStage) {
+    lines.push(
+      `- Imported ${stats.committedImported + stats.committedUpdated} PrintFactory job${stats.committedImported + stats.committedUpdated === 1 ? "" : "s"} before failure; those records were retained.`
+    );
+  } else if (stats.hasMore) {
+    lines.push(
+      "Imported the newest batch of PrintFactory jobs. Run sync again to continue."
+    );
+  }
+
   if (stats.parentJobSuggestions > 0) {
-    parts.push(
-      `${stats.parentJobSuggestions} suggested match${stats.parentJobSuggestions === 1 ? "" : "es"}`
+    lines.splice(
+      5,
+      0,
+      `- ${stats.parentJobSuggestions} suggested match${stats.parentJobSuggestions === 1 ? "" : "es"}`
     );
   }
 
-  if (stats.needsAttention > 0) {
-    parts.push(
-      `${stats.needsAttention} need${stats.needsAttention === 1 ? "s" : ""} attention`
-    );
+  return lines.join("\n");
+}
+
+async function countNeedsAttention(adminClient: SupabaseClient) {
+  const { count, error } = await adminClient
+    .from("printfactory_jobs")
+    .select("id", { count: "exact", head: true })
+    .in("job_match_status", ["unmatched", "suggested", "conflict"]);
+
+  if (error) {
+    throw error;
   }
 
-  return `${parts[0]}: ${parts.slice(1).join(", ")}.`;
+  return count ?? 0;
+}
+
+async function countIgnored(adminClient: SupabaseClient) {
+  const { count, error } = await adminClient
+    .from("printfactory_jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("job_match_status", "ignored");
+
+  if (error) {
+    throw error;
+  }
+
+  return count ?? 0;
 }
 
 export async function syncPrintfactoryJobs(
@@ -221,13 +164,18 @@ export async function syncPrintfactoryJobs(
   actorProfileId?: string | null
 ): Promise<PrintfactorySyncResult> {
   const connectionStatus = getPrintfactoryConnectionStatus();
+  const limits = getPrintfactorySyncLimits();
+  const timer = createSyncStageTimer();
+  const attemptedAt = new Date().toISOString();
 
   const emptyResult = (
     partial: Partial<PrintfactorySyncResult> = {}
   ): PrintfactorySyncResult => ({
     ok: false,
+    partial: false,
     imported: 0,
     updated: 0,
+    alreadyCurrent: 0,
     parentJobsAutoMatched: 0,
     parentJobSuggestions: 0,
     itemSuggestions: 0,
@@ -235,6 +183,16 @@ export async function syncPrintfactoryJobs(
     needsAttention: 0,
     ignored: 0,
     errors: 0,
+    pagesFetched: 0,
+    recordsReceived: 0,
+    recordsProcessed: 0,
+    accountTotal: null,
+    filteredTotal: null,
+    hasMore: false,
+    nextCursor: null,
+    elapsedMs: timer.getTimings().find((entry) => entry.stage === "total")?.elapsedMs ?? 0,
+    failingStage: null,
+    stageTimings: timer.getTimings(),
     matched: 0,
     unmatched: 0,
     suggested: 0,
@@ -247,8 +205,60 @@ export async function syncPrintfactoryJobs(
     ...partial,
   });
 
-  if (!connectionStatus.configured) {
+  let imported = 0;
+  let updated = 0;
+  let parentJobsAutoMatched = 0;
+  let parentJobSuggestions = 0;
+  let pagesFetched = 0;
+  let recordsReceived = 0;
+  let accountTotal: number | null = null;
+  let filteredTotal: number | null = null;
+  let hasMore = false;
+  let nextCursor: number | null = null;
+  let failingStage: SyncStageName | null = null;
+  let currentStage: SyncStageName = "api_request";
+
+  const finish = (
+    partial: Partial<PrintfactorySyncResult>
+  ): PrintfactorySyncResult => {
+    const alreadyCurrent = Math.max(recordsReceived - imported, 0);
+    const stageTimings = timer.getTimings();
+    const elapsedMs =
+      stageTimings.find((entry) => entry.stage === "total")?.elapsedMs ?? 0;
+
+    timer.logDevSummary({
+      imported,
+      updated,
+      recordsReceived,
+      pagesFetched,
+      hasMore,
+      failingStage,
+    });
+
     return emptyResult({
+      imported,
+      updated,
+      alreadyCurrent,
+      parentJobsAutoMatched,
+      parentJobSuggestions,
+      pagesFetched,
+      recordsReceived,
+      recordsProcessed: recordsReceived,
+      accountTotal,
+      filteredTotal,
+      hasMore,
+      nextCursor,
+      elapsedMs,
+      failingStage,
+      stageTimings,
+      matched: parentJobsAutoMatched,
+      suggested: parentJobSuggestions,
+      ...partial,
+    });
+  };
+
+  if (!connectionStatus.configured) {
+    return finish({
       error: `PrintFactory is not configured. Missing: ${connectionStatus.missing.join(", ")}`,
       errorCode: "not_configured",
     });
@@ -257,173 +267,270 @@ export async function syncPrintfactoryJobs(
   const schemaReadiness = await checkPrintfactorySchemaReadiness(adminClient);
 
   if (!schemaReadiness.ready) {
-    return emptyResult({
+    return finish({
       error: schemaReadiness.message,
       errorCode: "migration_required",
     });
   }
 
-  let apiJobs: PrintfactoryApiJob[];
+  const syncState = await loadPrintfactorySyncState(adminClient);
+  const continuingBackfill = syncState.lastSkipCursor > 0 && !syncState.lastSuccessfulSyncAt;
+
+  const dateWindow = syncState.lastSuccessfulSyncAt
+    ? buildIncrementalSyncWindow(syncState.lastSuccessfulSyncAt, limits)
+    : buildInitialSyncWindow(limits);
+
+  await savePrintfactorySyncState(adminClient, {
+    lastAttemptedSyncAt: attemptedAt,
+    lastError: null,
+  });
 
   try {
-    apiJobs = await fetchPrintfactoryJobsFromApi();
-  } catch (error) {
-    if (error instanceof PrintfactoryError) {
-      return emptyResult({
-        error: error.message,
-        errorCode: error.code,
+    timer.start("api_request");
+    currentStage = "api_request";
+    timer.start("pagination");
+
+    const fetchResult = await fetchPrintfactoryJobsBounded({
+      skip: continuingBackfill ? syncState.lastSkipCursor : 0,
+      dateTimeFrom: dateWindow.dateTimeFrom,
+      dateTimeTo: dateWindow.dateTimeTo,
+      maxRecords: limits.maxRecordsPerSync,
+      maxPages: limits.maxPagesPerSync,
+      pageSize: limits.pageSize,
+    });
+
+    timer.end("api_request", {
+      pagesFetched: fetchResult.pagesFetched,
+      recordsReceived: fetchResult.recordsReceived,
+      accountTotal: fetchResult.accountTotal,
+      filteredTotal: fetchResult.filteredTotal,
+    });
+    timer.end("pagination", {
+      hasMore: fetchResult.hasMore,
+      nextSkip: fetchResult.nextSkip,
+    });
+
+    pagesFetched = fetchResult.pagesFetched;
+    recordsReceived = fetchResult.recordsReceived;
+    accountTotal = fetchResult.accountTotal;
+    filteredTotal = fetchResult.filteredTotal;
+    hasMore = fetchResult.hasMore;
+    nextCursor = fetchResult.nextSkip;
+
+    if (fetchResult.jobs.length === 0) {
+      await savePrintfactorySyncState(adminClient, {
+        lastAttemptedSyncAt: attemptedAt,
+        lastSuccessfulSyncAt: attemptedAt,
+        lastSkipCursor: 0,
+        lastRecordCount: 0,
+        lastError: null,
+      });
+
+      return finish({
+        ok: true,
+        summaryMessage: buildSyncSummaryMessage({
+          recordsReceived: 0,
+          imported: 0,
+          alreadyCurrent: 0,
+          parentJobsAutoMatched: 0,
+          parentJobSuggestions: 0,
+          needsAttention: 0,
+          pagesFetched,
+          hasMore: false,
+          partial: false,
+          failingStage: null,
+          committedImported: 0,
+          committedUpdated: 0,
+        }),
       });
     }
 
-    return emptyResult({
-      error: error instanceof Error ? error.message : "PrintFactory sync failed.",
-      errorCode: "sync_failed",
+    const now = new Date().toISOString();
+
+    timer.start("normalization");
+    currentStage = "normalization";
+    timer.end("normalization", {
+      recordsReceived: fetchResult.jobs.length,
     });
-  }
 
-  if (apiJobs.length === 0) {
-    return emptyResult({
-      ok: true,
-      error: "PrintFactory API returned no jobs.",
-      errorCode: "no_jobs",
-      summaryMessage: "PrintFactory API returned no jobs in the sync window.",
-    });
-  }
+    timer.start("database_upsert");
+    currentStage = "database_upsert";
 
-  const now = new Date().toISOString();
-  let imported = 0;
-  let updated = 0;
-  let parentJobsAutoMatched = 0;
-  let parentJobSuggestions = 0;
-  let itemSuggestions = 0;
-  let errors = 0;
-
-  try {
-    const existingByGuid = await loadExistingByGuid(
+    const existingByGuid = await loadExistingPrintfactoryRows(
       adminClient,
-      apiJobs.map((job) => job.guid)
+      fetchResult.jobs.map((job) => job.guid)
     );
 
-    for (const apiJob of apiJobs) {
-      try {
-        const existing = existingByGuid.get(apiJob.guid);
-        const { row, created } = await upsertPrintfactoryJob(
-          adminClient,
-          apiJob,
-          existing,
-          now
-        );
+    const upsertResult = await batchUpsertPrintfactoryJobs(
+      adminClient,
+      fetchResult.jobs,
+      existingByGuid,
+      now,
+      limits.upsertBatchSize
+    );
 
-        if (created) {
-          imported += 1;
-        } else {
-          updated += 1;
-        }
+    imported = upsertResult.imported;
+    updated = upsertResult.updated;
 
-        const matchedRow = await applyJobMatchingIfNeeded(adminClient, row);
-        const status = matchedRow.job_match_status as string;
+    timer.end("database_upsert", {
+      imported,
+      updated,
+      batchSize: limits.upsertBatchSize,
+    });
 
-        if (status === "matched_automatically" || status === "matched_manually") {
-          parentJobsAutoMatched += 1;
-        } else if (status === "suggested") {
-          parentJobSuggestions += 1;
-        }
+    timer.start("parent_job_matching");
+    currentStage = "parent_job_matching";
 
-        itemSuggestions += await createItemSuggestionsForJob(
-          adminClient,
-          matchedRow as Record<string, unknown>
-        );
+    const matchResult = await batchMatchPrintfactoryJobs(
+      adminClient,
+      Array.from(upsertResult.rowByGuid.values()),
+      limits.matchBatchSize
+    );
 
-        const candidJobId = matchedRow.candid_job_id as string | null;
+    parentJobsAutoMatched = matchResult.parentJobsAutoMatched;
+    parentJobSuggestions = matchResult.parentJobSuggestions;
 
-        if (candidJobId) {
-          await refreshJobProductionReadiness(adminClient, candidJobId, actorProfileId);
-        }
-      } catch (jobError) {
-        errors += 1;
+    timer.end("parent_job_matching", {
+      matched: parentJobsAutoMatched,
+      suggestions: parentJobSuggestions,
+      skippedPreserved: matchResult.skipped,
+      updated: matchResult.updated,
+    });
 
-        if (process.env.NODE_ENV === "development") {
-          console.error("[printfactory-sync]", apiJob.guid, jobError);
-        }
-      }
-    }
+    // Item suggestions and per-job readiness refresh are deferred to keep sync under route timeout.
+    timer.start("item_suggestions");
+    currentStage = "item_suggestions";
+    timer.end("item_suggestions", { deferred: true, created: 0 });
 
-    const { data: allRecords } = await adminClient
-      .from("printfactory_jobs")
-      .select(`
-        id,
-        job_match_status,
-        candid_job_id,
-        suggested_candid_job_id,
-        match_suggestion_reason,
-        printfactory_job_manifest_items(link_status, match_confidence, suggestion_reason)
-      `);
+    const needsAttention = await countNeedsAttention(adminClient);
+    const ignored = await countIgnored(adminClient);
 
-    const tabCounts = countPrintfactoryRecordsByTab(allRecords ?? []);
     const { count: confirmedLinksCount } = await adminClient
       .from("printfactory_job_manifest_items")
       .select("id", { count: "exact", head: true })
       .eq("link_status", "confirmed");
 
     const summaryMessage = buildSyncSummaryMessage({
+      recordsReceived,
       imported,
-      updated,
+      alreadyCurrent: Math.max(recordsReceived - imported, 0),
       parentJobsAutoMatched,
       parentJobSuggestions,
-      needsAttention: tabCounts.needs_attention,
+      needsAttention,
+      pagesFetched,
+      hasMore,
+      partial: false,
+      failingStage: null,
+      committedImported: imported,
+      committedUpdated: updated,
     });
+
+    timer.start("activity_logging");
+    currentStage = "activity_logging";
 
     await logPrintfactoryActivity(adminClient, {
       activityType: PRINTFACTORY_ACTIVITY_TYPES.syncCompleted,
-      description: summaryMessage,
+      description: summaryMessage.replace(/\n/g, " "),
       actorProfileId,
       metadata: {
         imported,
         updated,
         parentJobsAutoMatched,
         parentJobSuggestions,
-        itemSuggestions,
+        itemSuggestions: 0,
         confirmedLinks: confirmedLinksCount ?? 0,
-        needsAttention: tabCounts.needs_attention,
-        ignored: tabCounts.ignored,
-        errors,
+        needsAttention,
+        ignored,
+        errors: 0,
+        pagesFetched,
+        recordsReceived,
+        hasMore,
+        nextCursor,
+        accountTotal,
+        filteredTotal,
+        elapsedMs: timer.getTimings().find((entry) => entry.stage === "total")?.elapsedMs ?? 0,
       },
     });
 
-    return {
+    timer.end("activity_logging");
+
+    await savePrintfactorySyncState(adminClient, {
+      lastAttemptedSyncAt: attemptedAt,
+      lastSuccessfulSyncAt: hasMore ? syncState.lastSuccessfulSyncAt : attemptedAt,
+      lastSkipCursor: hasMore ? (nextCursor ?? syncState.lastSkipCursor) : 0,
+      lastRecordCount: recordsReceived,
+      lastError: null,
+    });
+
+    return finish({
       ok: true,
-      imported,
-      updated,
-      parentJobsAutoMatched,
-      parentJobSuggestions,
-      itemSuggestions,
+      partial: false,
+      itemSuggestions: 0,
       confirmedLinks: confirmedLinksCount ?? 0,
-      needsAttention: tabCounts.needs_attention,
-      ignored: tabCounts.ignored,
-      errors,
-      matched: parentJobsAutoMatched,
-      unmatched: tabCounts.needs_attention,
-      suggested: parentJobSuggestions,
-      failed: errors,
-      itemSuggestionsCreated: itemSuggestions,
+      needsAttention,
+      ignored,
+      errors: 0,
+      itemSuggestionsCreated: 0,
+      unmatched: needsAttention,
+      failed: 0,
+      summaryMessage,
       error: null,
       errorCode: null,
-      connectionStatus,
-      summaryMessage,
-    };
+    });
   } catch (error) {
-    const schemaReadiness = await checkPrintfactorySchemaReadiness(adminClient);
+    failingStage = currentStage;
 
-    if (!schemaReadiness.ready) {
-      return emptyResult({
-        error: schemaReadiness.message ?? "PrintFactory matching schema is not ready.",
+    const safeMessage =
+      error instanceof PrintfactoryError
+        ? error.message
+        : error instanceof Error
+          ? error.message
+          : "PrintFactory sync failed.";
+
+    const partialSuccess = imported + updated > 0;
+    const committedMessage = partialSuccess
+      ? `Imported ${imported + updated} PrintFactory jobs, but ${failingStage?.replace(/_/g, " ")} failed. Imported records were retained.`
+      : safeMessage;
+
+    await savePrintfactorySyncState(adminClient, {
+      lastAttemptedSyncAt: attemptedAt,
+      lastSkipCursor: hasMore ? (nextCursor ?? syncState.lastSkipCursor) : syncState.lastSkipCursor,
+      lastRecordCount: recordsReceived || null,
+      lastError: safeMessage,
+      ...(partialSuccess && !hasMore
+        ? { lastSuccessfulSyncAt: syncState.lastSuccessfulSyncAt }
+        : {}),
+    });
+
+    if (error instanceof PrintfactoryError) {
+      return finish({
+        ok: partialSuccess,
+        partial: partialSuccess,
+        failingStage,
+        error: committedMessage,
+        errorCode: error.code,
+        summaryMessage: partialSuccess ? committedMessage : null,
+      });
+    }
+
+    const schemaReadinessAfter = await checkPrintfactorySchemaReadiness(adminClient);
+
+    if (!schemaReadinessAfter.ready) {
+      return finish({
+        partial: partialSuccess,
+        failingStage,
+        error: schemaReadinessAfter.message ?? "PrintFactory matching schema is not ready.",
         errorCode: "migration_required",
       });
     }
 
-    return emptyResult({
-      error: error instanceof Error ? error.message : "PrintFactory sync failed.",
+    return finish({
+      ok: partialSuccess,
+      partial: partialSuccess,
+      failingStage,
+      error: committedMessage,
       errorCode: "sync_failed",
+      summaryMessage: partialSuccess ? committedMessage : null,
     });
   }
 }
