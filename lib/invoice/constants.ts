@@ -71,7 +71,7 @@ export const INVOICE_DRAFT_SELECT =
   "id, job_id, company_id, quote_id, status, currency, subtotal, tax_total, total, purchase_order_number, internal_note, approved_by, approved_at, xero_invoice_id, xero_invoice_number, xero_status, created_at, updated_at";
 
 export const INVOICE_ITEM_SELECT =
-  "id, invoice_draft_id, job_id, production_item_id, quote_item_id, description, quantity, unit, unit_price, line_total, tax_rate, billing_status, pricing_source, pricing_note, created_at, updated_at, deleted_at";
+  "id, invoice_draft_id, job_id, production_item_id, quote_item_id, item_name, description, quantity, unit, unit_price, line_total, tax_rate, billing_status, pricing_source, pricing_note, manually_edited, created_at, updated_at, deleted_at";
 
 export const NON_INVOICE_BILLING_STATUSES = [
   "cancelled",

@@ -32,7 +32,8 @@ export type InvoiceItemRecord = {
   job_id: string;
   production_item_id: string | null;
   quote_item_id: string | null;
-  description: string;
+  item_name: string;
+  description: string | null;
   quantity: number;
   unit: string | null;
   unit_price: number | null;
@@ -41,9 +42,15 @@ export type InvoiceItemRecord = {
   billing_status: ManifestBillingStatus;
   pricing_source: PricingSource;
   pricing_note: string | null;
+  manually_edited: boolean;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;
+};
+
+export type InvoiceLineView = InvoiceItemRecord & {
+  sourceLabel: string;
+  canResetFromSource: boolean;
 };
 
 export type InvoiceReviewData = {
@@ -52,7 +59,7 @@ export type InvoiceReviewData = {
   manifestItems: ManifestItemRecord[];
   quotedItems: ManifestItemRecord[];
   productionChanges: ManifestItemRecord[];
-  finalLines: InvoiceItemRecord[];
+  finalLines: InvoiceLineView[];
   unpricedCount: number;
   canApprove: boolean;
   schemaMissing: boolean;
@@ -60,7 +67,8 @@ export type InvoiceReviewData = {
 };
 
 export type InvoiceItemUpdateInput = {
-  description?: string;
+  itemName?: string;
+  description?: string | null;
   quantity?: number;
   unit?: string | null;
   unitPrice?: number | null;
@@ -68,6 +76,7 @@ export type InvoiceItemUpdateInput = {
   billingStatus?: ManifestBillingStatus;
   pricingSource?: PricingSource;
   pricingNote?: string | null;
+  manuallyEdited?: boolean;
 };
 
 export type XeroPayloadPreview = {
@@ -79,6 +88,7 @@ export type XeroPayloadPreview = {
   dueDate: string;
   currency: string;
   lineItems: Array<{
+    itemName: string;
     description: string;
     quantity: number;
     unitAmount: number;

@@ -6,6 +6,7 @@ import {
   approveInvoiceDraft,
   loadInvoiceReviewData,
   reconcileInvoiceDraft,
+  resetInvoiceItemFromSource,
   updateInvoiceItem,
 } from "@/lib/invoice/service";
 import type { InvoiceItemUpdateInput } from "@/lib/invoice/types";
@@ -87,7 +88,13 @@ export async function POST(
       }
 
       const input: InvoiceItemUpdateInput = {
-        description: body.description ? String(body.description) : undefined,
+        itemName: body.itemName ? String(body.itemName) : undefined,
+        description:
+          body.description !== undefined
+            ? body.description
+              ? String(body.description)
+              : null
+            : undefined,
         quantity:
           body.quantity !== undefined && body.quantity !== null && body.quantity !== ""
             ? Number(body.quantity)
@@ -110,9 +117,27 @@ export async function POST(
           ? (String(body.pricingSource) as InvoiceItemUpdateInput["pricingSource"])
           : undefined,
         pricingNote: body.pricingNote ? String(body.pricingNote) : undefined,
+        manuallyEdited:
+          body.manuallyEdited === true
+            ? true
+            : body.manuallyEdited === false
+              ? false
+              : undefined,
       };
 
       const item = await updateInvoiceItem(adminClient, itemId, input, auth.userId);
+      revalidatePath(`/admin/jobs/${jobId}/invoice`);
+      return NextResponse.json({ item });
+    }
+
+    if (action === "reset_from_source") {
+      const itemId = body.itemId ? String(body.itemId) : "";
+
+      if (!itemId) {
+        return NextResponse.json({ error: "Item ID is required." }, { status: 400 });
+      }
+
+      const item = await resetInvoiceItemFromSource(adminClient, itemId, auth.userId);
       revalidatePath(`/admin/jobs/${jobId}/invoice`);
       return NextResponse.json({ item });
     }

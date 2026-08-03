@@ -28,6 +28,17 @@ export function isMissingManifestSchemaError(error: {
   );
 }
 
+export function isMissingInvoiceSchemaError(error: {
+  code?: string;
+  message?: string;
+}) {
+  return (
+    isMissingProductionSchemaError(error) ||
+    Boolean(error.message?.includes("item_name")) ||
+    Boolean(error.message?.includes("manually_edited"))
+  );
+}
+
 export class ProductionError extends Error {
   status: number;
 

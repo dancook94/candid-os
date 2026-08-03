@@ -13,12 +13,19 @@ import type {
   InvoiceDraftRecord,
   InvoiceItemRecord,
   InvoiceItemUpdateInput,
+  InvoiceLineView,
   InvoiceReviewData,
   XeroPayloadPreview,
 } from "@/lib/invoice/types";
 import { MANIFEST_ITEM_SELECT } from "@/lib/manifest/constants";
 import type { ManifestItemRecord } from "@/lib/manifest/types";
-import { ProductionError, isMissingProductionSchemaError } from "@/lib/production/errors";
+import {
+  buildInvoiceLineFromManifestItem,
+  buildXeroLineDescription,
+  getInvoiceLineSourceLabel,
+  isManualPricingSource,
+} from "@/lib/invoice/line-text";
+import { ProductionError, isMissingInvoiceSchemaError, isMissingProductionSchemaError } from "@/lib/production/errors";
 
 function roundMoney(value: number) {
   return Math.round(value * 100) / 100;
@@ -180,7 +187,7 @@ async function getOrCreateInvoiceDraft(
     .maybeSingle();
 
   if (existingError) {
-    if (isMissingProductionSchemaError(existingError)) {
+    if (isMissingProductionSchemaError(existingError) || isMissingInvoiceSchemaError(existingError)) {
       return { draft: null, schemaMissing: true as const, job };
     }
 
@@ -284,13 +291,15 @@ export async function reconcileInvoiceDraft(
 
     const pricing = defaultPricingForManifestItem(manifestItem);
     const quantity = manifestItem.quantity ?? manifestItem.quoted_quantity ?? 1;
+    const lineText = buildInvoiceLineFromManifestItem(manifestItem);
 
     await adminClient.from("job_invoice_items").insert({
       invoice_draft_id: draft.id,
       job_id: jobId,
       production_item_id: manifestItem.id,
       quote_item_id: manifestItem.quote_item_id,
-      description: manifestItem.item_name,
+      item_name: lineText.item_name,
+      description: lineText.description,
       quantity,
       unit: manifestItem.unit ?? "each",
       unit_price: pricing.unit_price,
@@ -299,6 +308,7 @@ export async function reconcileInvoiceDraft(
       billing_status: pricing.billing_status,
       pricing_source: pricing.pricing_source,
       pricing_note: manifestItem.internal_note,
+      manually_edited: false,
     });
   }
 
@@ -422,12 +432,26 @@ export async function loadInvoiceReviewData(
       item.billing_status === "reprint_no_charge" ||
       item.billing_status === "no_charge"
   );
-  const finalLines = typedInvoiceItems.filter(
-    (item) =>
-      !NON_INVOICE_BILLING_STATUSES.includes(
-        item.billing_status as (typeof NON_INVOICE_BILLING_STATUSES)[number]
-      )
-  );
+  const manifestById = new Map(typedManifest.map((item) => [item.id, item]));
+
+  const finalLines: InvoiceLineView[] = typedInvoiceItems
+    .filter(
+      (item) =>
+        !NON_INVOICE_BILLING_STATUSES.includes(
+          item.billing_status as (typeof NON_INVOICE_BILLING_STATUSES)[number]
+        )
+    )
+    .map((line) => {
+      const manifestItem = line.production_item_id
+        ? manifestById.get(line.production_item_id) ?? null
+        : null;
+
+      return {
+        ...line,
+        sourceLabel: getInvoiceLineSourceLabel(line, manifestItem),
+        canResetFromSource: Boolean(manifestItem),
+      };
+    });
 
   const unpricedCount = finalLines.filter((item) =>
     UNPRICED_BILLING_STATUSES.includes(
@@ -474,15 +498,34 @@ export async function updateInvoiceItem(
   const unitPrice =
     input.unitPrice !== undefined ? input.unitPrice : existing.unit_price;
   const billingStatus = input.billingStatus ?? existing.billing_status;
+  const itemName = input.itemName?.trim() ?? existing.item_name;
+  const description =
+    input.description !== undefined ? input.description : existing.description;
   const lineTotal =
     billingStatus === "price_required" || unitPrice === null
       ? 0
       : calculateLineTotal(quantity, unitPrice);
 
+  const textChanged =
+    itemName !== existing.item_name ||
+    (description ?? "") !== (existing.description ?? "");
+  const priceChanged =
+    input.unitPrice !== undefined && input.unitPrice !== existing.unit_price;
+  const manuallyEdited =
+    input.manuallyEdited ??
+    (existing.manually_edited || textChanged || priceChanged);
+
+  const pricingSource =
+    priceChanged || isManualPricingSource(existing.pricing_source)
+      ? input.pricingSource ??
+        (priceChanged ? ("manual" as PricingSource) : existing.pricing_source)
+      : input.pricingSource ?? existing.pricing_source;
+
   const { data: item, error } = await adminClient
     .from("job_invoice_items")
     .update({
-      description: input.description?.trim() ?? existing.description,
+      item_name: itemName,
+      description,
       quantity,
       unit: input.unit ?? existing.unit,
       unit_price: unitPrice,
@@ -492,8 +535,9 @@ export async function updateInvoiceItem(
         unitPrice !== null && billingStatus === "price_required"
           ? "ready_to_invoice"
           : billingStatus,
-      pricing_source: input.pricingSource ?? existing.pricing_source,
+      pricing_source: pricingSource,
       pricing_note: input.pricingNote ?? existing.pricing_note,
+      manually_edited: manuallyEdited,
     })
     .eq("id", itemId)
     .select(INVOICE_ITEM_SELECT)
@@ -538,6 +582,67 @@ export async function updateInvoiceItem(
   });
 
   return item as InvoiceItemRecord;
+}
+
+export async function resetInvoiceItemFromSource(
+  adminClient: SupabaseClient,
+  itemId: string,
+  actorProfileId: string
+) {
+  const { data: existing, error: loadError } = await adminClient
+    .from("job_invoice_items")
+    .select(INVOICE_ITEM_SELECT)
+    .eq("id", itemId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (loadError) {
+    throw new ProductionError(loadError.message, 500);
+  }
+
+  if (!existing) {
+    throw new ProductionError("Invoice line not found.", 404);
+  }
+
+  if (!existing.production_item_id) {
+    throw new ProductionError("This invoice line has no linked production item.", 400);
+  }
+
+  const { data: manifestItem, error: manifestError } = await adminClient
+    .from("production_items")
+    .select(MANIFEST_ITEM_SELECT)
+    .eq("id", existing.production_item_id)
+    .maybeSingle();
+
+  if (manifestError) {
+    throw new ProductionError(manifestError.message, 500);
+  }
+
+  if (!manifestItem) {
+    throw new ProductionError("Linked production item not found.", 404);
+  }
+
+  const typedManifest = manifestItem as ManifestItemRecord;
+  const lineText = buildInvoiceLineFromManifestItem(typedManifest);
+  const pricing = defaultPricingForManifestItem(typedManifest);
+  const quantity = typedManifest.quantity ?? typedManifest.quoted_quantity ?? 1;
+
+  return updateInvoiceItem(
+    adminClient,
+    itemId,
+    {
+      itemName: lineText.item_name,
+      description: lineText.description,
+      quantity,
+      unit: typedManifest.unit ?? "each",
+      unitPrice: pricing.unit_price,
+      billingStatus: pricing.billing_status,
+      pricingSource: pricing.pricing_source,
+      pricingNote: typedManifest.internal_note,
+      manuallyEdited: false,
+    },
+    actorProfileId
+  );
 }
 
 export async function approveInvoiceDraft(
@@ -659,7 +764,8 @@ export function buildXeroPayloadPreview(input: {
     dueDate: due.toISOString().slice(0, 10),
     currency: input.currency,
     lineItems: billableLines.map((item) => ({
-      description: item.description,
+      itemName: item.item_name,
+      description: buildXeroLineDescription(item),
       quantity: item.quantity,
       unitAmount: item.unit_price ?? 0,
       taxRate: item.tax_rate,

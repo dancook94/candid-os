@@ -1,19 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   INVOICE_DRAFT_STATUS_LABELS,
   PRICING_SOURCE_LABELS,
 } from "@/lib/invoice/constants";
-import type { XeroPayloadPreview } from "@/lib/invoice/types";
-import { MANIFEST_BILLING_STATUS_LABELS } from "@/lib/manifest/constants";
-import { MANIFEST_SOURCE_TYPE_LABELS } from "@/lib/manifest/constants";
-import type { InvoiceReviewData } from "@/lib/invoice/types";
+import { buildXeroLineDescription, formatManifestPreviewDescription } from "@/lib/invoice/line-text";
+import type { InvoiceLineView, InvoiceReviewData, XeroPayloadPreview } from "@/lib/invoice/types";
+import {
+  MANIFEST_BILLING_STATUS_LABELS,
+  MANIFEST_SOURCE_TYPE_LABELS,
+} from "@/lib/manifest/constants";
 import { formatGbp } from "@/lib/format-currency";
 
 type InvoiceReviewClientProps = {
@@ -26,6 +29,237 @@ type InvoiceReviewClientProps = {
   xeroPreview: XeroPayloadPreview;
 };
 
+type LineDraft = {
+  itemName: string;
+  description: string;
+  quantity: string;
+  unit: string;
+  unitPrice: string;
+  taxRate: string;
+};
+
+function buildLineDraft(line: InvoiceLineView): LineDraft {
+  return {
+    itemName: line.item_name,
+    description: line.description ?? "",
+    quantity: String(line.quantity),
+    unit: line.unit ?? "each",
+    unitPrice: line.unit_price === null ? "" : String(line.unit_price),
+    taxRate: String(line.tax_rate),
+  };
+}
+
+function InvoiceLineEditor({
+  jobId,
+  line,
+  onSaved,
+}: {
+  jobId: string;
+  line: InvoiceLineView;
+  onSaved: (message: string) => void;
+}) {
+  const [draft, setDraft] = useState<LineDraft>(() => buildLineDraft(line));
+  const [isSaving, setIsSaving] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
+  const [error, setError] = useState("");
+
+  async function saveLine() {
+    setIsSaving(true);
+    setError("");
+
+    try {
+      const response = await fetch(`/api/admin/jobs/${jobId}/invoice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_item",
+          itemId: line.id,
+          itemName: draft.itemName,
+          description: draft.description,
+          quantity: Number(draft.quantity),
+          unit: draft.unit,
+          unitPrice: draft.unitPrice === "" ? null : Number(draft.unitPrice),
+          taxRate: Number(draft.taxRate),
+          manuallyEdited: true,
+        }),
+      });
+
+      const result = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Unable to save invoice line.");
+      }
+
+      onSaved("Invoice line saved.");
+      window.location.reload();
+    } catch (saveError) {
+      setError(
+        saveError instanceof Error ? saveError.message : "Unable to save invoice line."
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }
+
+  async function resetFromSource() {
+    setIsResetting(true);
+    setError("");
+
+    try {
+      const response = await fetch(`/api/admin/jobs/${jobId}/invoice`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reset_from_source",
+          itemId: line.id,
+        }),
+      });
+
+      const result = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Unable to reset invoice line.");
+      }
+
+      onSaved("Invoice line reset from source.");
+      window.location.reload();
+    } catch (resetError) {
+      setError(
+        resetError instanceof Error ? resetError.message : "Unable to reset invoice line."
+      );
+    } finally {
+      setIsResetting(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Source: {line.sourceLabel}
+          </p>
+          {line.manually_edited ? (
+            <p className="mt-1 text-xs text-amber-700">Manually edited</p>
+          ) : null}
+        </div>
+        <p className="text-base font-semibold text-foreground">
+          {formatGbp(line.line_total)}
+        </p>
+      </div>
+
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor={`item-name-${line.id}`}>Item title</Label>
+          <Input
+            id={`item-name-${line.id}`}
+            value={draft.itemName}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, itemName: event.target.value }))
+            }
+          />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor={`description-${line.id}`}>Description</Label>
+          <Textarea
+            id={`description-${line.id}`}
+            value={draft.description}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, description: event.target.value }))
+            }
+            rows={6}
+            className="min-h-[9rem] resize-y"
+            placeholder="Full invoice description for Xero and customer-facing records"
+          />
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="space-y-2">
+            <Label htmlFor={`quantity-${line.id}`}>Quantity</Label>
+            <Input
+              id={`quantity-${line.id}`}
+              type="number"
+              min="0"
+              step="any"
+              value={draft.quantity}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, quantity: event.target.value }))
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={`unit-${line.id}`}>Unit</Label>
+            <Input
+              id={`unit-${line.id}`}
+              value={draft.unit}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, unit: event.target.value }))
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={`unit-price-${line.id}`}>Unit price</Label>
+            <Input
+              id={`unit-price-${line.id}`}
+              type="number"
+              min="0"
+              step="0.01"
+              value={draft.unitPrice}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, unitPrice: event.target.value }))
+              }
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={`tax-rate-${line.id}`}>VAT %</Label>
+            <Input
+              id={`tax-rate-${line.id}`}
+              type="number"
+              min="0"
+              step="0.1"
+              value={draft.taxRate}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, taxRate: event.target.value }))
+              }
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4 text-sm">
+        <p className="text-muted-foreground">
+          Pricing: {PRICING_SOURCE_LABELS[line.pricing_source]} ·{" "}
+          {MANIFEST_BILLING_STATUS_LABELS[line.billing_status]}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {line.canResetFromSource ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={isSaving || isResetting}
+              onClick={() => void resetFromSource()}
+            >
+              Reset from source
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            size="sm"
+            disabled={isSaving || isResetting || !draft.itemName.trim()}
+            onClick={() => void saveLine()}
+          >
+            {isSaving ? "Saving…" : "Save line"}
+          </Button>
+        </div>
+      </div>
+
+      {error ? <p className="mt-3 text-sm text-destructive">{error}</p> : null}
+    </div>
+  );
+}
+
 export function InvoiceReviewClient({
   jobId,
   jobReference,
@@ -35,43 +269,33 @@ export function InvoiceReviewClient({
   initialData,
   xeroPreview,
 }: InvoiceReviewClientProps) {
-  const [data, setData] = useState(initialData);
+  const [data] = useState(initialData);
   const [error, setError] = useState("");
-  const [busyItemId, setBusyItemId] = useState<string | null>(null);
+  const [success, setSuccess] = useState("");
   const [isApproving, setIsApproving] = useState(false);
 
-  async function updateLine(itemId: string, fields: Record<string, unknown>) {
-    setBusyItemId(itemId);
-    setError("");
-
-    try {
-      const response = await fetch(`/api/admin/jobs/${jobId}/invoice`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_item", itemId, ...fields }),
-      });
-
-      const result = (await response.json()) as { error?: string };
-
-      if (!response.ok) {
-        throw new Error(result.error ?? "Unable to update invoice line.");
-      }
-
-      window.location.reload();
-    } catch (updateError) {
-      setError(
-        updateError instanceof Error
-          ? updateError.message
-          : "Unable to update invoice line."
-      );
-    } finally {
-      setBusyItemId(null);
+  const previewFromDrafts = useMemo(() => {
+    if (data.schemaMissing || data.error) {
+      return xeroPreview;
     }
-  }
+
+    return {
+      ...xeroPreview,
+      lineItems: data.finalLines.map((line) => ({
+        itemName: line.item_name,
+        description: buildXeroLineDescription(line),
+        quantity: line.quantity,
+        unitAmount: line.unit_price ?? 0,
+        taxRate: line.tax_rate,
+        lineTotal: line.line_total,
+      })),
+    };
+  }, [data, xeroPreview]);
 
   async function approveDraft() {
     setIsApproving(true);
     setError("");
+    setSuccess("");
 
     try {
       const response = await fetch(`/api/admin/jobs/${jobId}/invoice`, {
@@ -101,7 +325,7 @@ export function InvoiceReviewClient({
   if (data.schemaMissing) {
     return (
       <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/50 p-6 text-sm text-amber-900">
-        Invoice draft tables are not configured yet. Apply the manifest and invoice migration in Supabase.
+        Invoice draft tables are not configured yet. Apply the manifest and invoice migrations in Supabase.
       </div>
     );
   }
@@ -142,6 +366,12 @@ export function InvoiceReviewClient({
           </p>
         ) : null}
 
+        {success ? (
+          <p className="rounded-lg border border-emerald-300/40 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            {success}
+          </p>
+        ) : null}
+
         {data.unpricedCount > 0 ? (
           <p className="rounded-lg border border-amber-300/50 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             {data.unpricedCount} billable item(s) still require pricing before approval.
@@ -155,14 +385,19 @@ export function InvoiceReviewClient({
               <p className="text-sm text-muted-foreground">No quoted manifest items.</p>
             ) : (
               data.quotedItems.map((item) => (
-                <div key={item.id} className="rounded-lg border border-border/70 p-3 text-sm">
+                <div key={item.id} className="rounded-lg border border-border/70 p-4 text-sm">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="font-medium">{item.item_name}</p>
                     <span className="text-xs text-muted-foreground">
                       {MANIFEST_SOURCE_TYPE_LABELS[item.source_type]}
                     </span>
                   </div>
-                  <p className="mt-1 text-muted-foreground">
+                  {item.description ? (
+                    <p className="mt-2 whitespace-pre-wrap text-muted-foreground">
+                      {item.description}
+                    </p>
+                  ) : null}
+                  <p className="mt-2 text-muted-foreground">
                     Qty {item.quoted_quantity ?? item.quantity ?? "—"} ·{" "}
                     {MANIFEST_BILLING_STATUS_LABELS[item.billing_status]}
                   </p>
@@ -181,7 +416,7 @@ export function InvoiceReviewClient({
               data.productionChanges.map((item) => (
                 <div
                   key={item.id}
-                  className="rounded-lg border border-[var(--candid-yellow)]/30 bg-yellow-50/20 p-3 text-sm"
+                  className="rounded-lg border border-[var(--candid-yellow)]/30 bg-yellow-50/20 p-4 text-sm"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <p className="font-medium">{item.item_name}</p>
@@ -189,7 +424,10 @@ export function InvoiceReviewClient({
                       {MANIFEST_SOURCE_TYPE_LABELS[item.source_type]}
                     </span>
                   </div>
-                  <p className="mt-1 text-muted-foreground">
+                  <p className="mt-2 whitespace-pre-wrap text-muted-foreground">
+                    {formatManifestPreviewDescription(item)}
+                  </p>
+                  <p className="mt-2 text-muted-foreground">
                     {MANIFEST_BILLING_STATUS_LABELS[item.billing_status]}
                     {item.customer_change_reason
                       ? ` · Cancelled: ${item.customer_change_reason}`
@@ -201,103 +439,37 @@ export function InvoiceReviewClient({
           </div>
         </section>
 
-        <section className="portal-surface rounded-xl border border-border bg-card p-6">
-          <h2 className="text-lg font-semibold">Final invoice lines</h2>
-          <div className="mt-4 space-y-4">
-            {data.finalLines.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No billable invoice lines yet.</p>
-            ) : (
-              data.finalLines.map((line) => (
-                <div key={line.id} className="rounded-lg border border-border p-4">
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2 md:col-span-2">
-                      <Label>Description</Label>
-                      <Input
-                        defaultValue={line.description}
-                        onBlur={(e) => {
-                          if (e.target.value !== line.description) {
-                            void updateLine(line.id, { description: e.target.value });
-                          }
-                        }}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Quantity</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="any"
-                        defaultValue={line.quantity}
-                        disabled={busyItemId === line.id}
-                        onBlur={(e) => {
-                          if (Number(e.target.value) !== line.quantity) {
-                            void updateLine(line.id, { quantity: Number(e.target.value) });
-                          }
-                        }}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Unit</Label>
-                      <Input
-                        defaultValue={line.unit ?? "each"}
-                        disabled={busyItemId === line.id}
-                        onBlur={(e) => {
-                          if (e.target.value !== (line.unit ?? "each")) {
-                            void updateLine(line.id, { unit: e.target.value });
-                          }
-                        }}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Unit price</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        defaultValue={line.unit_price ?? ""}
-                        disabled={busyItemId === line.id}
-                        onBlur={(e) => {
-                          const next =
-                            e.target.value === "" ? null : Number(e.target.value);
-                          if (next !== line.unit_price) {
-                            void updateLine(line.id, { unitPrice: next });
-                          }
-                        }}
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>VAT %</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        step="0.1"
-                        defaultValue={line.tax_rate}
-                        disabled={busyItemId === line.id}
-                        onBlur={(e) => {
-                          if (Number(e.target.value) !== line.tax_rate) {
-                            void updateLine(line.id, { taxRate: Number(e.target.value) });
-                          }
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-sm">
-                    <p className="text-muted-foreground">
-                      Source: {PRICING_SOURCE_LABELS[line.pricing_source]} ·{" "}
-                      {MANIFEST_BILLING_STATUS_LABELS[line.billing_status]}
-                    </p>
-                    <p className="font-medium">{formatGbp(line.line_total)}</p>
-                  </div>
-                </div>
-              ))
-            )}
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold">Final invoice lines</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Edit the title and full description for each billable line before approving or pushing to Xero.
+            </p>
           </div>
+
+          {data.finalLines.length === 0 ? (
+            <div className="portal-surface rounded-xl border border-dashed border-border bg-muted/20 p-6 text-sm text-muted-foreground">
+              No billable invoice lines yet.
+            </div>
+          ) : (
+            data.finalLines.map((line) => (
+              <InvoiceLineEditor
+                key={line.id}
+                jobId={jobId}
+                line={line}
+                onSaved={setSuccess}
+              />
+            ))
+          )}
         </section>
 
         <section className="portal-surface rounded-xl border border-dashed border-border bg-muted/20 p-6">
           <h2 className="text-lg font-semibold">Xero payload preview</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Line descriptions combine the saved title and full description.
+          </p>
           <pre className="mt-4 overflow-x-auto rounded-lg bg-muted/40 p-4 text-xs text-muted-foreground">
-            {JSON.stringify(xeroPreview, null, 2)}
+            {JSON.stringify(previewFromDrafts, null, 2)}
           </pre>
           <Button type="button" className="mt-4" disabled title="Xero integration is not configured yet.">
             Push to Xero
