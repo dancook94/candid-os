@@ -40,15 +40,31 @@ function formatMissingMessage(object: string): string {
   return `PrintFactory matching unavailable: ${object} is missing.`;
 }
 
+function serializeErrorField(value: unknown): string | null {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 function toQueryError(
   object: string,
-  error: { code?: string; message?: string; details?: string; hint?: string }
+  error: { code?: string; message?: string; details?: unknown; hint?: string }
 ): PrintfactorySchemaQueryError {
   return {
     object,
     code: error.code ?? null,
     message: error.message ?? "Unknown error.",
-    details: error.details ?? null,
+    details: serializeErrorField(error.details),
     hint: error.hint ?? null,
   };
 }
@@ -56,13 +72,13 @@ function toQueryError(
 export function toPrintfactoryDataQueryError(error: {
   code?: string;
   message?: string;
-  details?: string;
+  details?: unknown;
   hint?: string;
 }): PrintfactoryDataQueryError {
   return {
     code: error.code ?? null,
     message: error.message ?? "Unknown query error.",
-    details: error.details ?? null,
+    details: serializeErrorField(error.details),
     hint: error.hint ?? null,
   };
 }
@@ -120,12 +136,23 @@ function logSchemaReadinessDev(result: PrintfactorySchemaReadiness) {
     return;
   }
 
-  console.error("[printfactory schema readiness]", {
-    ready: result.ready,
-    missingTables: result.missingTables,
-    missingColumns: result.missingColumns,
-    queryErrors: result.queryErrors,
-  });
+  const payload = JSON.stringify(
+    {
+      ready: result.ready,
+      missingTables: result.missingTables,
+      missingColumns: result.missingColumns,
+      queryErrors: result.queryErrors,
+    },
+    null,
+    2
+  );
+
+  if (result.ready) {
+    console.info("[printfactory schema readiness]", payload);
+    return;
+  }
+
+  console.error("[printfactory schema readiness]", payload);
 }
 
 function logMatchingDataQueryDev(error: PrintfactoryDataQueryError) {
@@ -133,7 +160,10 @@ function logMatchingDataQueryDev(error: PrintfactoryDataQueryError) {
     return;
   }
 
-  console.error("[printfactory matching data query]", error);
+  console.error(
+    "[printfactory matching data query]",
+    JSON.stringify(error, null, 2)
+  );
 }
 
 export { logMatchingDataQueryDev };
