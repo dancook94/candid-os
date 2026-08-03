@@ -170,6 +170,15 @@ export async function checkPrintfactorySchemaReadiness(
     return linkTable;
   }
 
+  const mappingRulesTable = await probeTable(
+    adminClient,
+    "printfactory_mapping_rules"
+  );
+
+  if (mappingRulesTable) {
+    return mappingRulesTable;
+  }
+
   return {
     ready: true,
     missingObject: null,

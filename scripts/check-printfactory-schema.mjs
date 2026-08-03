@@ -65,6 +65,7 @@ async function probeColumn(column) {
 
 const jobsTableError = await probeTable("printfactory_jobs");
 const linkTableError = await probeTable("printfactory_job_manifest_items");
+const mappingRulesTableError = await probeTable("printfactory_mapping_rules");
 
 const columnErrors = {};
 for (const column of REQUIRED_COLUMNS) {
@@ -77,6 +78,7 @@ console.log(
     {
       printfactory_jobs: jobsTableError?.message ?? "ok",
       printfactory_job_manifest_items: linkTableError?.message ?? "ok",
+      printfactory_mapping_rules: mappingRulesTableError?.message ?? "ok",
       columnErrors,
     },
     null,
