@@ -24,12 +24,16 @@ export type ItemMatchSuggestion = {
   confidence: number;
   confidenceLevel: MatchConfidenceLevel;
   matchMethod: string;
+  reason: string;
+  reasons: string[];
+  oneClickConfirm: boolean;
 };
 
 export type PrintfactoryItemMatchInput = {
   source_file_path: string | null;
   source_file_name: string | null;
   job_name: string | null;
+  document_name?: string | null;
   media_type: string | null;
 };
 
@@ -99,11 +103,13 @@ export function suggestManifestItemMatches(
     printfactoryInput.source_file_path,
     printfactoryInput.source_file_name,
     printfactoryInput.job_name,
+    printfactoryInput.document_name,
     extractFilenameFromPath(printfactoryInput.source_file_path ?? ""),
   ].filter(Boolean) as string[];
 
   const filename =
     printfactoryInput.source_file_name ??
+    printfactoryInput.document_name ??
     extractFilenameFromPath(printfactoryInput.source_file_path ?? "") ??
     "";
 
@@ -112,14 +118,16 @@ export function suggestManifestItemMatches(
   for (const item of activeItems) {
     let score = 0;
     let matchMethod = "filename_similarity";
+    const reasons: string[] = [];
 
     for (const text of searchTexts) {
       const extractedRef = extractItemReferenceFromText(text);
 
       if (extractedRef && item.item_reference) {
         if (extractedRef.toUpperCase() === item.item_reference.toUpperCase()) {
-          score = Math.max(score, 1);
+          score = 1;
           matchMethod = "exact_item_reference";
+          reasons.push(`Exact item reference ${extractedRef} found in ${text === filename ? "filename" : "PrintFactory text"}`);
           break;
         }
       }
@@ -132,9 +140,10 @@ export function suggestManifestItemMatches(
         : 0;
       const filenameScore = Math.max(titleScore, descriptionScore);
 
-      if (filenameScore > 0) {
+      if (filenameScore >= 0.5) {
         score = Math.max(score, filenameScore * 0.75);
         matchMethod = "filename_similarity";
+        reasons.push(`Filename similar to item title "${item.item_name}"`);
       }
     }
 
@@ -148,6 +157,23 @@ export function suggestManifestItemMatches(
     ) {
       score = Math.max(score, 0.65);
       matchMethod = "material_match";
+      reasons.push(`Same material: ${item.material}`);
+    }
+
+    if (
+      item.width_mm &&
+      item.height_mm &&
+      filename &&
+      new RegExp(
+        `${item.width_mm}\\s*[x×]\\s*${item.height_mm}|${item.height_mm}\\s*[x×]\\s*${item.width_mm}`,
+        "i"
+      ).test(filename)
+    ) {
+      score = Math.max(score, 0.7);
+      matchMethod = "dimension_match";
+      reasons.push(
+        `Dimensions ${item.width_mm}×${item.height_mm} mm match filename`
+      );
     }
 
     for (const pattern of priorConfirmedPatterns) {
@@ -158,6 +184,7 @@ export function suggestManifestItemMatches(
       ) {
         score = Math.max(score, 0.9);
         matchMethod = "prior_confirmed_mapping";
+        reasons.push("Previously confirmed filename pattern");
       }
     }
 
@@ -169,9 +196,20 @@ export function suggestManifestItemMatches(
         confidence: Number(score.toFixed(2)),
         confidenceLevel: confidenceLevel(score),
         matchMethod,
+        reason: reasons[0] ?? "Possible manifest item match",
+        reasons: [...new Set(reasons)],
+        oneClickConfirm: matchMethod === "exact_item_reference" && score >= 1,
       });
     }
   }
 
   return suggestions.sort((left, right) => right.confidence - left.confidence);
+}
+
+export function hasAmbiguousItemSuggestions(suggestions: ItemMatchSuggestion[]) {
+  const highConfidence = suggestions.filter(
+    (suggestion) => suggestion.confidenceLevel === "high"
+  );
+
+  return highConfidence.length > 1;
 }

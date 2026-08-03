@@ -5,7 +5,10 @@ import { verifyApprovedCrmStaff } from "@/lib/crm-auth";
 import {
   manuallyMatchPrintfactoryJob,
   ignorePrintfactoryJob,
+  confirmSuggestedJobMatch,
+  clearAutomaticJobMatch,
 } from "@/lib/printfactory/job-matching";
+import { rematchPrintfactoryJob } from "@/lib/printfactory/matching-service";
 import {
   confirmPrintfactoryItemLink,
 } from "@/lib/printfactory/readiness-service";
@@ -65,7 +68,58 @@ export async function POST(
         );
 
         revalidatePath("/admin/production/printfactory-unmatched");
+        revalidatePath("/admin/production");
         return NextResponse.json({ ok: true, row });
+      }
+
+      case "confirm_suggested_job": {
+        const { data: pfJob, error: loadError } = await adminClient
+          .from("printfactory_jobs")
+          .select("suggested_candid_job_id")
+          .eq("id", printfactoryJobId)
+          .maybeSingle();
+
+        if (loadError) {
+          throw loadError;
+        }
+
+        const suggestedId =
+          body.candidJobId ?? (pfJob?.suggested_candid_job_id as string | null);
+
+        if (!suggestedId) {
+          return NextResponse.json(
+            { error: "No suggested Candid job to confirm." },
+            { status: 400 }
+          );
+        }
+
+        const row = await confirmSuggestedJobMatch(
+          adminClient,
+          printfactoryJobId,
+          suggestedId,
+          auth.userId
+        );
+
+        revalidatePath("/admin/production/printfactory-unmatched");
+        revalidatePath("/admin/production");
+        return NextResponse.json({ ok: true, row });
+      }
+
+      case "clear_auto_match": {
+        const row = await clearAutomaticJobMatch(adminClient, printfactoryJobId);
+        revalidatePath("/admin/production/printfactory-unmatched");
+        return NextResponse.json({ ok: true, row });
+      }
+
+      case "rematch": {
+        const result = await rematchPrintfactoryJob(
+          adminClient,
+          printfactoryJobId,
+          auth.userId
+        );
+        revalidatePath("/admin/production/printfactory-unmatched");
+        revalidatePath("/admin/production");
+        return NextResponse.json({ ok: true, ...result });
       }
 
       case "confirm_item": {

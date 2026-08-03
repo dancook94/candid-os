@@ -30,6 +30,7 @@ export type JobProductionBoardCard = {
   readiness_active: number;
   readiness_is_ready: boolean;
   ripped_requirements_count: number;
+  files_detected_count: number;
   dropbox_folder_path: string | null;
   dropbox_setup_status: string;
   opportunity_id: string | null;
@@ -130,6 +131,29 @@ export async function fetchJobProductionBoard(
     itemsByJob.set(jobId, existing);
   }
 
+  const { data: printfactoryCounts, error: pfCountError } = jobIds.length
+    ? await adminClient
+        .from("printfactory_jobs")
+        .select("candid_job_id")
+        .in("candid_job_id", jobIds)
+        .in("job_match_status", ["matched_automatically", "matched_manually"])
+    : { data: [], error: null };
+
+  if (pfCountError && pfCountError.code !== "42P01") {
+    return {
+      data: null,
+      queryError: "query_failed" as const,
+      detail: pfCountError.message,
+    };
+  }
+
+  const filesDetectedByJob = new Map<string, number>();
+
+  for (const row of printfactoryCounts ?? []) {
+    const jobId = row.candid_job_id as string;
+    filesDetectedByJob.set(jobId, (filesDetectedByJob.get(jobId) ?? 0) + 1);
+  }
+
   const searchTerm = filters.search.toLowerCase();
 
   const cards: JobProductionBoardCard[] = jobRows
@@ -174,6 +198,7 @@ export async function fetchJobProductionBoard(
         readiness_active: readiness.activeRequiredCount,
         readiness_is_ready: readiness.isReady,
         ripped_requirements_count: rippedCount,
+        files_detected_count: filesDetectedByJob.get(job.id as string) ?? 0,
         dropbox_folder_path: job.dropbox_folder_path as string | null,
         dropbox_setup_status: job.dropbox_setup_status as string,
         opportunity_id: job.opportunity_id as string | null,

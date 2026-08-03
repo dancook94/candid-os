@@ -10,32 +10,44 @@ import {
   PRINTFACTORY_JOB_SELECT,
 } from "@/lib/printfactory/constants";
 import { PrintfactoryError, isMissingPrintfactorySchemaError } from "@/lib/printfactory/errors";
-import {
-  logPrintfactoryActivity,
-} from "@/lib/printfactory/activity";
+import { logPrintfactoryActivity } from "@/lib/printfactory/activity";
 import {
   matchPrintfactoryJobToCandidJob,
   shouldPreserveExistingJobMatch,
 } from "@/lib/printfactory/job-matching";
 import {
-  suggestManifestItemMatches,
-  type ManifestItemMatchCandidate,
-} from "@/lib/printfactory/item-matching";
-import { MANIFEST_ITEM_SELECT } from "@/lib/manifest/constants";
+  countPrintfactoryRecordsByTab,
+  filterPrintfactoryRecordsByTab,
+  type ExceptionQueueTab,
+} from "@/lib/printfactory/matching-queue";
+import { createItemSuggestionsForJob } from "@/lib/printfactory/matching-service";
 import { refreshJobProductionReadiness } from "@/lib/printfactory/readiness-service";
 
 export type PrintfactorySyncResult = {
   ok: boolean;
   imported: number;
   updated: number;
+  parentJobsAutoMatched: number;
+  parentJobSuggestions: number;
+  itemSuggestions: number;
+  confirmedLinks: number;
+  needsAttention: number;
+  ignored: number;
+  errors: number;
+  /** @deprecated use parentJobsAutoMatched */
   matched: number;
+  /** @deprecated use needsAttention */
   unmatched: number;
+  /** @deprecated use parentJobSuggestions */
   suggested: number;
+  /** @deprecated use errors */
   failed: number;
+  /** @deprecated use itemSuggestions */
   itemSuggestionsCreated: number;
   error: string | null;
   errorCode: string | null;
   connectionStatus: ReturnType<typeof getPrintfactoryConnectionStatus>;
+  summaryMessage: string | null;
 };
 
 type ExistingPrintfactoryRow = {
@@ -81,6 +93,7 @@ async function upsertPrintfactoryJob(
     job_name: apiJob.name,
     source_file_path: apiJob.sourceFilePath,
     source_file_name: apiJob.sourceFileName,
+    document_name: apiJob.documentName,
     device: apiJob.device,
     media_type: apiJob.mediaType,
     producer: apiJob.producer,
@@ -88,6 +101,7 @@ async function upsertPrintfactoryJob(
     progress: apiJob.progress,
     created_at_printfactory: apiJob.createdAt,
     updated_at_printfactory: apiJob.updatedAt,
+    raw_metadata: apiJob.rawMetadata ?? null,
     last_seen_at: now,
   };
 
@@ -133,19 +147,23 @@ async function applyJobMatchingIfNeeded(
   }
 
   const match = await matchPrintfactoryJobToCandidJob(adminClient, {
-    source_file_path: row.source_file_path as string | null,
-    job_name: row.job_name as string | null,
-    source_file_name: row.source_file_name as string | null,
+    sourceFilePath: row.source_file_path as string | null,
+    sourceFileName: row.source_file_name as string | null,
+    jobName: row.job_name as string | null,
+    documentName: row.document_name as string | null,
   });
 
   const { data, error } = await adminClient
     .from("printfactory_jobs")
     .update({
       candid_job_id: match.candidJobId,
+      suggested_candid_job_id: match.suggestedCandidJobId,
       job_match_status: match.jobMatchStatus,
       job_match_method: match.jobMatchMethod,
       job_match_confidence: match.jobMatchConfidence,
       extracted_job_reference: match.extractedJobReference,
+      match_suggestion_reason: match.matchSuggestionReason,
+      match_suggestion_details: match.matchSuggestionDetails,
     })
     .eq("id", row.id)
     .select("*")
@@ -158,95 +176,37 @@ async function applyJobMatchingIfNeeded(
   return data;
 }
 
-async function createItemSuggestionsForJob(
-  adminClient: SupabaseClient,
-  printfactoryJob: Record<string, unknown>
-) {
-  const candidJobId = printfactoryJob.candid_job_id as string | null;
-  const printfactoryJobId = printfactoryJob.id as string;
+function buildSyncSummaryMessage(stats: {
+  imported: number;
+  updated: number;
+  parentJobsAutoMatched: number;
+  parentJobSuggestions: number;
+  needsAttention: number;
+}) {
+  const total = stats.imported + stats.updated;
 
-  if (!candidJobId) {
-    return 0;
+  if (total === 0) {
+    return "No PrintFactory jobs returned from sync.";
   }
 
-  const matchStatus = printfactoryJob.job_match_status as string;
+  const parts = [
+    `Synced ${total} job${total === 1 ? "" : "s"}`,
+    `${stats.parentJobsAutoMatched} parent job${stats.parentJobsAutoMatched === 1 ? "" : "s"} matched automatically`,
+  ];
 
-  if (matchStatus === "ignored" || matchStatus === "unmatched" || matchStatus === "conflict") {
-    return 0;
+  if (stats.parentJobSuggestions > 0) {
+    parts.push(
+      `${stats.parentJobSuggestions} suggested match${stats.parentJobSuggestions === 1 ? "" : "es"}`
+    );
   }
 
-  const { data: manifestItems, error: manifestError } = await adminClient
-    .from("production_items")
-    .select(MANIFEST_ITEM_SELECT)
-    .eq("job_id", candidJobId)
-    .is("deleted_at", null);
-
-  if (manifestError) {
-    throw manifestError;
+  if (stats.needsAttention > 0) {
+    parts.push(
+      `${stats.needsAttention} need${stats.needsAttention === 1 ? "s" : ""} attention`
+    );
   }
 
-  const { data: confirmedLinks, error: linksError } = await adminClient
-    .from("printfactory_job_manifest_items")
-    .select("production_item_id, printfactory_jobs!inner(source_file_name)")
-    .eq("link_status", "confirmed");
-
-  if (linksError && linksError.code !== "42P01") {
-    throw linksError;
-  }
-
-  const priorPatterns = (confirmedLinks ?? []).map((link) => ({
-    productionItemId: link.production_item_id as string,
-    filenamePattern:
-      ((link.printfactory_jobs as { source_file_name?: string | null })
-        ?.source_file_name ?? "") || "",
-  }));
-
-  const suggestions = suggestManifestItemMatches(
-    {
-      source_file_path: printfactoryJob.source_file_path as string | null,
-      source_file_name: printfactoryJob.source_file_name as string | null,
-      job_name: printfactoryJob.job_name as string | null,
-      media_type: printfactoryJob.media_type as string | null,
-    },
-    (manifestItems ?? []) as ManifestItemMatchCandidate[],
-    priorPatterns
-  );
-
-  let created = 0;
-
-  for (const suggestion of suggestions.slice(0, 5)) {
-    const { data: existingLink } = await adminClient
-      .from("printfactory_job_manifest_items")
-      .select("id, link_status")
-      .eq("printfactory_job_id", printfactoryJobId)
-      .eq("production_item_id", suggestion.productionItemId)
-      .maybeSingle();
-
-    if (existingLink?.link_status === "confirmed") {
-      continue;
-    }
-
-    const { error } = await adminClient
-      .from("printfactory_job_manifest_items")
-      .upsert(
-        {
-          printfactory_job_id: printfactoryJobId,
-          production_item_id: suggestion.productionItemId,
-          link_status: "suggested",
-          match_method: suggestion.matchMethod,
-          match_confidence: suggestion.confidence,
-        },
-        { onConflict: "printfactory_job_id,production_item_id" }
-      );
-
-    if (error) {
-      throw error;
-    }
-
-    created += 1;
-  }
-
-  return created;
+  return `${parts[0]}: ${parts.slice(1).join(", ")}.`;
 }
 
 export async function syncPrintfactoryJobs(
@@ -261,6 +221,13 @@ export async function syncPrintfactoryJobs(
     ok: false,
     imported: 0,
     updated: 0,
+    parentJobsAutoMatched: 0,
+    parentJobSuggestions: 0,
+    itemSuggestions: 0,
+    confirmedLinks: 0,
+    needsAttention: 0,
+    ignored: 0,
+    errors: 0,
     matched: 0,
     unmatched: 0,
     suggested: 0,
@@ -269,6 +236,7 @@ export async function syncPrintfactoryJobs(
     error: null,
     errorCode: null,
     connectionStatus,
+    summaryMessage: null,
     ...partial,
   });
 
@@ -302,17 +270,17 @@ export async function syncPrintfactoryJobs(
       ok: true,
       error: "PrintFactory API returned no jobs.",
       errorCode: "no_jobs",
+      summaryMessage: "PrintFactory API returned no jobs in the sync window.",
     });
   }
 
   const now = new Date().toISOString();
   let imported = 0;
   let updated = 0;
-  let matched = 0;
-  let unmatched = 0;
-  let suggested = 0;
-  let failed = 0;
-  let itemSuggestionsCreated = 0;
+  let parentJobsAutoMatched = 0;
+  let parentJobSuggestions = 0;
+  let itemSuggestions = 0;
+  let errors = 0;
 
   try {
     const existingByGuid = await loadExistingByGuid(
@@ -339,18 +307,13 @@ export async function syncPrintfactoryJobs(
         const matchedRow = await applyJobMatchingIfNeeded(adminClient, row);
         const status = matchedRow.job_match_status as string;
 
-        if (
-          status === "matched_automatically" ||
-          status === "matched_manually"
-        ) {
-          matched += 1;
+        if (status === "matched_automatically" || status === "matched_manually") {
+          parentJobsAutoMatched += 1;
         } else if (status === "suggested") {
-          suggested += 1;
-        } else if (status === "unmatched" || status === "conflict") {
-          unmatched += 1;
+          parentJobSuggestions += 1;
         }
 
-        itemSuggestionsCreated += await createItemSuggestionsForJob(
+        itemSuggestions += await createItemSuggestionsForJob(
           adminClient,
           matchedRow as Record<string, unknown>
         );
@@ -361,7 +324,7 @@ export async function syncPrintfactoryJobs(
           await refreshJobProductionReadiness(adminClient, candidJobId, actorProfileId);
         }
       } catch (jobError) {
-        failed += 1;
+        errors += 1;
 
         if (process.env.NODE_ENV === "development") {
           console.error("[printfactory-sync]", apiJob.guid, jobError);
@@ -369,18 +332,45 @@ export async function syncPrintfactoryJobs(
       }
     }
 
+    const { data: allRecords } = await adminClient
+      .from("printfactory_jobs")
+      .select(`
+        id,
+        job_match_status,
+        candid_job_id,
+        suggested_candid_job_id,
+        match_suggestion_reason,
+        printfactory_job_manifest_items(link_status, match_confidence, suggestion_reason)
+      `);
+
+    const tabCounts = countPrintfactoryRecordsByTab(allRecords ?? []);
+    const { count: confirmedLinksCount } = await adminClient
+      .from("printfactory_job_manifest_items")
+      .select("id", { count: "exact", head: true })
+      .eq("link_status", "confirmed");
+
+    const summaryMessage = buildSyncSummaryMessage({
+      imported,
+      updated,
+      parentJobsAutoMatched,
+      parentJobSuggestions,
+      needsAttention: tabCounts.needs_attention,
+    });
+
     await logPrintfactoryActivity(adminClient, {
       activityType: PRINTFACTORY_ACTIVITY_TYPES.syncCompleted,
-      description: `PrintFactory sync completed: ${imported} imported, ${updated} updated, ${matched} matched.`,
+      description: summaryMessage,
       actorProfileId,
       metadata: {
         imported,
         updated,
-        matched,
-        unmatched,
-        suggested,
-        failed,
-        itemSuggestionsCreated,
+        parentJobsAutoMatched,
+        parentJobSuggestions,
+        itemSuggestions,
+        confirmedLinks: confirmedLinksCount ?? 0,
+        needsAttention: tabCounts.needs_attention,
+        ignored: tabCounts.ignored,
+        errors,
       },
     });
 
@@ -388,20 +378,28 @@ export async function syncPrintfactoryJobs(
       ok: true,
       imported,
       updated,
-      matched,
-      unmatched,
-      suggested,
-      failed,
-      itemSuggestionsCreated,
+      parentJobsAutoMatched,
+      parentJobSuggestions,
+      itemSuggestions,
+      confirmedLinks: confirmedLinksCount ?? 0,
+      needsAttention: tabCounts.needs_attention,
+      ignored: tabCounts.ignored,
+      errors,
+      matched: parentJobsAutoMatched,
+      unmatched: tabCounts.needs_attention,
+      suggested: parentJobSuggestions,
+      failed: errors,
+      itemSuggestionsCreated: itemSuggestions,
       error: null,
       errorCode: null,
       connectionStatus,
+      summaryMessage,
     };
   } catch (error) {
     if (isMissingPrintfactorySchemaError(error as { message?: string; code?: string })) {
       return emptyResult({
         error:
-          "PrintFactory tables are missing. Apply supabase/migrations/20260803220000_printfactory_production_board_phase2.sql",
+          "PrintFactory tables are missing. Apply supabase/migrations/20260803220000_printfactory_production_board_phase2.sql and 20260803230000_printfactory_matching_enhancements.sql",
         errorCode: "migration_required",
       });
     }
@@ -415,51 +413,33 @@ export async function syncPrintfactoryJobs(
 
 export async function loadPrintfactoryMatchingRecords(
   adminClient: SupabaseClient,
-  tab: "needs_job_match" | "needs_item_match" | "confirmed" | "ignored"
+  tab: ExceptionQueueTab
 ) {
-  let query = adminClient.from("printfactory_jobs").select(`
+  const { data, error } = await adminClient
+    .from("printfactory_jobs")
+    .select(`
     ${PRINTFACTORY_JOB_SELECT},
     jobs(id, job_reference, project_name, company_id, companies(company_name)),
     printfactory_job_manifest_items(
-      ${"id, production_item_id, link_status, match_method, match_confidence, confirmed_at, production_items(id, item_reference, item_name)"}
+      id, production_item_id, link_status, match_method, match_confidence,
+      suggestion_reason, suggestion_details, confirmed_at,
+      production_items(id, item_reference, item_name)
     )
-  `);
-
-  switch (tab) {
-    case "needs_job_match":
-      query = query.in("job_match_status", ["unmatched", "suggested", "conflict"]);
-      break;
-    case "needs_item_match":
-      query = query
-        .in("job_match_status", [
-          "matched_automatically",
-          "matched_manually",
-          "suggested",
-        ])
-        .is("ignored_at", null);
-      break;
-    case "confirmed":
-      query = query.in("job_match_status", [
-        "matched_automatically",
-        "matched_manually",
-      ]);
-      break;
-    case "ignored":
-      query = query.eq("job_match_status", "ignored");
-      break;
-  }
-
-  const { data, error } = await query
+  `)
     .order("last_seen_at", { ascending: false })
-    .limit(200);
+    .limit(500);
 
   if (error) {
     if (isMissingPrintfactorySchemaError(error)) {
-      return { records: [], schemaMissing: true as const };
+      return { records: [], schemaMissing: true as const, tabCounts: null };
     }
 
     throw error;
   }
 
-  return { records: data ?? [], schemaMissing: false as const };
+  const allRecords = data ?? [];
+  const tabCounts = countPrintfactoryRecordsByTab(allRecords);
+  const records = filterPrintfactoryRecordsByTab(allRecords, tab);
+
+  return { records, schemaMissing: false as const, tabCounts };
 }

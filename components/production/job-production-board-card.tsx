@@ -79,7 +79,13 @@ export function JobProductionBoardCardView({
         <p>
           Production readiness: {card.readiness_label}
         </p>
-        <p>Ripped requirements: {card.ripped_requirements_count}</p>
+        <p>
+          Ripped requirements: {card.ripped_requirements_count} of{" "}
+          {card.readiness_active}
+        </p>
+        {card.files_detected_count > 0 ? (
+          <p>Files detected: {card.files_detected_count}</p>
+        ) : null}
         <p>
           Dropbox: {card.dropbox_setup_status}
           {card.dropbox_folder_path ? " · linked" : ""}

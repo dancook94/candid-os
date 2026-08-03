@@ -11,12 +11,7 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { formatCrmDateTime } from "@/lib/crm/format-datetime";
 import type { PrintfactoryConnectionStatus } from "@/lib/printfactory/client";
-
-type MatchingTab =
-  | "needs_job_match"
-  | "needs_item_match"
-  | "confirmed"
-  | "ignored";
+import type { ExceptionQueueTab } from "@/lib/printfactory/matching-queue";
 
 type MatchingRecord = {
   id: string;
@@ -24,6 +19,7 @@ type MatchingRecord = {
   job_name: string | null;
   source_file_name: string | null;
   source_file_path: string | null;
+  document_name?: string | null;
   device: string | null;
   media_type: string | null;
   printfactory_status: string | null;
@@ -31,6 +27,14 @@ type MatchingRecord = {
   job_match_status: string;
   job_match_confidence: number | null;
   extracted_job_reference: string | null;
+  suggested_candid_job_id?: string | null;
+  match_suggestion_reason?: string | null;
+  match_suggestion_details?: {
+    confidenceLevel?: string;
+    jobReference?: string;
+    projectName?: string;
+    reasons?: string[];
+  } | null;
   jobs?: {
     id: string;
     job_reference: string;
@@ -41,6 +45,9 @@ type MatchingRecord = {
     id: string;
     link_status: string;
     match_confidence: number | null;
+    match_method?: string | null;
+    suggestion_reason?: string | null;
+    suggestion_details?: { reasons?: string[] } | null;
     production_items?: {
       id: string;
       item_reference: string | null;
@@ -50,33 +57,31 @@ type MatchingRecord = {
 };
 
 type PrintfactoryMatchingClientProps = {
-  initialTab: MatchingTab;
+  initialTab: ExceptionQueueTab;
   records: MatchingRecord[];
+  tabCounts: Record<ExceptionQueueTab, number> | null;
   schemaMissing: boolean;
   jobFilter?: string;
   connectionStatus: PrintfactoryConnectionStatus;
-};
-
-const TAB_LABELS: Record<MatchingTab, string> = {
-  needs_job_match: "Needs job match",
-  needs_item_match: "Needs item match",
-  confirmed: "Confirmed",
-  ignored: "Ignored",
+  tabLabels: Record<ExceptionQueueTab, string>;
 };
 
 export function PrintfactoryMatchingClient({
   initialTab,
   records,
+  tabCounts,
   schemaMissing,
   jobFilter,
   connectionStatus,
+  tabLabels,
 }: PrintfactoryMatchingClientProps) {
   const router = useRouter();
-  const [tab, setTab] = useState<MatchingTab>(initialTab);
+  const [tab, setTab] = useState<ExceptionQueueTab>(initialTab);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [syncMessage, setSyncMessage] = useState("");
   const [syncError, setSyncError] = useState("");
   const [actionError, setActionError] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const connection = connectionStatus;
 
   const filteredRecords = useMemo(() => {
@@ -89,9 +94,27 @@ export function PrintfactoryMatchingClient({
     return records.filter((record) => {
       const jobRef = record.jobs?.job_reference?.toLowerCase() ?? "";
       const extracted = record.extracted_job_reference?.toLowerCase() ?? "";
-      return jobRef.includes(term) || extracted.includes(term);
+      const suggestedRef =
+        record.match_suggestion_details?.jobReference?.toLowerCase() ?? "";
+      return (
+        jobRef.includes(term) ||
+        extracted.includes(term) ||
+        suggestedRef.includes(term)
+      );
     });
   }, [records, jobFilter]);
+
+  function toggleSelected(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }
 
   async function runSync() {
     setSyncError("");
@@ -105,19 +128,14 @@ export function PrintfactoryMatchingClient({
       const payload = (await response.json()) as {
         ok?: boolean;
         error?: string;
-        imported?: number;
-        updated?: number;
-        matched?: number;
-        unmatched?: number;
+        summaryMessage?: string;
       };
 
       if (!response.ok) {
         throw new Error(payload.error ?? "Sync failed.");
       }
 
-      setSyncMessage(
-        `Synced: ${payload.imported ?? 0} imported, ${payload.updated ?? 0} updated, ${payload.matched ?? 0} matched, ${payload.unmatched ?? 0} unmatched.`
-      );
+      setSyncMessage(payload.summaryMessage ?? "Sync completed.");
       router.refresh();
     } catch (error) {
       setSyncError(error instanceof Error ? error.message : "Sync failed.");
@@ -153,6 +171,49 @@ export function PrintfactoryMatchingClient({
     }
   }
 
+  async function runBulkAction(
+    action: string,
+    extra: Record<string, unknown> = {}
+  ) {
+    if (
+      !window.confirm(
+        "Apply this bulk action to the selected PrintFactory records?"
+      )
+    ) {
+      return;
+    }
+
+    setActionError("");
+    setBusyId("bulk");
+
+    try {
+      const response = await fetch("/api/admin/printfactory/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          confirm: true,
+          printfactoryJobIds: [...selectedIds],
+          ...extra,
+        }),
+      });
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Bulk action failed.");
+      }
+
+      setSelectedIds(new Set());
+      router.refresh();
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Bulk action failed."
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   if (schemaMissing) {
     return (
       <Card className="portal-surface border-amber-300">
@@ -160,6 +221,10 @@ export function PrintfactoryMatchingClient({
           Apply{" "}
           <code className="text-xs">
             supabase/migrations/20260803220000_printfactory_production_board_phase2.sql
+          </code>{" "}
+          and{" "}
+          <code className="text-xs">
+            supabase/migrations/20260803230000_printfactory_matching_enhancements.sql
           </code>{" "}
           before using PrintFactory matching.
         </CardContent>
@@ -210,7 +275,7 @@ export function PrintfactoryMatchingClient({
       ) : null}
 
       <div className="flex flex-wrap gap-2">
-        {(Object.keys(TAB_LABELS) as MatchingTab[]).map((value) => (
+        {(Object.keys(tabLabels) as ExceptionQueueTab[]).map((value) => (
           <Button
             key={value}
             type="button"
@@ -221,10 +286,64 @@ export function PrintfactoryMatchingClient({
               router.push(`/admin/production/printfactory-unmatched?tab=${value}`);
             }}
           >
-            {TAB_LABELS[value]}
+            {tabLabels[value]}
+            {tabCounts ? ` (${tabCounts[value]})` : ""}
           </Button>
         ))}
       </div>
+
+      {selectedIds.size > 0 ? (
+        <Card className="portal-surface">
+          <CardContent className="flex flex-wrap items-center gap-2 pt-6">
+            <span className="text-sm text-muted-foreground">
+              {selectedIds.size} selected
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busyId === "bulk"}
+              onClick={() => void runBulkAction("rematch")}
+            >
+              Re-run matching
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busyId === "bulk"}
+              onClick={() => void runBulkAction("ignore_historical")}
+            >
+              Ignore as historical
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busyId === "bulk"}
+              onClick={() => void runBulkAction("clear_automatic_matches")}
+            >
+              Clear automatic matches
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {tab === "suggested_matches" ? (
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={busyId === "bulk"}
+            onClick={() =>
+              void runBulkAction("confirm_high_confidence_suggestions")
+            }
+          >
+            Confirm all high-confidence suggestions
+          </Button>
+        </div>
+      ) : null}
 
       {filteredRecords.length === 0 ? (
         <Card className="portal-surface">
@@ -239,6 +358,8 @@ export function PrintfactoryMatchingClient({
             record={record}
             tab={tab}
             busy={busyId === record.id}
+            selected={selectedIds.has(record.id)}
+            onToggleSelected={() => toggleSelected(record.id)}
             onAction={(body) => void runAction(record.id, body)}
           />
         ))
@@ -251,11 +372,15 @@ function PrintfactoryRecordCard({
   record,
   tab,
   busy,
+  selected,
+  onToggleSelected,
   onAction,
 }: {
   record: MatchingRecord;
-  tab: MatchingTab;
+  tab: ExceptionQueueTab;
   busy: boolean;
+  selected: boolean;
+  onToggleSelected: () => void;
   onAction: (body: Record<string, unknown>) => void;
 }) {
   const [candidJobId, setCandidJobId] = useState("");
@@ -266,12 +391,30 @@ function PrintfactoryRecordCard({
     (link) => link.link_status === "suggested"
   );
 
+  const suggestionDetails = record.match_suggestion_details;
+  const hasJobSuggestion =
+    record.job_match_status === "suggested" && record.suggested_candid_job_id;
+
   return (
     <Card className="portal-surface">
-      <CardHeader>
-        <CardTitle className="text-base">
-          {record.job_name ?? record.source_file_name ?? "Unnamed PrintFactory job"}
-        </CardTitle>
+      <CardHeader className="flex flex-row items-start justify-between gap-4">
+        <div className="space-y-1">
+          <CardTitle className="text-base">
+            {record.job_name ?? record.source_file_name ?? "Unnamed PrintFactory job"}
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Status: {record.job_match_status.replace(/_/g, " ")}
+          </p>
+        </div>
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={onToggleSelected}
+            className="h-4 w-4 rounded border-border"
+          />
+          Select
+        </label>
       </CardHeader>
       <CardContent className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2 text-sm text-muted-foreground">
@@ -281,7 +424,7 @@ function PrintfactoryRecordCard({
           </p>
           <p>
             <span className="font-medium text-foreground">Filename:</span>{" "}
-            {record.source_file_name ?? "—"}
+            {record.source_file_name ?? record.document_name ?? "—"}
           </p>
           <p className="break-all">
             <span className="font-medium text-foreground">Source path:</span>{" "}
@@ -292,7 +435,7 @@ function PrintfactoryRecordCard({
             {record.device ?? "—"} · {record.media_type ?? "—"}
           </p>
           <p>
-            <span className="font-medium text-foreground">Status:</span>{" "}
+            <span className="font-medium text-foreground">PrintFactory status:</span>{" "}
             {record.printfactory_status ?? "—"}
           </p>
           <p>
@@ -308,14 +451,59 @@ function PrintfactoryRecordCard({
         </div>
 
         <div className="space-y-4">
-          {tab === "needs_job_match" ? (
+          {hasJobSuggestion ? (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-3 text-sm">
+              <p className="font-medium text-foreground">Suggested job</p>
+              <p>
+                {suggestionDetails?.jobReference ?? "—"} —{" "}
+                {suggestionDetails?.projectName ?? "Unknown project"}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Confidence:{" "}
+                {suggestionDetails?.confidenceLevel ?? "medium"}
+              </p>
+              <p className="mt-1 text-xs">
+                Reason: {record.match_suggestion_reason ?? "Title similarity"}
+              </p>
+              {(suggestionDetails?.reasons ?? []).length > 1 ? (
+                <ul className="mt-1 list-inside list-disc text-xs text-muted-foreground">
+                  {(suggestionDetails?.reasons ?? []).map((reason) => (
+                    <li key={reason}>{reason}</li>
+                  ))}
+                </ul>
+              ) : null}
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => onAction({ action: "confirm_suggested_job" })}
+                >
+                  Confirm
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => onAction({ action: "rematch" })}
+                >
+                  Choose another
+                </Button>
+              </div>
+            </div>
+          ) : null}
+
+          {(tab === "needs_attention" || tab === "all_imported") &&
+          !record.jobs &&
+          !hasJobSuggestion ? (
             <div className="space-y-2">
               <Label htmlFor={`job-${record.id}`}>Match to Candid job ID</Label>
               <Input
                 id={`job-${record.id}`}
                 value={candidJobId}
                 onChange={(event) => setCandidJobId(event.target.value)}
-                placeholder="Job UUID or use extracted ref lookup"
+                placeholder="Job UUID"
               />
               {record.extracted_job_reference ? (
                 <p className="text-xs text-muted-foreground">
@@ -338,8 +526,19 @@ function PrintfactoryRecordCard({
             </div>
           ) : null}
 
-          {(tab === "needs_item_match" || tab === "confirmed") &&
-          suggestions.length > 0 ? (
+          {record.job_match_status === "matched_automatically" ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => onAction({ action: "clear_auto_match" })}
+            >
+              Clear automatic match
+            </Button>
+          ) : null}
+
+          {suggestions.length > 0 ? (
             <div className="space-y-2">
               <p className="text-sm font-medium text-foreground">
                 Suggested manifest items
@@ -354,9 +553,24 @@ function PrintfactoryRecordCard({
                     {link.production_items?.item_name ?? "Unknown item"}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    Confidence: {link.match_confidence ?? "—"}
+                    Confidence:{" "}
+                    {(link.match_confidence ?? 0) >= 0.85
+                      ? "High"
+                      : (link.match_confidence ?? 0) >= 0.6
+                        ? "Medium"
+                        : "Low"}
                   </p>
-                  {tab === "needs_item_match" ? (
+                  {link.suggestion_reason ? (
+                    <p className="text-xs text-muted-foreground">
+                      Reason: {link.suggestion_reason}
+                    </p>
+                  ) : null}
+                  {(link.suggestion_details?.reasons ?? []).map((reason) => (
+                    <p key={reason} className="text-xs text-muted-foreground">
+                      · {reason}
+                    </p>
+                  ))}
+                  {tab !== "confirmed" ? (
                     <Button
                       type="button"
                       size="sm"
@@ -369,7 +583,9 @@ function PrintfactoryRecordCard({
                         })
                       }
                     >
-                      Confirm suggested item
+                      {link.match_method === "exact_item_reference"
+                        ? "One-click confirm"
+                        : "Confirm suggested item"}
                     </Button>
                   ) : null}
                 </div>
@@ -377,9 +593,16 @@ function PrintfactoryRecordCard({
             </div>
           ) : null}
 
-          {tab === "needs_item_match" && record.jobs ? (
+          {record.jobs && suggestions.length === 0 && tab === "needs_attention" ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Unrecognised file for known job {record.jobs.job_reference}. Link to
+              an existing item or create an additional production item.
+            </p>
+          ) : null}
+
+          {record.jobs && tab !== "confirmed" ? (
             <div className="space-y-2">
-              <Label htmlFor={`item-${record.id}`}>Select different item ID</Label>
+              <Label htmlFor={`item-${record.id}`}>Link to manifest item ID</Label>
               <Input
                 id={`item-${record.id}`}
                 value={selectedItemId}
@@ -403,21 +626,12 @@ function PrintfactoryRecordCard({
             </div>
           ) : null}
 
-          {tab === "needs_item_match" && record.jobs ? (
+          {record.jobs && tab !== "confirmed" && tab !== "ignored" ? (
             <div className="space-y-2">
               <p className="text-sm font-medium text-foreground">
                 Create additional production item
               </p>
-              <Select
-                defaultValue="additional_billable"
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (value === "ignore") {
-                    return;
-                  }
-                }}
-                id={`classification-${record.id}`}
-              >
+              <Select defaultValue="additional_billable" id={`classification-${record.id}`}>
                 <option value="additional_billable">Additional billable item</option>
                 <option value="replacement">Replacement</option>
                 <option value="no_charge_reprint">No-charge reprint</option>
@@ -442,29 +656,32 @@ function PrintfactoryRecordCard({
             </div>
           ) : null}
 
-          <div className="space-y-2">
-            <Label htmlFor={`ignore-${record.id}`}>Ignore reason</Label>
-            <Textarea
-              id={`ignore-${record.id}`}
-              value={ignoreReason}
-              onChange={(event) => setIgnoreReason(event.target.value)}
-              rows={2}
-            />
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={busy || !ignoreReason.trim()}
-              onClick={() =>
-                onAction({
-                  action: "ignore",
-                  reason: ignoreReason.trim(),
-                })
-              }
-            >
-              Ignore
-            </Button>
-          </div>
+          {tab !== "ignored" ? (
+            <div className="space-y-2">
+              <Label htmlFor={`ignore-${record.id}`}>Ignore reason</Label>
+              <Textarea
+                id={`ignore-${record.id}`}
+                value={ignoreReason}
+                onChange={(event) => setIgnoreReason(event.target.value)}
+                rows={2}
+                placeholder="Historical import, test job, etc."
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy || !ignoreReason.trim()}
+                onClick={() =>
+                  onAction({
+                    action: "ignore",
+                    reason: ignoreReason.trim(),
+                  })
+                }
+              >
+                Ignore
+              </Button>
+            </div>
+          ) : null}
         </div>
       </CardContent>
     </Card>

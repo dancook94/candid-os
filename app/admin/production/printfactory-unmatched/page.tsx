@@ -7,17 +7,15 @@ import { Button } from "@/components/ui/button";
 import { buildCrmAppShellProps } from "@/lib/admin-shell-props";
 import { requireCrmPageAccess } from "@/lib/crm-page-access";
 import { getPrintfactoryConnectionStatus } from "@/lib/printfactory/client";
+import {
+  EXCEPTION_QUEUE_TAB_LABELS,
+  type ExceptionQueueTab,
+} from "@/lib/printfactory/matching-queue";
 import { loadPrintfactoryMatchingRecords } from "@/lib/printfactory/sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
-
-type MatchingTab =
-  | "needs_job_match"
-  | "needs_item_match"
-  | "confirmed"
-  | "ignored";
 
 type PrintfactoryMatchingPageProps = {
   searchParams: Promise<{
@@ -26,16 +24,17 @@ type PrintfactoryMatchingPageProps = {
   }>;
 };
 
-function parseTab(value: string | undefined): MatchingTab {
+function parseTab(value: string | undefined): ExceptionQueueTab {
   if (
-    value === "needs_item_match" ||
+    value === "suggested_matches" ||
     value === "confirmed" ||
-    value === "ignored"
+    value === "ignored" ||
+    value === "all_imported"
   ) {
     return value;
   }
 
-  return "needs_job_match";
+  return "needs_attention";
 }
 
 export default async function PrintfactoryMatchingPage({
@@ -54,33 +53,18 @@ export default async function PrintfactoryMatchingPage({
   const adminClient = createAdminClient();
   const connection = getPrintfactoryConnectionStatus();
 
-  const { records, schemaMissing } = await loadPrintfactoryMatchingRecords(
+  const { records, schemaMissing, tabCounts } = await loadPrintfactoryMatchingRecords(
     adminClient,
     tab
   );
-
-  const needsItemMatchRecords =
-    tab === "needs_item_match"
-      ? records.filter((record) => {
-          const links = (record.printfactory_job_manifest_items ?? []) as Array<{
-            link_status: string;
-          }>;
-
-          const hasConfirmed = links.some(
-            (link) => link.link_status === "confirmed"
-          );
-
-          return !hasConfirmed;
-        })
-      : records;
 
   return (
     <AppShell {...shellProps}>
       <div className="mx-auto max-w-6xl">
         <PageHeader
           eyebrow="Production"
-          title="PrintFactory Matching"
-          description="Review PrintFactory jobs, match them to Candid jobs via Synology paths, and confirm manifest item links manually."
+          title="PrintFactory Exception Queue"
+          description="Automatically matched PrintFactory jobs update existing Candid jobs. Review only genuine exceptions, suggested matches, and unrecognised files."
           actions={
             <Link href="/admin/production">
               <Button variant="outline">Production Board</Button>
@@ -98,10 +82,12 @@ export default async function PrintfactoryMatchingPage({
 
         <PrintfactoryMatchingClient
           initialTab={tab}
-          records={needsItemMatchRecords as never[]}
+          records={records as never[]}
+          tabCounts={tabCounts}
           schemaMissing={schemaMissing}
           jobFilter={jobFilter}
           connectionStatus={connection}
+          tabLabels={EXCEPTION_QUEUE_TAB_LABELS}
         />
       </div>
     </AppShell>
