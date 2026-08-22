@@ -9,6 +9,7 @@ import {
 import {
   compareArtworkToQuotedSize,
   computeEffectiveDpi,
+  enrichSizeComparisonWithResolution,
 } from "@/lib/proof-generator/compare-specification";
 import type {
   DetectedArtworkMetadata,
@@ -16,6 +17,7 @@ import type {
   PreflightOverallStatus,
   PreflightResult,
   QuotedSpecificationItem,
+  SizeComparisonResult,
 } from "@/lib/proof-generator/types";
 
 function worstStatus(statuses: PreflightOverallStatus[]): PreflightOverallStatus {
@@ -42,10 +44,64 @@ function checkToOverall(status: PreflightCheck["status"]): PreflightOverallStatu
   return "pass";
 }
 
+function resolveRasterPixels(metadata: DetectedArtworkMetadata) {
+  const raster = metadata.rasterImages.value[0];
+  if (raster) {
+    return {
+      widthPx: raster.widthPx,
+      heightPx: raster.heightPx,
+      embeddedDpi: raster.effectiveDpiAtArtworkSize,
+    };
+  }
+
+  if (metadata.imageWidthPx.value != null && metadata.imageHeightPx.value != null) {
+    return {
+      widthPx: metadata.imageWidthPx.value,
+      heightPx: metadata.imageHeightPx.value,
+      embeddedDpi: null,
+    };
+  }
+
+  return null;
+}
+
+function buildSizeComparison(input: {
+  metadata: DetectedArtworkMetadata;
+  quotedItems: QuotedSpecificationItem[];
+}): SizeComparisonResult | null {
+  const primaryQuoted = input.quotedItems[0] ?? null;
+  const pageSize = input.metadata.pageSize.value;
+
+  if (!primaryQuoted) {
+    return null;
+  }
+
+  const comparison = compareArtworkToQuotedSize({
+    quotedWidthMm: primaryQuoted.quotedWidthMm,
+    quotedHeightMm: primaryQuoted.quotedHeightMm,
+    detectedWidthMm: pageSize?.widthMm ?? null,
+    detectedHeightMm: pageSize?.heightMm ?? null,
+  });
+
+  const pixels = resolveRasterPixels(input.metadata);
+
+  if (!pixels || pageSize == null) {
+    return comparison;
+  }
+
+  return enrichSizeComparisonWithResolution(comparison, {
+    widthPx: pixels.widthPx,
+    heightPx: pixels.heightPx,
+    artworkWidthMm: pageSize.widthMm,
+    artworkHeightMm: pageSize.heightMm,
+    embeddedDpi: pixels.embeddedDpi,
+  });
+}
+
 export function buildPreflightChecks(input: {
   metadata: DetectedArtworkMetadata;
   quotedItems: QuotedSpecificationItem[];
-  sizeComparison: ReturnType<typeof compareArtworkToQuotedSize> | null;
+  sizeComparison: SizeComparisonResult | null;
 }): PreflightCheck[] {
   const { metadata, quotedItems, sizeComparison } = input;
   const checks: PreflightCheck[] = [];
@@ -53,22 +109,16 @@ export function buildPreflightChecks(input: {
   const pageSize = metadata.pageSize.value;
 
   if (sizeComparison && primaryQuoted) {
-    const status: PreflightCheck["status"] = sizeComparison.matchedScale
-      ? "pass"
-      : sizeComparison.aspectRatioMatches
-        ? "warning"
-        : "manual_review";
-
     checks.push({
       key: "size_scale",
       label: "Size / scale",
-      status,
+      status: sizeComparison.comparisonStatus,
       detectedValue: pageSize
-        ? `${pageSize.widthMm} × ${pageSize.heightMm} mm`
+        ? `${pageSize.widthMm} x ${pageSize.heightMm} mm`
         : null,
       expectedValue:
         primaryQuoted.quotedWidthMm != null && primaryQuoted.quotedHeightMm != null
-          ? `${primaryQuoted.quotedWidthMm} × ${primaryQuoted.quotedHeightMm} mm`
+          ? `${primaryQuoted.quotedWidthMm} x ${primaryQuoted.quotedHeightMm} mm`
           : null,
       message: sizeComparison.message,
       confidence: pageSize ? metadata.pageSize.confidence : "low",
@@ -98,8 +148,7 @@ export function buildPreflightChecks(input: {
         status: "pass",
         detectedValue: metadata.orientation.value,
         expectedValue: "Rotated match",
-        message:
-          "Artwork dimensions match quoted specification when rotated.",
+        message: "Artwork dimensions match quoted specification when rotated.",
         confidence: metadata.orientation.confidence,
       });
     }
@@ -183,7 +232,7 @@ export function buildPreflightChecks(input: {
       detectedValue: formatDimensionsLabel(bleedBoxValue),
       expectedValue: trimBox ? formatDimensionsLabel(trimBox) : null,
       message: bleedAllowance
-        ? `Detected bleed allowance ≈ ${bleedAllowance} mm.`
+        ? `Detected bleed allowance ~ ${bleedAllowance} mm.`
         : "Bleed box detected.",
       confidence: metadata.bleedBox.confidence,
     });
@@ -194,40 +243,72 @@ export function buildPreflightChecks(input: {
       status: "manual_review",
       detectedValue: null,
       expectedValue: null,
-      message: "PDF bleed box not detected — manual check required.",
+      message: "PDF bleed box not detected - manual check required.",
       confidence: "medium",
     });
   }
 
-  const rasterImages = metadata.rasterImages.value;
-  if (
-    rasterImages.length > 0 &&
-    pageSize &&
-    sizeComparison?.matchedScale
-  ) {
-    const primary = rasterImages[0];
-    const effectiveDpi = computeEffectiveDpi({
-      widthPx: primary.widthPx,
-      heightPx: primary.heightPx,
-      artworkWidthMm: pageSize.widthMm,
-      artworkHeightMm: pageSize.heightMm,
-      finishedScale: sizeComparison.matchedScale,
+  if (sizeComparison?.artworkResolutionDpi != null) {
+    checks.push({
+      key: "artwork_resolution",
+      label: "Artwork resolution",
+      status: "info",
+      detectedValue: `${sizeComparison.artworkResolutionDpi} DPI`,
+      expectedValue: null,
+      message: "Resolution at supplied artwork size.",
+      confidence: "medium",
     });
+  }
 
-    if (effectiveDpi != null) {
-      checks.push({
-        key: "effective_resolution",
-        label: "Effective resolution",
-        status:
-          effectiveDpi < LOW_EFFECTIVE_DPI_THRESHOLD ? "warning" : "info",
-        detectedValue: `≈ ${effectiveDpi} DPI at finished size`,
-        expectedValue: null,
-        message:
-          effectiveDpi < LOW_EFFECTIVE_DPI_THRESHOLD
-            ? "Manual resolution review recommended."
+  if (sizeComparison?.effectiveResolutionDpi != null) {
+    checks.push({
+      key: "effective_resolution",
+      label: "Effective resolution",
+      status:
+        sizeComparison.effectiveResolutionDpi < LOW_EFFECTIVE_DPI_THRESHOLD
+          ? "warning"
+          : "info",
+      detectedValue: `${sizeComparison.effectiveResolutionDpi} DPI at finished size`,
+      expectedValue: null,
+      message:
+        sizeComparison.effectiveResolutionDpi < LOW_EFFECTIVE_DPI_THRESHOLD
+          ? "Manual resolution review recommended for large-format output."
+          : sizeComparison.matchedScaleLabel
+            ? `Effective finished resolution at ${sizeComparison.matchedScaleLabel} scale.`
             : "Effective resolution calculated at intended finished size.",
-        confidence: "low",
+      confidence: "medium",
+    });
+  } else {
+    const rasterImages = metadata.rasterImages.value;
+    if (
+      rasterImages.length > 0 &&
+      pageSize &&
+      sizeComparison?.matchedScale
+    ) {
+      const primary = rasterImages[0];
+      const effectiveDpi = computeEffectiveDpi({
+        widthPx: primary.widthPx,
+        heightPx: primary.heightPx,
+        artworkWidthMm: pageSize.widthMm,
+        artworkHeightMm: pageSize.heightMm,
+        finishedScale: sizeComparison.matchedScale,
       });
+
+      if (effectiveDpi != null) {
+        checks.push({
+          key: "effective_resolution",
+          label: "Effective resolution",
+          status:
+            effectiveDpi < LOW_EFFECTIVE_DPI_THRESHOLD ? "warning" : "info",
+          detectedValue: `${effectiveDpi} DPI at finished size`,
+          expectedValue: null,
+          message:
+            effectiveDpi < LOW_EFFECTIVE_DPI_THRESHOLD
+              ? "Manual resolution review recommended for large-format output."
+              : "Effective resolution calculated at intended finished size.",
+          confidence: "low",
+        });
+      }
     }
   }
 
@@ -251,17 +332,10 @@ export function buildPreflightResult(input: {
   quotedItems: QuotedSpecificationItem[];
   sourceReference: PreflightResult["sourceReference"];
 }): PreflightResult {
-  const primaryQuoted = input.quotedItems[0] ?? null;
-  const pageSize = input.metadata.pageSize.value;
-
-  const sizeComparison = primaryQuoted
-    ? compareArtworkToQuotedSize({
-        quotedWidthMm: primaryQuoted.quotedWidthMm,
-        quotedHeightMm: primaryQuoted.quotedHeightMm,
-        detectedWidthMm: pageSize?.widthMm ?? null,
-        detectedHeightMm: pageSize?.heightMm ?? null,
-      })
-    : null;
+  const sizeComparison = buildSizeComparison({
+    metadata: input.metadata,
+    quotedItems: input.quotedItems,
+  });
 
   const checks = buildPreflightChecks({
     metadata: input.metadata,

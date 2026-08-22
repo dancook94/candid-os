@@ -26,10 +26,19 @@ export function formatProofGeneratorMaxAnalysisLabel() {
 }
 
 /** Common artwork scale factors compared against quoted finished size. */
-export const COMMON_ARTWORK_SCALES = [1, 0.5, 0.25, 0.2, 0.1] as const;
+export const COMMON_ARTWORK_SCALES = [1, 0.5, 0.25, 0.2, 0.1, 0.05] as const;
 
 /** Tolerance when matching scaled dimensions (mm). */
 export const SIZE_MATCH_TOLERANCE_MM = 2;
+
+/** Relative tolerance when comparing width vs height scale ratios (1%). */
+export const SCALE_RATIO_TOLERANCE = 0.01;
+
+/** Maximum preview pixel dimension embedded in customer proof PDFs. */
+export const PROOF_PDF_PREVIEW_MAX_PX = 1400;
+
+/** Tolerance when snapping calculated scale to a common production scale (1%). */
+export const COMMON_SCALE_SNAP_TOLERANCE = 0.01;
 
 /** Points → millimetres (1 pt = 1/72 inch). */
 export const PT_TO_MM = 25.4 / 72;

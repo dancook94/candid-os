@@ -68,11 +68,16 @@ function buildPreflight(overrides?: Partial<PreflightResult>): PreflightResult {
       detectedHeightMm: 800,
       matchedScale: 1,
       matchedScaleLabel: "100%",
+      widthScalePercent: 100,
+      heightScalePercent: 100,
       aspectRatioMatches: true,
-      rotationMatches: true,
+      rotationMatches: false,
+      comparisonStatus: "pass",
       expectedFinishedWidthMm: 1200,
       expectedFinishedHeightMm: 800,
-      message: "Match at 100%",
+      artworkResolutionDpi: 300,
+      effectiveResolutionDpi: 300,
+      message: "Artwork supplied at 100% scale.",
     },
     quotedItems: [
       {
@@ -110,6 +115,7 @@ describe("generateCustomerProofPdf", () => {
       customerMessage: "Please confirm the 1200 \u00D7 800mm size.",
       preflight: buildPreflight(),
       sourceBuffer: MINIMAL_PNG,
+      sourceFileName: "proof.png",
     });
 
     assert.ok(pdf.byteLength > 1000);

@@ -184,7 +184,7 @@ export function buildProofDropboxFileName(
   const base = itemReference
     ? sanitizeDropboxPathSegment(itemReference)
     : "Proof";
-  return `${base} Proof v${versionNumber}.${extension.replace(/^\./, "")}`;
+  return `${base}-Proof-v${versionNumber}.${extension.replace(/^\./, "")}`;
 }
 
 export function buildProofUploadTargetFileName({

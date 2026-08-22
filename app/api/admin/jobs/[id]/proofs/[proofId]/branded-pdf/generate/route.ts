@@ -4,12 +4,10 @@ import { verifyApprovedAdmin } from "@/lib/admin-auth";
 import { jobErrorResponse } from "@/lib/jobs/api-response";
 import { requireAdminJobAccess } from "@/lib/jobs/auth";
 import {
-  analyseExistingProofArtwork,
   generateBrandedPdfForExistingProof,
 } from "@/lib/proof-generator/service";
 import type {
   PreflightManualOverrides,
-  PreflightResult,
 } from "@/lib/proof-generator/types";
 import { ProofError } from "@/lib/proofs/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -41,20 +39,13 @@ export async function POST(request: Request, context: RouteContext) {
     await requireAdminJobAccess(adminClient, jobId);
 
     const body = (await request.json()) as {
-      preflight?: PreflightResult;
       manualOverrides?: PreflightManualOverrides;
     };
-
-    const preflight =
-      body.preflight?.analysisVersion
-        ? body.preflight
-        : await analyseExistingProofArtwork(adminClient, jobId, proofId);
 
     const result = await generateBrandedPdfForExistingProof(adminClient, {
       jobId,
       proofId,
       actorProfileId: authResult.userId,
-      preflightResult: preflight,
       manualOverrides: body.manualOverrides,
     });
 

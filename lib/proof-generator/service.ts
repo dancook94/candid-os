@@ -4,16 +4,20 @@ import { downloadDropboxFile } from "@/lib/dropbox/client";
 import { analyseImageBuffer } from "@/lib/proof-generator/analyse-image";
 import { analysePdfBuffer } from "@/lib/proof-generator/analyse-pdf";
 import {
+  assertValidSourceArtworkBuffer,
+  logProofGeneratorDebug,
+} from "@/lib/proof-generator/artwork-buffer";
+import {
   formatProofGeneratorMaxAnalysisLabel,
   getProofGeneratorMaxAnalysisBytes,
   PROOF_GENERATOR_OVERSIZE_MESSAGE,
   PROOF_GENERATOR_UNSUPPORTED_MESSAGE,
 } from "@/lib/proof-generator/constants";
 import { generateCustomerProofPdf } from "@/lib/proof-generator/generate-proof-pdf";
+import { loadQuotedSpecificationItems } from "@/lib/proof-generator/quoted-specification";
 import type {
   PreflightManualOverrides,
   PreflightResult,
-  QuotedSpecificationItem,
 } from "@/lib/proof-generator/types";
 import { buildPreflightResult } from "@/lib/proof-generator/warnings";
 import { PROOF_ACTIVITY_TYPES, PROOF_SELECT } from "@/lib/proofs/constants";
@@ -21,6 +25,7 @@ import { ProofError } from "@/lib/proofs/errors";
 import { getFileExtension } from "@/lib/proofs/file-validation";
 import { logProofActivity } from "@/lib/proofs/activity";
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
+import { isPathInProofsFolder } from "@/lib/proofs/dropbox";
 import { uploadProofFileToProofsFolder } from "@/lib/proofs/service";
 
 function assertAnalysisSize(buffer: Buffer) {
@@ -100,46 +105,6 @@ async function loadProofProductionItemIds(
   return productionItemIds;
 }
 
-async function loadQuotedSpecificationItems(
-  adminClient: SupabaseClient,
-  jobId: string,
-  productionItemIds: string[]
-): Promise<QuotedSpecificationItem[]> {
-  const { data, error } = await adminClient
-    .from("production_items")
-    .select(
-      "id, item_reference, item_name, description, quantity, width_mm, height_mm, material, media_profile, machine, sides, finishing_notes, internal_note"
-    )
-    .eq("job_id", jobId)
-    .in("id", productionItemIds)
-    .is("deleted_at", null);
-
-  if (error) {
-    throw new ProofError(error.message, 500);
-  }
-
-  if ((data ?? []).length !== productionItemIds.length) {
-    throw new ProofError("One or more manifest items were not found on this job.", 404);
-  }
-
-  return (data ?? []).map((item) => ({
-    id: item.id as string,
-    itemReference: (item.item_reference as string | null) ?? null,
-    itemName: item.item_name as string,
-    description: (item.description as string | null) ?? null,
-    quantity: (item.quantity as number | null) ?? null,
-    quotedWidthMm: (item.width_mm as number | null) ?? null,
-    quotedHeightMm: (item.height_mm as number | null) ?? null,
-    material: (item.material as string | null) ?? null,
-    printSpecification: [item.material, item.media_profile, item.machine]
-      .filter(Boolean)
-      .join(" · ") || null,
-    sides: (item.sides as string | null) ?? null,
-    finishing: (item.finishing_notes as string | null) ?? null,
-    notes: (item.internal_note as string | null) ?? null,
-  }));
-}
-
 async function loadProofSourceArtwork(
   adminClient: SupabaseClient,
   jobId: string,
@@ -147,9 +112,23 @@ async function loadProofSourceArtwork(
 ) {
   await loadMutableProofRecord(adminClient, jobId, proofId);
 
+  const { data: job, error: jobError } = await adminClient
+    .from("jobs")
+    .select("job_reference, project_name, dropbox_folder_path")
+    .eq("id", jobId)
+    .maybeSingle();
+
+  if (jobError) {
+    throw new ProofError(jobError.message, 500);
+  }
+
+  if (!job) {
+    throw new ProofError("Job not found.", 404);
+  }
+
   const { data: proofFile, error } = await adminClient
     .from("job_proof_files")
-    .select("job_file_id, dropbox_path, file_name, mime_type")
+    .select("job_file_id, dropbox_path, file_name, mime_type, file_role")
     .eq("proof_id", proofId)
     .eq("file_role", "source_artwork")
     .limit(1)
@@ -163,35 +142,109 @@ async function loadProofSourceArtwork(
     throw new ProofError("Attach proof artwork before generating a branded PDF.", 409);
   }
 
-  const fileName = proofFile.file_name as string;
+  let dropboxPath = proofFile.dropbox_path as string;
+  let fileName = proofFile.file_name as string;
+  let mimeType = (proofFile.mime_type as string | null) ?? null;
+  const jobFileId = (proofFile.job_file_id as string | null) ?? null;
+
+  if (jobFileId) {
+    const { data: jobFile, error: jobFileError } = await adminClient
+      .from("job_files")
+      .select("dropbox_path_lower, file_name, mime_type")
+      .eq("id", jobFileId)
+      .eq("job_id", jobId)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (jobFileError) {
+      throw new ProofError(jobFileError.message, 500);
+    }
+
+    if (jobFile?.dropbox_path_lower) {
+      dropboxPath = jobFile.dropbox_path_lower as string;
+      fileName = (jobFile.file_name as string) || fileName;
+      mimeType = (jobFile.mime_type as string | null) ?? mimeType;
+    }
+  }
+
+  if (
+    job.dropbox_folder_path &&
+    isPathInProofsFolder(
+      dropboxPath,
+      job.dropbox_folder_path as string,
+      job.job_reference as string,
+      job.project_name as string
+    )
+  ) {
+    throw new ProofError(
+      "Source artwork cannot be a generated proof PDF from 03 Proofs. Re-attach the original artwork file.",
+      409
+    );
+  }
+
   assertSupportedExtension(fileName);
 
-  const downloaded = await downloadDropboxFile(proofFile.dropbox_path as string);
+  logProofGeneratorDebug("source_artwork_download_start", {
+    proofId,
+    fileName,
+    dropboxPath,
+    mimeType,
+    jobFileId,
+  });
+
+  const downloaded = await downloadDropboxFile(dropboxPath);
   assertAnalysisSize(downloaded.buffer);
+  const detectedKind = assertValidSourceArtworkBuffer(downloaded.buffer, fileName);
+
+  logProofGeneratorDebug("source_artwork_download_complete", {
+    proofId,
+    fileName,
+    dropboxPath,
+    mimeType: mimeType ?? downloaded.contentType,
+    detectedKind,
+    byteLength: downloaded.buffer.length,
+  });
 
   return {
     buffer: downloaded.buffer,
     fileName,
-    mimeType: (proofFile.mime_type as string | null) ?? downloaded.contentType,
-    dropboxPath: proofFile.dropbox_path as string,
-    jobFileId: (proofFile.job_file_id as string | null) ?? null,
+    mimeType: mimeType ?? downloaded.contentType,
+    dropboxPath,
+    jobFileId,
+    detectedKind,
   };
 }
 
-export async function analyseExistingProofArtwork(
+async function buildPreflightForSourceArtwork(
   adminClient: SupabaseClient,
   jobId: string,
-  proofId: string
-): Promise<PreflightResult> {
+  proofId: string,
+  artwork: Awaited<ReturnType<typeof loadProofSourceArtwork>>
+) {
   const productionItemIds = await loadProofProductionItemIds(adminClient, proofId);
-  const [quotedItems, artwork] = await Promise.all([
-    loadQuotedSpecificationItems(adminClient, jobId, productionItemIds),
-    loadProofSourceArtwork(adminClient, jobId, proofId),
-  ]);
+  const quotedItems = await loadQuotedSpecificationItems(
+    adminClient,
+    jobId,
+    productionItemIds
+  );
 
-  const extension = getFileExtension(artwork.fileName);
+  logProofGeneratorDebug("quoted_specification_resolved", {
+    proofId,
+    productionItemIds,
+    quotedItems: quotedItems.map((item) => ({
+      id: item.id,
+      itemReference: item.itemReference,
+      quotedWidthMm: item.quotedWidthMm,
+      quotedHeightMm: item.quotedHeightMm,
+      material: item.material,
+      printSpecification: item.printSpecification,
+      sides: item.sides,
+      finishing: item.finishing,
+    })),
+  });
+
   const metadata =
-    extension === "pdf"
+    artwork.detectedKind === "pdf"
       ? await analysePdfBuffer(artwork.buffer, artwork.fileName, artwork.mimeType)
       : await analyseImageBuffer(artwork.buffer, artwork.fileName, artwork.mimeType);
 
@@ -205,6 +258,15 @@ export async function analyseExistingProofArtwork(
       mimeType: artwork.mimeType,
     },
   });
+}
+
+export async function analyseExistingProofArtwork(
+  adminClient: SupabaseClient,
+  jobId: string,
+  proofId: string
+): Promise<PreflightResult> {
+  const artwork = await loadProofSourceArtwork(adminClient, jobId, proofId);
+  return buildPreflightForSourceArtwork(adminClient, jobId, proofId, artwork);
 }
 
 export async function saveProofPreflightRecord(
@@ -282,13 +344,12 @@ export async function generateBrandedPdfForExistingProof(
     jobId,
     proofId,
     actorProfileId,
-    preflightResult,
     manualOverrides,
   }: {
     jobId: string;
     proofId: string;
     actorProfileId: string;
-    preflightResult: PreflightResult;
+    preflightResult?: PreflightResult;
     manualOverrides?: PreflightManualOverrides;
   }
 ) {
@@ -313,6 +374,13 @@ export async function generateBrandedPdfForExistingProof(
   }
 
   const artwork = await loadProofSourceArtwork(adminClient, jobId, proofId);
+  const preflightResult = await buildPreflightForSourceArtwork(
+    adminClient,
+    jobId,
+    proofId,
+    artwork
+  );
+
   const sourceDropboxPath = artwork.dropboxPath;
   const sourceJobFileId = artwork.jobFileId;
 
@@ -326,6 +394,7 @@ export async function generateBrandedPdfForExistingProof(
       customerMessage: (proof.customer_message as string | null) ?? null,
       preflight: preflightResult,
       sourceBuffer: artwork.buffer,
+      sourceFileName: artwork.fileName,
     });
   } catch (error) {
     const message =
@@ -373,6 +442,7 @@ export async function generateBrandedPdfForExistingProof(
     metadata: {
       job_id: jobId,
       proof_id: proofId,
+      production_item_ids: (await loadProofProductionItemIds(adminClient, proofId)),
       overall_status: preflightResult.overallStatus,
       source_dropbox_path: sourceDropboxPath,
       generated_dropbox_path: uploadResult.dropboxPath,

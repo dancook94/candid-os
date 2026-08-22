@@ -75,10 +75,15 @@ export type SizeComparisonResult = {
   detectedHeightMm: number | null;
   matchedScale: number | null;
   matchedScaleLabel: string | null;
+  widthScalePercent: number | null;
+  heightScalePercent: number | null;
   aspectRatioMatches: boolean;
   rotationMatches: boolean;
+  comparisonStatus: "pass" | "warning" | "manual_review";
   expectedFinishedWidthMm: number | null;
   expectedFinishedHeightMm: number | null;
+  artworkResolutionDpi: number | null;
+  effectiveResolutionDpi: number | null;
   message: string;
 };
 

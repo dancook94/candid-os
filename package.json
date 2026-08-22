@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:proof-generator": "node --import tsx --test lib/proof-generator/compare-specification.test.ts lib/proof-generator/pdf-text.test.ts lib/proof-generator/generate-proof-pdf.test.ts"
+    "test:proof-generator": "node --import tsx --test lib/proof-generator/compare-specification.test.ts lib/proof-generator/pdf-text.test.ts lib/proof-generator/generate-proof-pdf.test.ts lib/proof-generator/quoted-specification.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
