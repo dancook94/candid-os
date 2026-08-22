@@ -6,7 +6,6 @@ import { isMissingRelationError } from "@/lib/customer-settings/errors";
 import { loadCompanyAddresses } from "@/lib/customer-settings/addresses";
 import { CRM_ACTIVITY_TYPES, logQuoteRequestCustomerActivity } from "@/lib/quote-request/activity";
 import { createOpportunityFromQuoteRequest } from "@/lib/crm/opportunity-linking";
-import { notifyNewQuoteRequestSafe } from "@/lib/notifications/triggers";
 import {
   buildAddressDuplicateKey,
   isValidUkPostcode,
@@ -394,12 +393,6 @@ export async function submitCustomerQuoteRequest(
     await createOpportunityFromQuoteRequest(adminClient, {
       quoteRequestId: createdQuoteRequestId,
       actorProfileId: context.profile.id,
-      contactId: context.contact.id,
-    });
-
-    void notifyNewQuoteRequestSafe(adminClient, {
-      quoteRequestId: createdQuoteRequestId,
-      companyId: context.company.id,
       contactId: context.contact.id,
     });
 

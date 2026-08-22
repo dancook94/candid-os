@@ -58,24 +58,53 @@ function buildQuoteAcceptedNextStep(job: {
   artwork_source: string | null;
   artwork_status: string | null;
 }) {
-  if (job.artwork_source === "candid_creating") {
-    return "Your job has now been created and our team will prepare the artwork.";
+  switch (job.artwork_source) {
+    case "portal_upload":
+    case "customer_pending":
+      return "Your job is now live. You can upload any required artwork from the job page.";
+    case "candid_creating":
+      return "Your job is now live and our team will prepare the artwork.";
+    case "manual_receipt":
+      return "Your job is now live and your artwork has been received.";
+    default:
+      if (job.artwork_required) {
+        return "Your job is now live. You can upload any required artwork from the job page.";
+      }
+
+      return "Your job is now live and we'll keep you updated as production progresses.";
+  }
+}
+
+function formatDeliveryAddress(snapshot: {
+  delivery_address_line_1?: string | null;
+  delivery_address_line_2?: string | null;
+  delivery_city?: string | null;
+  delivery_county?: string | null;
+  delivery_postcode?: string | null;
+}) {
+  return [
+    snapshot.delivery_address_line_1,
+    snapshot.delivery_address_line_2,
+    snapshot.delivery_city,
+    snapshot.delivery_county,
+    snapshot.delivery_postcode,
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
+function formatQuoteTotalLabel(version: {
+  total: unknown;
+  vat_amount?: unknown;
+  subtotal?: unknown;
+}) {
+  const total = formatMoney(version.total);
+
+  if (version.vat_amount != null && Number(version.vat_amount) > 0) {
+    return `${total} including VAT`;
   }
 
-  if (
-    job.artwork_source === "manual_receipt" ||
-    job.artwork_source === "portal_upload" ||
-    job.artwork_status === "received" ||
-    job.artwork_status === "uploaded"
-  ) {
-    return "Your job has now been created and we'll continue preparing it for production.";
-  }
-
-  if (job.artwork_required) {
-    return "Your job has now been created. You can upload artwork from the job page.";
-  }
-
-  return "Your job has now been created and we'll keep you updated as production progresses.";
+  return total;
 }
 
 export async function notifyCustomerRegistration(
@@ -240,7 +269,7 @@ export async function notifyQuoteReady(
   const { data: quote, error } = await adminClient
     .from("quotes")
     .select(
-      "id, company_id, contact_id, project_name, quote_number, companies(company_name), contacts(full_name, email)"
+      "id, company_id, contact_id, project_name, quote_number, status, contacts(full_name, email, profile_id), companies(company_name)"
     )
     .eq("id", input.quoteId)
     .maybeSingle();
@@ -249,9 +278,17 @@ export async function notifyQuoteReady(
     throw error ?? new Error("Quote not found.");
   }
 
+  if (quote.status === "draft") {
+    logNotificationEvent("quote_ready_skipped", {
+      quoteId: input.quoteId,
+      reason: "quote_is_draft",
+    });
+    return { ok: false as const, skippedReason: "quote_is_draft" };
+  }
+
   let versionQuery = adminClient
     .from("quote_versions")
-    .select("id, version_number, total, version_status")
+    .select("id, version_number, total, subtotal, vat_amount, version_status")
     .eq("quote_id", input.quoteId)
     .eq("version_status", "sent");
 
@@ -266,16 +303,21 @@ export async function notifyQuoteReady(
   const { data: version } = await versionQuery.maybeSingle();
 
   if (!version || version.version_status !== "sent") {
-    return;
+    logNotificationEvent("quote_ready_skipped", {
+      quoteId: input.quoteId,
+      reason: "no_sent_version",
+    });
+    return { ok: false as const, skippedReason: "no_sent_version" };
   }
 
   const company = extractSingle(quote.companies);
   const contact = extractSingle(quote.contacts);
 
-  await sendNotification(adminClient, {
+  return sendNotification(adminClient, {
     type: "quote_ready",
     companyId: quote.company_id as string,
     contactId: (input.contactId ?? quote.contact_id) as string | null,
+    profileId: (contact?.profile_id as string | null) ?? null,
     quoteId: quote.id as string,
     idempotencyKey: `quote_ready:${quote.id}:${version.id}`,
     metadata: {
@@ -283,7 +325,7 @@ export async function notifyQuoteReady(
       companyName: company?.company_name ?? "Your company",
       customerName: contact?.full_name ?? "there",
       quoteReference: formatQuoteReference(quote.quote_number),
-      quoteTotal: formatMoney(version.total),
+      quoteTotal: formatQuoteTotalLabel(version),
       quoteVersion: `Version ${version.version_number}`,
       quoteId: quote.id,
       quoteUrl: `/quotes/${quote.id}`,
@@ -296,9 +338,15 @@ export async function notifyQuoteReadySafe(
   input: { quoteId: string; contactId?: string | null; versionId?: string | null }
 ) {
   try {
-    await notifyQuoteReady(adminClient, input);
+    return await notifyQuoteReady(adminClient, input);
   } catch (error) {
     logNotificationFailure("quote_ready", error);
+    return {
+      ok: false,
+      notificationIds: [],
+      results: [],
+      skippedReason: error instanceof Error ? error.message : "notification_failed",
+    };
   }
 }
 
@@ -316,7 +364,7 @@ export async function notifyQuoteAccepted(
     adminClient
       .from("quotes")
       .select(
-        "id, project_name, quote_number, total, required_date, fulfilment_method, companies(company_name), contacts(full_name, email)"
+        "id, project_name, quote_number, total, required_date, fulfilment_method, quote_request_id, companies(company_name), contacts(full_name, email, profile_id)"
       )
       .eq("id", input.quoteId)
       .maybeSingle(),
@@ -330,7 +378,19 @@ export async function notifyQuoteAccepted(
   ]);
 
   if (!quote || !job) {
-    return;
+    return { ok: false as const, skippedReason: "quote_or_job_missing" };
+  }
+
+  let purchaseOrderNumber: string | null = null;
+
+  if (quote.quote_request_id) {
+    const { data: quoteRequest } = await adminClient
+      .from("quote_requests")
+      .select("purchase_order_number")
+      .eq("id", quote.quote_request_id as string)
+      .maybeSingle();
+
+    purchaseOrderNumber = (quoteRequest?.purchase_order_number as string | null) ?? null;
   }
 
   const company = extractSingle(quote.companies);
@@ -353,38 +413,56 @@ export async function notifyQuoteAccepted(
     requiredDate: quote.required_date ?? job.required_date ?? "Not specified",
     fulfilmentMethod: quote.fulfilment_method ?? job.fulfilment_method ?? "Not specified",
     artworkStatusLabel,
+    purchaseOrderNumber: purchaseOrderNumber ?? "Not supplied",
     nextStep,
   };
 
-  await sendNotification(adminClient, {
-    type: "quote_accepted_customer",
-    companyId: input.companyId,
-    contactId: input.contactId ?? null,
+  const profileId = (contact?.profile_id as string | null) ?? null;
+
+  const [customerResult, internalResult] = await Promise.all([
+    sendNotification(adminClient, {
+      type: "quote_accepted_customer",
+      companyId: input.companyId,
+      contactId: input.contactId ?? null,
+      profileId,
+      quoteId: input.quoteId,
+      jobId: input.jobId,
+      idempotencyKey: `quote_accepted_customer:${input.quoteId}`,
+      metadata: {
+        ...sharedMetadata,
+        jobUrl: `/jobs/${job.id}`,
+      },
+    }),
+    sendNotification(adminClient, {
+      type: "quote_accepted_internal",
+      companyId: input.companyId,
+      contactId: input.contactId ?? null,
+      quoteId: input.quoteId,
+      jobId: input.jobId,
+      opportunityId: input.opportunityId ?? null,
+      idempotencyKey: `quote_accepted_internal:${input.quoteId}`,
+      metadata: {
+        ...sharedMetadata,
+        jobUrl: `/admin/jobs/${job.id}`,
+        opportunityUrl: input.opportunityId
+          ? `/admin/opportunities/${input.opportunityId}`
+          : null,
+      },
+    }),
+  ]);
+
+  logNotificationEvent("quote_accepted_sent", {
     quoteId: input.quoteId,
     jobId: input.jobId,
-    idempotencyKey: `quote_accepted_customer:${input.quoteId}`,
-    metadata: {
-      ...sharedMetadata,
-      jobUrl: `/jobs/${job.id}`,
-    },
+    customerOk: customerResult.ok,
+    internalOk: internalResult.ok,
   });
 
-  await sendNotification(adminClient, {
-    type: "quote_accepted_internal",
-    companyId: input.companyId,
-    contactId: input.contactId ?? null,
-    quoteId: input.quoteId,
-    jobId: input.jobId,
-    opportunityId: input.opportunityId ?? null,
-    idempotencyKey: `quote_accepted_internal:${input.quoteId}`,
-    metadata: {
-      ...sharedMetadata,
-      jobUrl: `/admin/jobs/${job.id}`,
-      opportunityUrl: input.opportunityId
-        ? `/admin/opportunities/${input.opportunityId}`
-        : null,
-    },
-  });
+  return {
+    ok: customerResult.ok && internalResult.ok,
+    customerResult,
+    internalResult,
+  };
 }
 
 export async function notifyQuoteAcceptedSafe(
@@ -398,9 +476,13 @@ export async function notifyQuoteAcceptedSafe(
   }
 ) {
   try {
-    await notifyQuoteAccepted(adminClient, input);
+    return await notifyQuoteAccepted(adminClient, input);
   } catch (error) {
     logNotificationFailure("quote_accepted", error);
+    return {
+      ok: false,
+      skippedReason: error instanceof Error ? error.message : "notification_failed",
+    };
   }
 }
 
@@ -478,14 +560,14 @@ export async function notifyArtworkUploadedSafe(
   }
 }
 
-export async function notifyNewQuoteRequest(
+export async function notifyInternalQuoteRequestReceived(
   adminClient: SupabaseClient,
   input: { quoteRequestId: string; companyId: string; contactId: string }
 ) {
   const { data: quoteRequest, error } = await adminClient
     .from("quote_requests")
     .select(
-      "id, project_name, required_date, fulfilment_method, companies(company_name), contacts(full_name)"
+      "id, project_name, description, fulfilment_method, requested_date, requested_time, request_status, created_at, purchase_order_number, notes, delivery_address_line_1, delivery_address_line_2, delivery_city, delivery_county, delivery_postcode, companies(company_name), contacts(full_name, email)"
     )
     .eq("id", input.quoteRequestId)
     .maybeSingle();
@@ -494,36 +576,82 @@ export async function notifyNewQuoteRequest(
     throw error ?? new Error("Quote request not found.");
   }
 
+  if (quoteRequest.request_status !== "submitted") {
+    logNotificationEvent("quote_request_notification_skipped", {
+      quoteRequestId: input.quoteRequestId,
+      reason: "not_submitted",
+      requestStatus: quoteRequest.request_status,
+    });
+    return { ok: false as const, skippedReason: "not_submitted" };
+  }
+
+  const { count: attachmentCount } = await adminClient
+    .from("quote_request_attachments")
+    .select("id", { count: "exact", head: true })
+    .eq("quote_request_id", input.quoteRequestId);
+
   const company = extractSingle(quoteRequest.companies);
   const contact = extractSingle(quoteRequest.contacts);
+  const deliveryAddress =
+    quoteRequest.fulfilment_method === "delivery"
+      ? formatDeliveryAddress(quoteRequest)
+      : null;
 
-  await sendNotification(adminClient, {
-    type: "new_quote_request",
+  return sendNotification(adminClient, {
+    type: "internal_quote_request_received",
     companyId: input.companyId,
     contactId: input.contactId,
     quoteRequestId: input.quoteRequestId,
-    idempotencyKey: `new_quote_request:${input.quoteRequestId}`,
+    idempotencyKey: `quote_request_submitted:${input.quoteRequestId}`,
     metadata: {
       projectName: quoteRequest.project_name,
       companyName: company?.company_name ?? "Customer",
       customerName: contact?.full_name ?? "Customer",
-      requiredDate: quoteRequest.required_date ?? "Not specified",
-      fulfilmentMethod: quoteRequest.fulfilment_method ?? "Not specified",
+      requiredDate: quoteRequest.requested_date ?? "Not specified",
+      requiredTime: quoteRequest.requested_time ?? "Not specified",
+      fulfilmentMethod:
+        quoteRequest.fulfilment_method === "delivery" ? "Delivery" : "Collection",
+      deliveryAddress: deliveryAddress || null,
+      purchaseOrderNumber: quoteRequest.purchase_order_number ?? null,
+      customerNotes: quoteRequest.notes ?? null,
+      attachmentCount: String(attachmentCount ?? 0),
+      submittedAt: formatDisplayDate(quoteRequest.created_at as string),
       quoteRequestId: quoteRequest.id,
       quoteRequestUrl: `/admin/quote-requests/${quoteRequest.id}`,
     },
   });
 }
 
-export async function notifyNewQuoteRequestSafe(
+export async function notifyInternalQuoteRequestReceivedSafe(
   adminClient: SupabaseClient,
   input: { quoteRequestId: string; companyId: string; contactId: string }
 ) {
   try {
-    await notifyNewQuoteRequest(adminClient, input);
+    return await notifyInternalQuoteRequestReceived(adminClient, input);
   } catch (error) {
-    logNotificationFailure("new_quote_request", error);
+    logNotificationFailure("internal_quote_request_received", error);
+    return {
+      ok: false,
+      notificationIds: [],
+      results: [],
+      skippedReason: error instanceof Error ? error.message : "notification_failed",
+    };
   }
+}
+
+/** @deprecated Use notifyInternalQuoteRequestReceived */
+export async function notifyNewQuoteRequest(
+  adminClient: SupabaseClient,
+  input: { quoteRequestId: string; companyId: string; contactId: string }
+) {
+  return notifyInternalQuoteRequestReceived(adminClient, input);
+}
+
+export async function notifyNewQuoteRequestSafe(
+  adminClient: SupabaseClient,
+  input: { quoteRequestId: string; companyId: string; contactId: string }
+) {
+  return notifyInternalQuoteRequestReceivedSafe(adminClient, input);
 }
 
 export async function notifyJobReadyForInvoice(

@@ -33,6 +33,7 @@ const TYPE_FILTER_OPTIONS = [
   { value: "", label: "All types" },
   { value: "customer_registration_received", label: "Customer registration" },
   { value: "internal_new_registration", label: "Internal registration" },
+  { value: "internal_quote_request_received", label: "Quote request (internal)" },
   { value: "customer_account_approved", label: "Account approved" },
   { value: "quote_ready", label: "Quote ready" },
   { value: "quote_accepted_customer", label: "Quote accepted (customer)" },

@@ -252,24 +252,50 @@ export function renderNotificationEmail(
         }),
       };
 
+    case "internal_quote_request_received":
     case "new_quote_request":
       return {
         subject: `New quote request — ${project}`,
         html: renderEmailShell({
           headline: "New quote request",
           bodyParagraphs: [
-            `${company} submitted a new quote request for ${project}.`,
+            `${customerName} at ${company} submitted a new quote request for ${project}.`,
           ],
           detailRows: [
             { label: "Customer", value: customerName },
             { label: "Company", value: company },
-            { label: "Required date", value: String(metadata.requiredDate ?? "Not specified") },
+            { label: "Project", value: project },
+            {
+              label: "Required date",
+              value: String(metadata.requiredDate ?? "Not specified"),
+            },
+            {
+              label: "Required time",
+              value: String(metadata.requiredTime ?? "Not specified"),
+            },
             {
               label: "Fulfilment",
               value: String(metadata.fulfilmentMethod ?? "Not specified"),
             },
+            ...(metadata.deliveryAddress
+              ? [{ label: "Delivery address", value: String(metadata.deliveryAddress) }]
+              : []),
+            ...(metadata.purchaseOrderNumber
+              ? [{ label: "PO / reference", value: String(metadata.purchaseOrderNumber) }]
+              : []),
+            ...(metadata.customerNotes
+              ? [{ label: "Customer notes", value: String(metadata.customerNotes) }]
+              : []),
+            {
+              label: "Attachments",
+              value: String(metadata.attachmentCount ?? "0"),
+            },
+            {
+              label: "Submitted",
+              value: String(metadata.submittedAt ?? "Recently"),
+            },
           ],
-          ctaLabel: "View quote request",
+          ctaLabel: "Review quote request",
           ctaHref: buildAbsoluteUrl(
             String(metadata.quoteRequestUrl ?? `/admin/quote-requests/${metadata.quoteRequestId ?? ""}`)
           ),
@@ -331,8 +357,12 @@ export function renderNotificationEmail(
               label: "Artwork",
               value: String(metadata.artworkStatusLabel ?? "Not specified"),
             },
+            ...(metadata.purchaseOrderNumber &&
+            metadata.purchaseOrderNumber !== "Not supplied"
+              ? [{ label: "PO / reference", value: String(metadata.purchaseOrderNumber) }]
+              : []),
           ],
-          ctaLabel: "View job",
+          ctaLabel: "Open job",
           ctaHref: buildAbsoluteUrl(String(metadata.jobUrl ?? `/admin/jobs/${metadata.jobId ?? ""}`)),
           footerNote: metadata.opportunityUrl
             ? `Opportunity: ${buildAbsoluteUrl(String(metadata.opportunityUrl))}`

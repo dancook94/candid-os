@@ -377,6 +377,12 @@ export function QuoteRequestForm({
       }
     }
 
+    await fetch("/api/notifications/quote-request-submitted", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quoteRequestId: submitResult.quoteRequestId }),
+    });
+
     setIsSubmitting(false);
     setUploadProgress("");
     router.push("/quotes");

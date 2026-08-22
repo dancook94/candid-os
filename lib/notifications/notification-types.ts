@@ -37,6 +37,7 @@ export const CUSTOMER_NOTIFICATION_TYPES = [
 
 export const INTERNAL_NOTIFICATION_TYPES = [
   "internal_new_registration",
+  "internal_quote_request_received",
   "new_quote_request",
   "quote_accepted_internal",
   "quote_accepted",
@@ -73,6 +74,7 @@ export const DEFAULT_INTERNAL_ROUTING: Record<
   InternalRecipientGroup[]
 > = {
   internal_new_registration: ["admin"],
+  internal_quote_request_received: ["sales"],
   new_quote_request: ["sales"],
   quote_accepted_internal: ["sales", "production"],
   quote_accepted: ["sales", "production"],
@@ -115,6 +117,7 @@ export const TESTABLE_NOTIFICATION_TYPES = [
   "quote_accepted_confirmation",
   "artwork_uploaded_confirmation",
   "new_quote_request",
+  "internal_quote_request_received",
   "internal_new_registration",
   "quote_accepted_internal",
   "quote_accepted",
@@ -138,6 +141,10 @@ export function normalizeNotificationType(type: string): NotificationType {
 
   if (type === "quote_accepted") {
     return "quote_accepted_internal";
+  }
+
+  if (type === "new_quote_request") {
+    return "internal_quote_request_received";
   }
 
   return type as NotificationType;

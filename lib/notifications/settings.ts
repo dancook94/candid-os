@@ -39,6 +39,7 @@ function defaultCustomerToggles(): Record<CustomerNotificationType, boolean> {
 function defaultInternalToggles(): Record<InternalNotificationType, boolean> {
   return {
     internal_new_registration: true,
+    internal_quote_request_received: true,
     new_quote_request: true,
     quote_accepted_internal: true,
     quote_accepted: true,
@@ -81,16 +82,25 @@ export function normalizeNotificationSettings(
   }
 
   const record = raw as Record<string, unknown>;
+  const internal = {
+    ...defaults.internal,
+    ...(isRecord(record.internal) ? (record.internal as typeof defaults.internal) : {}),
+  };
+
+  if (
+    isRecord(record.internal) &&
+    record.internal.internal_quote_request_received === undefined &&
+    record.internal.new_quote_request !== undefined
+  ) {
+    internal.internal_quote_request_received = Boolean(record.internal.new_quote_request);
+  }
 
   return {
     customer: {
       ...defaults.customer,
       ...(isRecord(record.customer) ? (record.customer as typeof defaults.customer) : {}),
     },
-    internal: {
-      ...defaults.internal,
-      ...(isRecord(record.internal) ? (record.internal as typeof defaults.internal) : {}),
-    },
+    internal,
     recipientGroups: {
       ...defaults.recipientGroups,
       ...normalizeRecipientGroups(record.recipientGroups),

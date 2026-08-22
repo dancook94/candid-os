@@ -12,6 +12,8 @@ export function resolveNotificationReplyTo(type: NotificationType): string | und
   switch (type) {
     case "customer_registration_received":
     case "customer_account_approved":
+    case "internal_quote_request_received":
+    case "new_quote_request":
     case "quote_ready":
     case "quote_revised":
     case "quote_accepted_customer":
