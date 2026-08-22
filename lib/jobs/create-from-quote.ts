@@ -517,11 +517,21 @@ export async function ensureJobForAcceptedQuote({
     }
   }
 
-  prepareQuoteAcceptedNotification({
-    companyId: quote.company_id,
-    quoteId: quote.id,
-    jobId: job.id,
-  });
+  try {
+    await prepareQuoteAcceptedNotification({
+      adminClient,
+      companyId: quote.company_id,
+      quoteId: quote.id,
+      jobId: job.id,
+      contactId: quote.contact_id,
+      opportunityId: quote.opportunity_id,
+    });
+  } catch (notificationError) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[jobs] quote accepted notification failed", notificationError);
+    }
+  }
+
   prepareJobCreatedNotification({
     companyId: quote.company_id,
     quoteId: quote.id,

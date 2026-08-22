@@ -722,6 +722,20 @@ export function AdminSettingsPanel({
             <CardContent className="pt-6">
               <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border p-4">
                 <div>
+                  <p className="text-sm font-medium text-foreground">Notification settings</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Customer and internal email toggles, recipient groups and test sends.
+                  </p>
+                </div>
+                <Link href="/admin/settings/notifications">
+                  <Button type="button" variant="outline">
+                    Manage notifications
+                  </Button>
+                </Link>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border p-4">
+                <div>
                   <p className="text-sm font-medium text-foreground">Dropbox</p>
                   <p className="mt-1 text-sm text-muted-foreground">
                     Customer artwork uploads and job folder provisioning.

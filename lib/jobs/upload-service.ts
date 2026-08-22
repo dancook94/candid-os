@@ -13,8 +13,8 @@ import { isCustomerArtworkUploadEnabled } from "@/lib/jobs/artwork-source";
 import {
   JOB_ACTIVITY_TYPES,
   logJobActivity,
-  prepareArtworkUploadedNotification,
 } from "@/lib/jobs/activity";
+import { prepareArtworkUploadedNotification } from "@/lib/jobs/notifications";
 import type { CustomerJobContext } from "@/lib/jobs/auth";
 import { JobError } from "@/lib/jobs/errors";
 import {
@@ -626,7 +626,8 @@ export async function finishArtworkUpload(
   }
 
   try {
-    prepareArtworkUploadedNotification({
+    await prepareArtworkUploadedNotification({
+      adminClient,
       companyId,
       jobId,
       fileId: file.id,

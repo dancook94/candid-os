@@ -44,7 +44,7 @@ export function prepareArtworkUploadedNotification(_input: {
   jobId: string;
   fileId: string;
 }) {
-  // Hook for future SMTP notifications.
+  // Implemented in lib/jobs/notifications.ts — kept for backwards compatibility.
 }
 
 export function prepareArtworkChangesRequestedNotification(_input: {

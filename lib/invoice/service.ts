@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { notifyJobReadyForInvoiceSafe } from "@/lib/notifications/triggers";
+
 import { createCrmActivity } from "@/lib/crm/create-crm-activity";
 import {
   INVOICE_ACTIVITY_TYPES,
@@ -173,6 +175,7 @@ async function refreshDraftTotalsAndStatus(
     .length;
 
   const typedDraft = draft as InvoiceDraftRecord;
+  const previousStatus = typedDraft.status;
   let nextStatus: InvoiceDraftStatus = typedDraft.status;
 
   if (!preserveApproved || typedDraft.status !== "approved") {
@@ -201,6 +204,18 @@ async function refreshDraftTotalsAndStatus(
 
   if (updateError || !updatedDraft) {
     throw new ProductionError(updateError?.message ?? "Unable to update draft.", 500);
+  }
+
+  if (
+    previousStatus !== "ready_for_review" &&
+    nextStatus === "ready_for_review" &&
+    unpricedCount === 0
+  ) {
+    void notifyJobReadyForInvoiceSafe(adminClient, {
+      jobId: typedDraft.job_id,
+      invoiceDraftId: draftId,
+      unpricedCount,
+    });
   }
 
   return {

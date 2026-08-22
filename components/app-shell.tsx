@@ -13,6 +13,7 @@ import {
   Gauge,
   History,
   LogOut,
+  Mail,
   Package,
   Receipt,
   Settings,
@@ -136,6 +137,11 @@ const crmLinks: NavLink[] = [
     href: "/admin/activity",
     label: "Activity",
     icon: History,
+  },
+  {
+    href: "/admin/notifications",
+    label: "Notifications",
+    icon: Mail,
   },
 ];
 
