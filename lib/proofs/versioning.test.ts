@@ -8,7 +8,37 @@ import {
   formatProofHistoryEntry,
   getCurrentProofRecord,
   hasInProgressProof,
+  highestProofVersionForManifestLineage,
+  manifestItemSetsMatch,
+  nextProofVersionForManifestLineage,
 } from "@/lib/proofs/versioning";
+
+describe("manifestItemSetsMatch", () => {
+  it("matches identical manifest item sets regardless of order", () => {
+    assert.equal(
+      manifestItemSetsMatch(["b", "a"], ["a", "b"]),
+      true
+    );
+    assert.equal(
+      manifestItemSetsMatch(["a"], ["a", "b"]),
+      false
+    );
+  });
+});
+
+describe("nextProofVersionForManifestLineage", () => {
+  it("increments within the same manifest item lineage only", () => {
+    const proofs = [
+      { version_number: 1, productionItemIds: ["item-a"] },
+      { version_number: 2, productionItemIds: ["item-a"] },
+      { version_number: 1, productionItemIds: ["item-b"] },
+    ];
+
+    assert.equal(nextProofVersionForManifestLineage(proofs, ["item-a"]), 3);
+    assert.equal(nextProofVersionForManifestLineage(proofs, ["item-b"]), 2);
+    assert.equal(nextProofVersionForManifestLineage(proofs, ["item-c"]), 1);
+  });
+});
 
 describe("buildCustomerProofPdfFileName", () => {
   it("uses item reference for single-item proofs", () => {

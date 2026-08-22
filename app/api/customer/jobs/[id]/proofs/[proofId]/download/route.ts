@@ -8,6 +8,8 @@ import { markProofViewed, loadCustomerProofDownloadFile } from "@/lib/proofs/ser
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
+export const dynamic = "force-dynamic";
+
 type RouteContext = { params: Promise<{ id: string; proofId: string }> };
 
 function proofErrorResponse(error: unknown) {

@@ -7,6 +7,31 @@ export type RevisableProofStatus = (typeof REVISABLE_PROOF_STATUSES)[number];
 
 const IN_PROGRESS_PROOF_STATUSES = ["draft", "internal_review", "ready_to_send"] as const;
 
+export function manifestItemSetsMatch(left: string[], right: string[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const normalizedLeft = [...left].sort();
+  const normalizedRight = [...right].sort();
+
+  return normalizedLeft.every((id, index) => id === normalizedRight[index]);
+}
+
+export function highestProofVersionForManifestLineage<
+  T extends { version_number: number; productionItemIds: string[] },
+>(proofs: T[], productionItemIds: string[]) {
+  return proofs
+    .filter((proof) => manifestItemSetsMatch(proof.productionItemIds, productionItemIds))
+    .reduce((max, proof) => Math.max(max, proof.version_number), 0);
+}
+
+export function nextProofVersionForManifestLineage<
+  T extends { version_number: number; productionItemIds: string[] },
+>(proofs: T[], productionItemIds: string[]) {
+  return highestProofVersionForManifestLineage(proofs, productionItemIds) + 1;
+}
+
 export function isRevisableProofStatus(status: string): status is RevisableProofStatus {
   return REVISABLE_PROOF_STATUSES.includes(status as RevisableProofStatus);
 }

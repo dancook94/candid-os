@@ -228,6 +228,7 @@ export function AdminJobProofsPanel({
 
   const currentProof = getCurrentProofRecord(proofs);
   const proofHistory = [...proofs].sort((left, right) => right.version_number - left.version_number);
+  const sortedProofs = proofHistory;
 
   async function createProof() {
     if (!canSaveDraft) {
@@ -668,15 +669,30 @@ export function AdminJobProofsPanel({
       ) : null}
 
       <div className="space-y-4">
-        {proofs.length === 0 ? (
+        {sortedProofs.length === 0 ? (
           <p className="text-sm text-muted-foreground">No proofs yet.</p>
         ) : (
-          proofs.map((proof) => (
-            <div key={proof.id} className="rounded-lg border border-border p-4 space-y-3">
+          sortedProofs.map((proof) => {
+            const isCurrent = currentProof?.id === proof.id;
+            const isEditableDraft = ["draft", "internal_review", "ready_to_send"].includes(
+              proof.status
+            );
+            const isArchived = ["superseded", "cancelled"].includes(proof.status);
+
+            return (
+            <div
+              key={proof.id}
+              className={`rounded-lg border p-4 space-y-3 ${
+                isArchived ? "border-border/70 bg-muted/20 opacity-80" : "border-border"
+              }`}
+            >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <p className="font-medium">
-                    {proof.title} · v{proof.version_number}
+                  <p className="font-medium">{proof.title}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {isCurrent ? "Current proof: " : "Proof "}
+                    v{proof.version_number}
+                    {isCurrent ? "" : ` — ${PROOF_STATUS_LABELS[proof.status as keyof typeof PROOF_STATUS_LABELS] ?? proof.status}`}
                   </p>
                   <p className="text-xs text-muted-foreground">{proof.proof_reference}</p>
                 </div>
@@ -710,6 +726,8 @@ export function AdminJobProofsPanel({
                 </ul>
               ) : null}
 
+              {!isEditableDraft ? null : (
+                <>
               <ProofFileAttachmentPanel
                 jobId={jobId}
                 proof={proof}
@@ -797,6 +815,8 @@ export function AdminJobProofsPanel({
                   Generate the branded customer proof PDF before marking ready or sending.
                 </p>
               ) : null}
+                </>
+              )}
 
               {["sent", "viewed"].includes(proof.status) ? (
                 <Button
@@ -809,10 +829,6 @@ export function AdminJobProofsPanel({
                 </Button>
               ) : null}
 
-              {["changes_requested", "superseded"].includes(proof.status) ? (
-                <p className="text-xs text-muted-foreground">Archived version — read only.</p>
-              ) : null}
-
               {canCreateRevisedProof(proof, proofs) ? (
                 <Button
                   type="button"
@@ -822,8 +838,15 @@ export function AdminJobProofsPanel({
                   Create revised proof
                 </Button>
               ) : null}
+
+              {isArchived ? (
+                <p className="text-xs text-muted-foreground">
+                  Previous version — customer proof files are preserved in 03 Proofs.
+                </p>
+              ) : null}
             </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

@@ -19,16 +19,20 @@ import { logProofActivity } from "@/lib/proofs/activity";
 import {
   copyProofFileToProofsFolder,
   assertDropboxPathInJobSubfolder,
+  assertVersionedProofPathAvailable,
   buildProofUploadTargetFileName,
   isPathInProofsFolder,
+  proofArtifactMatchesVersion,
   resolveDropboxFileMetadata,
   resolveProofsFolderPath,
   resolveProofsFolderPathForJob,
   resolveProofsFolderPathOrThrow,
 } from "@/lib/proofs/dropbox";
+import { resolveCustomerProofDownloadFile } from "@/lib/proofs/download-file";
 import {
   buildProofReference,
   getInProgressProof,
+  highestProofVersionForManifestLineage,
   isRevisableProofStatus,
 } from "@/lib/proofs/versioning";
 import {
@@ -122,20 +126,213 @@ async function loadJobContext(
   return data as JobContext;
 }
 
-export async function nextProofVersion(adminClient: SupabaseClient, jobId: string) {
-  const { data, error } = await adminClient
+export async function nextProofVersionForManifestItems(
+  adminClient: SupabaseClient,
+  jobId: string,
+  productionItemIds: string[]
+) {
+  const { data: proofs, error } = await adminClient
     .from("job_proofs")
-    .select("version_number")
-    .eq("job_id", jobId)
-    .order("version_number", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .select("id, version_number")
+    .eq("job_id", jobId);
 
   if (error) {
     throw new ProofError(error.message, 500);
   }
 
-  return (data?.version_number ?? 0) + 1;
+  const proofIds = (proofs ?? []).map((proof) => proof.id as string);
+  if (!proofIds.length) {
+    return 1;
+  }
+
+  const { data: links, error: linkError } = await adminClient
+    .from("job_proof_manifest_items")
+    .select("proof_id, production_item_id")
+    .in("proof_id", proofIds);
+
+  if (linkError) {
+    throw new ProofError(linkError.message, 500);
+  }
+
+  const itemsByProofId = new Map<string, string[]>();
+  for (const link of links ?? []) {
+    const proofId = link.proof_id as string;
+    const items = itemsByProofId.get(proofId) ?? [];
+    items.push(link.production_item_id as string);
+    itemsByProofId.set(proofId, items);
+  }
+
+  const lineageProofs = (proofs ?? []).map((proof) => ({
+    version_number: proof.version_number as number,
+    productionItemIds: itemsByProofId.get(proof.id as string) ?? [],
+  }));
+
+  return highestProofVersionForManifestLineage(lineageProofs, productionItemIds) + 1;
+}
+
+export async function proofHasGeneratedCustomerArtifact(
+  adminClient: SupabaseClient,
+  proofId: string
+) {
+  const customerProof = await loadProofFileRecord(adminClient, proofId, "customer_proof");
+  if (customerProof?.dropbox_path) {
+    return true;
+  }
+
+  const { data: preflight, error } = await adminClient
+    .from("job_proof_preflight")
+    .select("generated_at")
+    .eq("proof_id", proofId)
+    .maybeSingle();
+
+  if (error) {
+    if (error.code === "42703" || error.code === "42P01") {
+      return false;
+    }
+    throw new ProofError(error.message, 500);
+  }
+
+  return Boolean(preflight?.generated_at);
+}
+
+export async function forkProofForNextGeneration(
+  adminClient: SupabaseClient,
+  {
+    jobId,
+    sourceProofId,
+    actorProfileId,
+  }: {
+    jobId: string;
+    sourceProofId: string;
+    actorProfileId: string;
+  }
+) {
+  const job = await loadJobContext(adminClient, jobId);
+  const sourceProof = await loadMutableProof(adminClient, jobId, sourceProofId);
+
+  const { data: manifestLinks, error: linkLoadError } = await adminClient
+    .from("job_proof_manifest_items")
+    .select("production_item_id")
+    .eq("proof_id", sourceProofId);
+
+  if (linkLoadError) {
+    throw new ProofError(linkLoadError.message, 500);
+  }
+
+  const productionItemIds = (manifestLinks ?? []).map(
+    (link) => link.production_item_id as string
+  );
+
+  if (!productionItemIds.length) {
+    throw new ProofError("The source proof has no linked manifest items.", 409);
+  }
+
+  const versionNumber = await nextProofVersionForManifestItems(
+    adminClient,
+    jobId,
+    productionItemIds
+  );
+
+  if (versionNumber <= (sourceProof.version_number as number)) {
+    throw new ProofError(
+      "Unable to determine the next proof version for this manifest item lineage.",
+      409
+    );
+  }
+
+  const sourceArtwork = await loadProofFileRecord(adminClient, sourceProofId, "source_artwork");
+  if (!sourceArtwork?.dropbox_path) {
+    throw new ProofError("Attach revised source artwork before generating the next proof version.", 409);
+  }
+
+  const proofReference = buildProofReference(job.job_reference, versionNumber);
+  const now = new Date().toISOString();
+
+  const { data: proof, error } = await adminClient
+    .from("job_proofs")
+    .insert({
+      job_id: jobId,
+      company_id: job.company_id,
+      proof_reference: proofReference,
+      version_number: versionNumber,
+      status: "draft",
+      title: sourceProof.title,
+      artwork_origin: sourceProof.artwork_origin,
+      customer_message: sourceProof.customer_message,
+      internal_note: sourceProof.internal_note,
+      created_by_profile_id: actorProfileId,
+      updated_at: now,
+    })
+    .select(PROOF_SELECT)
+    .single();
+
+  if (error || !proof) {
+    throw new ProofError(error?.message ?? "Unable to create the next proof version.", 500);
+  }
+
+  const { error: manifestError } = await adminClient.from("job_proof_manifest_items").insert(
+    productionItemIds.map((productionItemId) => ({
+      proof_id: proof.id,
+      production_item_id: productionItemId,
+    }))
+  );
+
+  if (manifestError) {
+    throw new ProofError(manifestError.message, 500);
+  }
+
+  const { error: sourceCopyError } = await adminClient.from("job_proof_files").insert({
+    proof_id: proof.id,
+    file_role: "source_artwork",
+    job_file_id: sourceArtwork.job_file_id,
+    dropbox_file_id: sourceArtwork.dropbox_file_id,
+    dropbox_path: sourceArtwork.dropbox_path,
+    dropbox_revision: sourceArtwork.dropbox_revision,
+    file_name: sourceArtwork.file_name,
+    mime_type: sourceArtwork.mime_type,
+    file_size_bytes: sourceArtwork.file_size_bytes,
+    content_hash: sourceArtwork.content_hash,
+  });
+
+  if (sourceCopyError) {
+    throw new ProofError(sourceCopyError.message, 500);
+  }
+
+  await adminClient
+    .from("job_proofs")
+    .update({
+      status: "superseded",
+      superseded_at: now,
+      updated_at: now,
+    })
+    .eq("id", sourceProofId);
+
+  await syncJobProofWorkflowStatus(adminClient, jobId);
+
+  await logProofActivity(adminClient, {
+    activityType: PROOF_ACTIVITY_TYPES.proofCreated,
+    description: `${proofReference} created as the next version after ${sourceProof.proof_reference}.`,
+    companyId: job.company_id,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
+    actorProfileId,
+    metadata: {
+      job_id: jobId,
+      proof_id: proof.id,
+      version_number: versionNumber,
+      superseded_proof_id: sourceProofId,
+      superseded_version_number: sourceProof.version_number,
+      production_item_ids: productionItemIds,
+    },
+  });
+
+  revalidateJobPages({
+    jobId,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
+  });
+
+  return proof;
 }
 
 async function loadManifestItemsByIds(
@@ -470,7 +667,11 @@ export async function createJobProof(
     input.productionItemIds
   );
   const sourceFile = await resolveSourceFileMetadata(adminClient, job, input);
-  const versionNumber = await nextProofVersion(adminClient, jobId);
+  const versionNumber = await nextProofVersionForManifestItems(
+    adminClient,
+    jobId,
+    input.productionItemIds
+  );
   const proofReference = buildProofReference(job.job_reference, versionNumber);
   const now = new Date().toISOString();
 
@@ -632,7 +833,11 @@ export async function createRevisedJobProof(
 
   await loadManifestItemsByIds(adminClient, jobId, productionItemIds);
 
-  const versionNumber = await nextProofVersion(adminClient, jobId);
+  const versionNumber = await nextProofVersionForManifestItems(
+    adminClient,
+    jobId,
+    productionItemIds
+  );
   const proofReference = buildProofReference(job.job_reference, versionNumber);
   const now = new Date().toISOString();
 
@@ -670,6 +875,38 @@ export async function createRevisedJobProof(
 
   if (linkError) {
     throw new ProofError(linkError.message, 500);
+  }
+
+  const { data: sourceArtwork, error: sourceArtworkError } = await adminClient
+    .from("job_proof_files")
+    .select(PROOF_FILE_SELECT)
+    .eq("proof_id", sourceProofId)
+    .eq("file_role", "source_artwork")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (sourceArtworkError) {
+    throw new ProofError(sourceArtworkError.message, 500);
+  }
+
+  if (sourceArtwork) {
+    const { error: sourceCopyError } = await adminClient.from("job_proof_files").insert({
+      proof_id: proof.id,
+      file_role: "source_artwork",
+      job_file_id: sourceArtwork.job_file_id,
+      dropbox_file_id: sourceArtwork.dropbox_file_id,
+      dropbox_path: sourceArtwork.dropbox_path,
+      dropbox_revision: sourceArtwork.dropbox_revision,
+      file_name: sourceArtwork.file_name,
+      mime_type: sourceArtwork.mime_type,
+      file_size_bytes: sourceArtwork.file_size_bytes,
+      content_hash: sourceArtwork.content_hash,
+    });
+
+    if (sourceCopyError) {
+      throw new ProofError(sourceCopyError.message, 500);
+    }
   }
 
   await syncJobProofWorkflowStatus(adminClient, jobId);
@@ -758,7 +995,10 @@ async function loadProofFileRecord(
     query = query.eq("file_role", fileRole);
   }
 
-  const { data, error } = await query.limit(1).maybeSingle();
+  const { data, error } = await query
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
   if (error) {
     throw new ProofError(error.message, 500);
@@ -1158,6 +1398,11 @@ export async function uploadProofFileToProofsFolder(
   });
   const dropboxPath = `${proofsFolderPath}/${targetFileName}`;
 
+  await assertVersionedProofPathAvailable(dropboxPath, {
+    versionNumber: proof.version_number,
+    targetFileName,
+  });
+
   const uploaded = await uploadSmallDropboxFile({
     dropboxPath,
     body: fileBuffer,
@@ -1314,12 +1559,15 @@ export async function loadCustomerProofDownloadFile(
     customerVisible?: boolean;
   }
 ) {
-  const { data: proof, error } = await adminClient
-    .from("job_proofs")
-    .select(PROOF_SELECT)
-    .eq("id", proofId)
-    .eq("job_id", jobId)
-    .maybeSingle();
+  const [{ data: proof, error }, job] = await Promise.all([
+    adminClient
+      .from("job_proofs")
+      .select(PROOF_SELECT)
+      .eq("id", proofId)
+      .eq("job_id", jobId)
+      .maybeSingle(),
+    loadJobContext(adminClient, jobId),
+  ]);
 
   if (error || !proof) {
     throw new ProofError("Proof not found.", 404);
@@ -1332,21 +1580,34 @@ export async function loadCustomerProofDownloadFile(
     throw new ProofError("Proof is not available.", 403);
   }
 
-  const sourceArtwork = await loadProofFileRecord(adminClient, proofId, "source_artwork");
-  const customerProof = await loadProofFileRecord(adminClient, proofId, "customer_proof");
-  const proofFile = sourceArtwork
-    ? customerProof
-    : customerProof ?? (await loadProofFileRecord(adminClient, proofId));
+  const resolved = await resolveCustomerProofDownloadFile(adminClient, {
+    jobId,
+    proofId,
+    versionNumber: proof.version_number as number,
+    dropboxFolderPath: job.dropbox_folder_path,
+    jobReference: job.job_reference,
+    repairStaleReference: true,
+  });
 
-  if (!proofFile?.dropbox_path) {
-    throw new ProofError("Proof file is not ready to download.", 409);
-  }
-
-  if (sourceArtwork && !customerProof?.dropbox_path) {
-    throw new ProofError("The branded customer proof PDF has not been generated yet.", 409);
-  }
-
-  return { proof, proofFile };
+  return {
+    proof,
+    proofFile: {
+      id: resolved.id,
+      proof_id: resolved.proof_id,
+      file_role: "customer_proof" as const,
+      job_file_id: null,
+      dropbox_file_id: null,
+      dropbox_path: resolved.dropbox_path,
+      dropbox_revision: null,
+      file_name: resolved.file_name,
+      mime_type: resolved.mime_type,
+      file_size_bytes: resolved.file_size_bytes,
+      content_hash: resolved.content_hash,
+      preview_dropbox_path: null,
+      preview_metadata: null,
+      created_at: null,
+    },
+  };
 }
 
 export async function markProofReadyToSend(
@@ -1434,6 +1695,19 @@ export async function sendJobProof(
     job.dropbox_folder_path,
     "Attach a proof PDF or image before sending."
   );
+
+  if (
+    !proofArtifactMatchesVersion(
+      proofFile.file_name as string,
+      proofFile.dropbox_path as string,
+      proof.version_number as number
+    )
+  ) {
+    throw new ProofError(
+      `The customer-facing proof file must match proof v${proof.version_number as number}. Generate the branded PDF for this version before sending.`,
+      409
+    );
+  }
 
   const proofsFolderPath = resolveProofsFolderPathOrThrow(
     job.dropbox_folder_path,

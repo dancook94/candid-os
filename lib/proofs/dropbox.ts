@@ -208,6 +208,16 @@ export function buildCustomerProofPdfFileName(input: {
   return `${safeJob}-Proof-v${input.versionNumber}.${extension}`;
 }
 
+/** True when a proof PDF filename or Dropbox path includes `-Proof-v{N}`. */
+export function proofArtifactMatchesVersion(
+  fileName: string | null | undefined,
+  dropboxPath: string | null | undefined,
+  versionNumber: number
+) {
+  const token = `-Proof-v${versionNumber}`;
+  return `${fileName ?? ""}\0${dropboxPath ?? ""}`.includes(token);
+}
+
 export function buildProofUploadTargetFileName({
   itemReference,
   jobReference,
@@ -286,6 +296,31 @@ export async function resolveDropboxFileMetadata(path: string) {
   }
 
   return metadata;
+}
+
+export async function assertVersionedProofPathAvailable(
+  dropboxPath: string,
+  {
+    versionNumber,
+    targetFileName,
+  }: {
+    versionNumber: number;
+    targetFileName: string;
+  }
+) {
+  try {
+    await resolveDropboxFileMetadata(dropboxPath);
+    throw new ProofError(
+      `Proof v${versionNumber} file "${targetFileName}" already exists in Dropbox. The proof version state is inconsistent — refresh the job page or create a revised proof before generating again.`,
+      409
+    );
+  } catch (error) {
+    if (error instanceof ProofError && error.status === 404) {
+      return;
+    }
+
+    throw error;
+  }
 }
 
 export function assertDropboxPathInJobSubfolder(
