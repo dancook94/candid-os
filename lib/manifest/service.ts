@@ -9,6 +9,7 @@ import {
   MANIFEST_ITEM_SELECT,
 } from "@/lib/manifest/constants";
 import type { ManifestSourceType } from "@/lib/manifest/constants";
+import { loadProductionProofGate } from "@/lib/manifest/production-gates";
 import { calculateProductionReadiness } from "@/lib/manifest/readiness";
 import type {
   CancelManifestItemInput,
@@ -344,9 +345,12 @@ export async function getJobProductionReadiness(
 ) {
   const job = await loadJob(adminClient, jobId);
   const { items } = await loadManifestItemsForJob(adminClient, jobId);
+  const proofGate = await loadProductionProofGate(adminClient, jobId);
 
   return calculateProductionReadiness(items, {
     hasOverride: Boolean(job.ready_to_print_override_at),
+    proofGateSatisfied: !proofGate.proofBlocked,
+    proofStatusLabel: proofGate.proofStatusLabel,
   });
 }
 

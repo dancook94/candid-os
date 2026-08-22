@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { CustomerJobArtworkSection } from "@/components/customer-job-artwork-section";
+import { CustomerJobProofsSection } from "@/components/proofs/customer-job-proofs-section";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { requireCustomerSettingsContext } from "@/lib/customer-settings/auth";
 import { loadCustomerJobDetail } from "@/lib/jobs/loaders";
+import { loadCustomerJobProofingContext } from "@/lib/proofs/loaders";
 import {
   buildCustomerAppShellProps,
   requireCustomerPortalUser,
@@ -78,7 +80,10 @@ export default async function CustomerJobDetailPage({
 
   await requireCustomerSettingsContext(supabase, user);
 
-  const job = await loadCustomerJobDetail(supabase, profile.company_id, id);
+  const [job, proofing] = await Promise.all([
+    loadCustomerJobDetail(supabase, profile.company_id, id),
+    loadCustomerJobProofingContext(id),
+  ]);
 
   if (!job) {
     notFound();
@@ -157,6 +162,18 @@ export default async function CustomerJobDetailPage({
             </CardContent>
           </Card>
         ) : null}
+
+        <Card className="portal-surface mb-6 overflow-hidden">
+          <CardContent className="pt-6">
+            <CustomerJobProofsSection
+              jobId={job.id}
+              proofRequired={proofing.proofRequired}
+              workflowStatus={proofing.workflowStatus}
+              proofs={proofing.proofs}
+              schemaMissing={proofing.schemaMissing}
+            />
+          </CardContent>
+        </Card>
 
         <Card className="portal-surface overflow-hidden">
           <CardContent className="pt-6">

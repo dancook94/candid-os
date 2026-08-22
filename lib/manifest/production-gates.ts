@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { loadJobProofRequired } from "@/lib/jobs/proof-required";
+import { loadManifestItemsForJob } from "@/lib/manifest/service";
+import { evaluateJobProofGate } from "@/lib/proofs/gates";
 
 export type ProductionProofGate = {
   proofRequired: boolean;
@@ -9,71 +10,35 @@ export type ProductionProofGate = {
   proofStatusLabel: string;
 };
 
-/**
- * Proof gate for Ready to Print. When proofing tables are not yet deployed,
- * jobs are not blocked — only structure is in place for the next phase.
- */
 export async function loadProductionProofGate(
   adminClient: SupabaseClient,
   jobId: string
 ): Promise<ProductionProofGate> {
-  const proofRequired = await loadJobProofRequired(adminClient, jobId);
+  let manifestItems: Awaited<ReturnType<typeof loadManifestItemsForJob>>["items"] = [];
 
-  if (!proofRequired) {
-    return {
-      proofRequired: false,
-      proofApproved: true,
-      proofBlocked: false,
-      proofStatusLabel: "Proof not required",
-    };
+  try {
+    const manifestResult = await loadManifestItemsForJob(adminClient, jobId);
+    manifestItems = manifestResult.items;
+  } catch {
+    manifestItems = [];
   }
 
-  const proofState = await loadJobProofApprovalState(adminClient, jobId);
+  const evaluation = await evaluateJobProofGate(adminClient, jobId, manifestItems);
 
-  if (!proofState.available) {
+  if (!evaluation.schemaAvailable) {
     return {
-      proofRequired: true,
-      proofApproved: true,
+      proofRequired: evaluation.proofRequired,
+      proofApproved: !evaluation.proofRequired,
       proofBlocked: false,
-      proofStatusLabel: "Awaiting proof workflow",
+      proofStatusLabel: evaluation.proofStatusLabel,
     };
   }
 
   return {
-    proofRequired: true,
-    proofApproved: proofState.approved,
-    proofBlocked: !proofState.approved,
-    proofStatusLabel: proofState.approved ? "Proof approved" : proofState.label,
-  };
-}
-
-async function loadJobProofApprovalState(
-  adminClient: SupabaseClient,
-  jobId: string
-): Promise<
-  | { available: false }
-  | { available: true; approved: boolean; label: string }
-> {
-  const { data, error } = await adminClient
-    .from("jobs")
-    .select("proof_approved_at, proof_status")
-    .eq("id", jobId)
-    .maybeSingle();
-
-  if (error) {
-    return { available: false };
-  }
-
-  if (!data || (data.proof_approved_at === undefined && data.proof_status === undefined)) {
-    return { available: false };
-  }
-
-  const approved = Boolean(data.proof_approved_at) || data.proof_status === "approved";
-
-  return {
-    available: true,
-    approved,
-    label: approved ? "Proof approved" : "Proof approval required",
+    proofRequired: evaluation.proofRequired,
+    proofApproved: evaluation.proofApproved,
+    proofBlocked: evaluation.proofBlocked,
+    proofStatusLabel: evaluation.proofStatusLabel,
   };
 }
 

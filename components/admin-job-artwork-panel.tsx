@@ -35,6 +35,13 @@ type AdminJobFile = {
 type AdminJobArtworkPanelProps = {
   jobId: string;
   files: AdminJobFile[];
+  manifestItems?: Array<{ id: string; item_reference: string | null; item_name: string }>;
+  fileManifestLinks?: Array<{
+    jobFileId: string;
+    productionItemId: string;
+    itemReference: string | null;
+    itemName: string;
+  }>;
 };
 
 function getAdminArtworkStatusLabel(file: AdminJobFile) {
@@ -51,12 +58,19 @@ function mapArtworkStatusToBadge(file: AdminJobFile) {
   );
 }
 
-export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps) {
+export function AdminJobArtworkPanel({
+  jobId,
+  files,
+  manifestItems = [],
+  fileManifestLinks = [],
+}: AdminJobArtworkPanelProps) {
   const [expandedFileId, setExpandedFileId] = useState<string | null>(null);
   const [pendingFileId, setPendingFileId] = useState<string | null>(null);
   const [changesComments, setChangesComments] = useState<Record<string, string>>({});
   const [internalNotesByFile, setInternalNotesByFile] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
+  const [linkingFileId, setLinkingFileId] = useState<string | null>(null);
+  const [selectedLinkItemIds, setSelectedLinkItemIds] = useState<string[]>([]);
   const [reconcilingFileId, setReconcilingFileId] = useState<string | null>(null);
 
   async function reconcileUpload(fileId: string) {
@@ -108,6 +122,34 @@ export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps
     window.location.reload();
   }
 
+  async function linkFileToItems(fileId: string) {
+    setError(null);
+    setPendingFileId(fileId);
+
+    const response = await fetch(`/api/admin/jobs/${jobId}/file-manifest-links`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        jobFileId: fileId,
+        productionItemIds: selectedLinkItemIds,
+      }),
+    });
+
+    const payload = (await response.json()) as { error?: string };
+    setPendingFileId(null);
+
+    if (!response.ok) {
+      setError(payload.error ?? "Unable to link artwork to manifest items.");
+      return;
+    }
+
+    window.location.reload();
+  }
+
+  function linksForFile(fileId: string) {
+    return fileManifestLinks.filter((link) => link.jobFileId === fileId);
+  }
+
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold text-neutral-950">Customer artwork</h2>
@@ -137,7 +179,20 @@ export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps
               <tbody>
                 {files.map((file) => (
                   <tr key={file.id}>
-                    <td className="p-4 font-medium text-foreground">{file.file_name}</td>
+                    <td className="p-4 font-medium text-foreground">
+                      <div>{file.file_name}</div>
+                      {linksForFile(file.id).length ? (
+                        <ul className="mt-1 text-xs font-normal text-muted-foreground">
+                          {linksForFile(file.id).map((link) => (
+                            <li key={link.productionItemId}>
+                              {link.itemReference
+                                ? `${link.itemReference} · ${link.itemName}`
+                                : link.itemName}
+                            </li>
+                          ))}
+                        </ul>
+                      ) : null}
+                    </td>
                     <td className="p-4 text-muted-foreground">v{file.version_number}</td>
                     <td className="p-4">
                       <StatusBadge
@@ -177,6 +232,21 @@ export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps
                             Reconcile
                           </Button>
                         ) : null}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setLinkingFileId((current) =>
+                              current === file.id ? null : file.id
+                            );
+                            setSelectedLinkItemIds(
+                              linksForFile(file.id).map((link) => link.productionItemId)
+                            );
+                          }}
+                        >
+                          Link items
+                        </Button>
                         <Button
                           type="button"
                           variant="outline"
@@ -285,6 +355,58 @@ export function AdminJobArtworkPanel({ jobId, files }: AdminJobArtworkPanelProps
                     }
                   >
                     Request changes
+                  </Button>
+                </div>
+              </div>
+            ) : null
+          )}
+
+          {files.map((file) =>
+            linkingFileId === file.id ? (
+              <div
+                key={`link-${file.id}`}
+                className="rounded-xl border border-border bg-background p-4"
+              >
+                <p className="font-medium text-neutral-950">
+                  Link {file.file_name} to manifest items
+                </p>
+                <div className="mt-3 space-y-2">
+                  {manifestItems.map((item) => (
+                    <label key={item.id} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={selectedLinkItemIds.includes(item.id)}
+                        onChange={(event) => {
+                          setSelectedLinkItemIds((current) =>
+                            event.target.checked
+                              ? [...current, item.id]
+                              : current.filter((id) => id !== item.id)
+                          );
+                        }}
+                      />
+                      <span>
+                        {item.item_reference ? `${item.item_reference} · ` : ""}
+                        {item.item_name}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-4 flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={pendingFileId === file.id || selectedLinkItemIds.length === 0}
+                    onClick={() => linkFileToItems(file.id)}
+                  >
+                    Save links
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setLinkingFileId(null)}
+                  >
+                    Cancel
                   </Button>
                 </div>
               </div>

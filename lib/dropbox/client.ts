@@ -315,6 +315,28 @@ export async function createDropboxFolder(path: string) {
   }
 }
 
+export async function copyDropboxFile({
+  fromPath,
+  toPath,
+}: {
+  fromPath: string;
+  toPath: string;
+}) {
+  const response = await dropboxApiRequest<{ metadata: DropboxFileMetadata }>(
+    "/2/files/copy_v2",
+    {
+      body: {
+        from_path: fromPath,
+        to_path: toPath,
+        allow_shared_folder: false,
+        autorename: true,
+      },
+    }
+  );
+
+  return response.metadata;
+}
+
 export async function downloadDropboxFile(path: string) {
   const accessToken = await getDropboxAccessToken();
   const response = await fetch("https://content.dropboxapi.com/2/files/download", {

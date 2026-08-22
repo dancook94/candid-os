@@ -40,6 +40,17 @@ export function buildCustomerArtworkFolderPath(
   return `${buildJobDropboxRootPath(jobReference, projectName)}/${CUSTOMER_UPLOAD_SUBFOLDER}`;
 }
 
+export const WORKING_FILES_SUBFOLDER = "02 Working Files";
+export const PROOFS_SUBFOLDER = "03 Proofs";
+
+export function buildWorkingFilesFolderPath(jobReference: string, projectName: string) {
+  return `${buildJobDropboxRootPath(jobReference, projectName)}/${WORKING_FILES_SUBFOLDER}`;
+}
+
+export function buildProofsFolderPath(jobReference: string, projectName: string) {
+  return `${buildJobDropboxRootPath(jobReference, projectName)}/${PROOFS_SUBFOLDER}`;
+}
+
 export async function ensureJobDropboxFolders({
   jobReference,
   projectName,

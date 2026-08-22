@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { AdminJobArtworkPanel } from "@/components/admin-job-artwork-panel";
 import { AdminJobArtworkSourcePanel } from "@/components/admin-job-artwork-source-panel";
 import { AdminJobDropboxPanel } from "@/components/admin-job-dropbox-panel";
+import { AdminJobProofsPanel } from "@/components/proofs/admin-job-proofs-panel";
 import { ProductionManifestPanel } from "@/components/manifest/production-manifest-panel";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
@@ -23,6 +24,8 @@ import { JOB_STATUS_LABELS } from "@/lib/jobs/constants";
 import { getAdminArtworkSourceLabel } from "@/lib/jobs/artwork-source";
 import { isDropboxConfigured } from "@/lib/dropbox/client";
 import { getJobProductionReadiness, loadManifestItemsForJob } from "@/lib/manifest/service";
+import { loadAdminJobProofingContext } from "@/lib/proofs/loaders";
+import { loadJobFileManifestLinks } from "@/lib/proofs/service";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -82,7 +85,7 @@ export default async function AdminJobDetailPage({
 
   const shellProps = await buildAdminAppShellProps(supabase, profile);
 
-  const [manifestResult, readiness] = await Promise.all([
+  const [manifestResult, readiness, proofing, fileManifestLinks] = await Promise.all([
     loadManifestItemsForJob(adminClient, id),
     getJobProductionReadiness(adminClient, id).catch(() => ({
       activeRequiredCount: 0,
@@ -91,6 +94,8 @@ export default async function AdminJobDetailPage({
       hasOverride: false,
       label: "Unable to calculate readiness",
     })),
+    loadAdminJobProofingContext(id),
+    loadJobFileManifestLinks(adminClient, id),
   ]);
 
   return (
@@ -215,9 +220,31 @@ export default async function AdminJobDetailPage({
           </CardContent>
         </Card>
 
+        <Card className="portal-surface mb-6 overflow-hidden">
+          <CardContent className="pt-6">
+            <AdminJobProofsPanel
+              jobId={detail.job.id}
+              manifestItems={manifestResult.items}
+              jobFiles={detail.files.map((file) => ({
+                id: file.id,
+                file_name: file.file_name,
+                upload_status: file.upload_status,
+              }))}
+              initialRequirement={proofing.requirement}
+              initialProofs={proofing.proofs}
+              schemaMissing={proofing.schemaMissing}
+            />
+          </CardContent>
+        </Card>
+
         <Card className="portal-surface overflow-hidden">
           <CardContent className="pt-6">
-            <AdminJobArtworkPanel jobId={detail.job.id} files={detail.files} />
+            <AdminJobArtworkPanel
+              jobId={detail.job.id}
+              files={detail.files}
+              manifestItems={manifestResult.items}
+              fileManifestLinks={fileManifestLinks}
+            />
           </CardContent>
         </Card>
       </div>
