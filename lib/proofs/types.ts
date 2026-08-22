@@ -1,6 +1,7 @@
 import type {
   ProofArtworkOrigin,
   ProofFileLocationType,
+  ProofFileRole,
   ProofInternalChecklistKey,
   ProofStatus,
   ProofWorkflowStatus,
@@ -39,6 +40,7 @@ export type JobProofRecord = {
 export type JobProofFileRecord = {
   id: string;
   proof_id: string;
+  file_role: ProofFileRole;
   job_file_id: string | null;
   dropbox_file_id: string | null;
   dropbox_path: string | null;
@@ -61,6 +63,7 @@ export type JobProofFileView = JobProofFileRecord & {
 
 export type JobProofView = JobProofRecord & {
   files: JobProofFileView[];
+  brandedPdfGeneratedAt: string | null;
   manifestItems: Array<{
     id: string;
     item_reference: string | null;

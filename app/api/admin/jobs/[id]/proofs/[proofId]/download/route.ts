@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { verifyApprovedAdmin } from "@/lib/admin-auth";
+import { downloadDropboxFile } from "@/lib/dropbox/client";
 import { jobErrorResponse } from "@/lib/jobs/api-response";
 import { requireAdminJobAccess } from "@/lib/jobs/auth";
 import { ProofError } from "@/lib/proofs/errors";
-import { uploadSourceArtworkForProof } from "@/lib/proofs/service";
+import { loadCustomerProofDownloadFile } from "@/lib/proofs/service";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -17,7 +18,7 @@ function proofErrorResponse(error: unknown) {
   return jobErrorResponse(error);
 }
 
-export async function POST(request: Request, context: RouteContext) {
+export async function GET(_request: Request, context: RouteContext) {
   try {
     const { id: jobId, proofId } = await context.params;
     const supabase = await createClient();
@@ -30,31 +31,22 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    let formData: FormData;
-    try {
-      formData = await request.formData();
-    } catch {
-      return NextResponse.json({ error: "Invalid upload payload." }, { status: 400 });
-    }
-
-    const file = formData.get("file");
-    if (!(file instanceof File)) {
-      return NextResponse.json({ error: "A proof file is required." }, { status: 400 });
-    }
-
     const adminClient = createAdminClient();
     await requireAdminJobAccess(adminClient, jobId);
 
-    const result = await uploadSourceArtworkForProof(adminClient, {
+    const { proofFile } = await loadCustomerProofDownloadFile(adminClient, {
       jobId,
       proofId,
-      fileName: file.name,
-      mimeType: file.type || null,
-      fileBuffer: await file.arrayBuffer(),
-      actorProfileId: authResult.userId,
     });
 
-    return NextResponse.json(result);
+    const downloaded = await downloadDropboxFile(proofFile.dropbox_path as string);
+
+    return new NextResponse(new Uint8Array(downloaded.buffer), {
+      headers: {
+        "Content-Type": downloaded.contentType,
+        "Content-Disposition": `attachment; filename="${proofFile.file_name}"`,
+      },
+    });
   } catch (error) {
     return proofErrorResponse(error);
   }

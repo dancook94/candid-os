@@ -9,6 +9,7 @@ import {
   type ProofFileLocationType,
 } from "@/lib/proofs/constants";
 import { PROOF_UPLOAD_MAX_BYTES_LABEL } from "@/lib/proofs/file-validation";
+import { getSourceArtworkFile } from "@/lib/proofs/proof-files";
 import type { JobProofFileView, JobProofView } from "@/lib/proofs/types";
 
 type DropboxListFile = {
@@ -83,7 +84,7 @@ export function ProofFileAttachmentPanel({
     onAttachFormOpened?.();
   }, [forceShowAttach, onAttachFormOpened]);
 
-  const proofFile = proof.files[0] as JobProofFileView | undefined;
+  const proofFile = getSourceArtworkFile(proof.files);
   const completeJobFiles = jobFiles.filter((file) => file.upload_status === "complete");
   const canEditAttachment = ["draft", "internal_review", "ready_to_send"].includes(
     proof.status
@@ -199,7 +200,7 @@ export function ProofFileAttachmentPanel({
   return (
     <div className="space-y-3 border-t border-border pt-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm font-medium">Proof file</p>
+        <p className="text-sm font-medium">Source artwork</p>
         {canEditAttachment && !showAttach ? (
           <Button
             type="button"
@@ -231,8 +232,8 @@ export function ProofFileAttachmentPanel({
             <dd>{locationLabel(proofFile.location_type)}</dd>
           </div>
           <div>
-            <dt className="text-muted-foreground">Customer-facing</dt>
-            <dd>{proofFile.is_customer_facing ? "Yes" : "No — attach a PDF or image"}</dd>
+            <dt className="text-muted-foreground">Used for</dt>
+            <dd>Preflight analysis and branded PDF generation</dd>
           </div>
           {canEditAttachment ? (
             <div className="pt-1">

@@ -16,6 +16,7 @@ import {
   type CustomerProofState,
 } from "@/lib/proofs/customer-state";
 import type { JobProofView } from "@/lib/proofs/types";
+import { getCustomerProofFile } from "@/lib/proofs/proof-files";
 
 type CustomerJobProofsSectionProps = {
   jobId: string;
@@ -168,9 +169,9 @@ export function CustomerJobProofsSection({
               </div>
             ) : null}
 
-            {proof.files[0] ? (
+            {getCustomerProofFile(proof.files) ? (
               <p className="text-sm text-muted-foreground">
-                Artwork: {proof.files[0].file_name}
+                Proof file: {getCustomerProofFile(proof.files)?.file_name}
               </p>
             ) : null}
 

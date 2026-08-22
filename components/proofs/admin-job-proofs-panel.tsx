@@ -20,6 +20,10 @@ import {
 } from "@/lib/proofs/constants";
 import type { JobProofView } from "@/lib/proofs/types";
 import type { ProofSelectableManifestItem } from "@/lib/proofs/manifest-items";
+import {
+  getSourceArtworkFile,
+  hasGeneratedCustomerProof,
+} from "@/lib/proofs/proof-files";
 import { ProofBrandedPdfPanel } from "@/components/proofs/proof-branded-pdf-panel";
 import { ProofFileAttachmentPanel } from "@/components/proofs/proof-file-attachment-panel";
 
@@ -39,6 +43,18 @@ type AdminJobProofsPanelProps = {
   initialProofs: JobProofView[];
   schemaMissing?: boolean;
 };
+
+function requiresGeneratedCustomerProof(proof: JobProofView) {
+  return Boolean(getSourceArtworkFile(proof.files));
+}
+
+function canSendBrandedProof(proof: JobProofView) {
+  if (!requiresGeneratedCustomerProof(proof)) {
+    return true;
+  }
+
+  return hasGeneratedCustomerProof(proof.files);
+}
 
 function mapProofStatusToBadge(status: string) {
   switch (status) {
@@ -703,7 +719,7 @@ export function AdminJobProofsPanel({
               {proof.status === "internal_review" ? (
                 <Button
                   type="button"
-                  disabled={pending}
+                  disabled={pending || !canSendBrandedProof(proof)}
                   onClick={() => proofAction(proof.id, "mark_ready_to_send")}
                 >
                   Mark ready to send
@@ -713,11 +729,17 @@ export function AdminJobProofsPanel({
               {proof.status === "ready_to_send" ? (
                 <Button
                   type="button"
-                  disabled={pending}
+                  disabled={pending || !canSendBrandedProof(proof)}
                   onClick={() => proofAction(proof.id, "send")}
                 >
                   Send to customer
                 </Button>
+              ) : null}
+
+              {requiresGeneratedCustomerProof(proof) && !canSendBrandedProof(proof) ? (
+                <p className="text-xs text-amber-800">
+                  Generate the branded customer proof PDF before marking ready or sending.
+                </p>
               ) : null}
 
               {["sent", "viewed"].includes(proof.status) ? (

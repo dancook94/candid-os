@@ -140,7 +140,7 @@ async function loadQuotedSpecificationItems(
   }));
 }
 
-async function loadProofAttachedArtwork(
+async function loadProofSourceArtwork(
   adminClient: SupabaseClient,
   jobId: string,
   proofId: string
@@ -151,6 +151,7 @@ async function loadProofAttachedArtwork(
     .from("job_proof_files")
     .select("job_file_id, dropbox_path, file_name, mime_type")
     .eq("proof_id", proofId)
+    .eq("file_role", "source_artwork")
     .limit(1)
     .maybeSingle();
 
@@ -185,7 +186,7 @@ export async function analyseExistingProofArtwork(
   const productionItemIds = await loadProofProductionItemIds(adminClient, proofId);
   const [quotedItems, artwork] = await Promise.all([
     loadQuotedSpecificationItems(adminClient, jobId, productionItemIds),
-    loadProofAttachedArtwork(adminClient, jobId, proofId),
+    loadProofSourceArtwork(adminClient, jobId, proofId),
   ]);
 
   const extension = getFileExtension(artwork.fileName);
@@ -215,6 +216,10 @@ export async function saveProofPreflightRecord(
     sourceDropboxPath,
     sourceJobFileId,
     reviewedByProfileId,
+    generatedAt,
+    generatedDropboxPath,
+    generatedFileName,
+    requirePersisted = false,
   }: {
     proofId: string;
     preflight: PreflightResult;
@@ -222,6 +227,10 @@ export async function saveProofPreflightRecord(
     sourceDropboxPath?: string | null;
     sourceJobFileId?: string | null;
     reviewedByProfileId?: string | null;
+    generatedAt?: string | null;
+    generatedDropboxPath?: string | null;
+    generatedFileName?: string | null;
+    requirePersisted?: boolean;
   }
 ) {
   const payload = {
@@ -234,6 +243,9 @@ export async function saveProofPreflightRecord(
     manual_overrides: manualOverrides ?? {},
     reviewed_by_profile_id: reviewedByProfileId ?? null,
     reviewed_at: reviewedByProfileId ? new Date().toISOString() : null,
+    generated_at: generatedAt ?? null,
+    generated_dropbox_path: generatedDropboxPath ?? null,
+    generated_file_name: generatedFileName ?? null,
     metadata: {
       sizeComparison: preflight.sizeComparison,
       quotedItems: preflight.quotedItems,
@@ -249,6 +261,12 @@ export async function saveProofPreflightRecord(
 
   if (error) {
     if (error.code === "42703" || error.code === "42P01") {
+      if (requirePersisted) {
+        throw new ProofError(
+          "Proof preflight schema is not deployed. Apply the proof generator migrations before generating branded PDFs.",
+          503
+        );
+      }
       return { saved: false, schemaMissing: true as const };
     }
 
@@ -278,7 +296,7 @@ export async function generateBrandedPdfForExistingProof(
 
   const { data: job, error: jobError } = await adminClient
     .from("jobs")
-    .select("company_id, quote_id, opportunity_id, job_reference, project_name")
+    .select("company_id, quote_id, opportunity_id, job_reference, project_name, dropbox_folder_path")
     .eq("id", jobId)
     .maybeSingle();
 
@@ -290,31 +308,47 @@ export async function generateBrandedPdfForExistingProof(
     throw new ProofError("Job not found.", 404);
   }
 
-  const artwork = await loadProofAttachedArtwork(adminClient, jobId, proofId);
+  if (!job.dropbox_folder_path) {
+    throw new ProofError("No Dropbox folder is linked to this job yet.", 409);
+  }
+
+  const artwork = await loadProofSourceArtwork(adminClient, jobId, proofId);
   const sourceDropboxPath = artwork.dropboxPath;
   const sourceJobFileId = artwork.jobFileId;
 
-  const generatedPdf = await generateCustomerProofPdf({
-    jobReference: job.job_reference as string,
-    projectName: job.project_name as string,
-    proofReference: proof.proof_reference as string,
-    versionNumber: proof.version_number as number,
-    customerMessage: (proof.customer_message as string | null) ?? null,
-    preflight: preflightResult,
-    sourceBuffer: artwork.buffer,
-  });
+  let generatedPdf: Buffer;
+  try {
+    generatedPdf = await generateCustomerProofPdf({
+      jobReference: job.job_reference as string,
+      projectName: job.project_name as string,
+      proofReference: proof.proof_reference as string,
+      versionNumber: proof.version_number as number,
+      customerMessage: (proof.customer_message as string | null) ?? null,
+      preflight: preflightResult,
+      sourceBuffer: artwork.buffer,
+    });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Branded proof PDF generation failed.";
+    throw new ProofError(message, 500);
+  }
 
-  await uploadProofFileToProofsFolder(adminClient, {
+  const pdfBuffer = Uint8Array.from(generatedPdf);
+
+  if (!pdfBuffer.byteLength) {
+    throw new ProofError("Branded proof PDF generation produced an empty file.", 500);
+  }
+
+  const uploadResult = await uploadProofFileToProofsFolder(adminClient, {
     jobId,
     proofId,
-    fileName: `${proof.proof_reference as string}-v${proof.version_number as number}.pdf`,
+    fileName: `${proof.proof_reference as string}.pdf`,
     mimeType: "application/pdf",
-    fileBuffer: generatedPdf.buffer.slice(
-      generatedPdf.byteOffset,
-      generatedPdf.byteOffset + generatedPdf.byteLength
-    ),
+    fileBuffer: pdfBuffer.buffer,
     actorProfileId,
   });
+
+  const generatedAt = new Date().toISOString();
 
   await saveProofPreflightRecord(adminClient, {
     proofId,
@@ -323,6 +357,10 @@ export async function generateBrandedPdfForExistingProof(
     sourceDropboxPath,
     sourceJobFileId,
     reviewedByProfileId: actorProfileId,
+    generatedAt,
+    generatedDropboxPath: uploadResult.dropboxPath,
+    generatedFileName: uploadResult.fileName,
+    requirePersisted: true,
   });
 
   await logProofActivity(adminClient, {
@@ -337,6 +375,8 @@ export async function generateBrandedPdfForExistingProof(
       proof_id: proofId,
       overall_status: preflightResult.overallStatus,
       source_dropbox_path: sourceDropboxPath,
+      generated_dropbox_path: uploadResult.dropboxPath,
+      generated_file_name: uploadResult.fileName,
     },
   });
 
@@ -346,5 +386,11 @@ export async function generateBrandedPdfForExistingProof(
     opportunityId: job.opportunity_id as string | null,
   });
 
-  return { proofId, proofReference: proof.proof_reference as string };
+  return {
+    proofId,
+    proofReference: proof.proof_reference as string,
+    generatedFileName: uploadResult.fileName,
+    generatedDropboxPath: uploadResult.dropboxPath,
+    generatedAt,
+  };
 }

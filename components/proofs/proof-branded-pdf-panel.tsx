@@ -6,7 +6,12 @@ import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
 import type { PreflightCheck, PreflightResult } from "@/lib/proof-generator/types";
 import { PROOF_ATTACHABLE_STATUSES } from "@/lib/proofs/constants";
-import { getFileExtension } from "@/lib/proofs/file-validation";
+import {
+  getCustomerProofFile,
+  getSourceArtworkFile,
+  hasGeneratedCustomerProof,
+  hasGeneratorEligibleSourceArtwork,
+} from "@/lib/proofs/proof-files";
 import type { JobProofView } from "@/lib/proofs/types";
 
 type ProofBrandedPdfPanelProps = {
@@ -45,14 +50,12 @@ function mapOverallStatusToBadge(status: PreflightResult["overallStatus"]) {
   }
 }
 
-function hasGeneratorEligibleAttachment(proof: JobProofView) {
-  const proofFile = proof.files[0];
-  if (!proofFile?.dropbox_path) {
-    return false;
+function formatTimestamp(value: string | null) {
+  if (!value) {
+    return null;
   }
 
-  const extension = getFileExtension(proofFile.file_name);
-  return ["pdf", "jpg", "jpeg", "png"].includes(extension);
+  return new Date(value).toLocaleString("en-GB");
 }
 
 export function ProofBrandedPdfPanel({
@@ -71,7 +74,10 @@ export function ProofBrandedPdfPanel({
   const canGenerate = PROOF_ATTACHABLE_STATUSES.includes(
     proof.status as (typeof PROOF_ATTACHABLE_STATUSES)[number]
   );
-  const hasAttachment = hasGeneratorEligibleAttachment(proof);
+  const sourceArtwork = getSourceArtworkFile(proof.files);
+  const customerProof = getCustomerProofFile(proof.files);
+  const hasAttachment = hasGeneratorEligibleSourceArtwork(proof.files);
+  const hasCustomerProof = hasGeneratedCustomerProof(proof.files);
 
   const warningChecks = useMemo(
     () =>
@@ -139,7 +145,10 @@ export function ProofBrandedPdfPanel({
       }
     );
 
-    const payload = (await response.json()) as { error?: string };
+    const payload = (await response.json()) as {
+      error?: string;
+      generatedFileName?: string;
+    };
 
     onPendingChange(false);
 
@@ -154,16 +163,49 @@ export function ProofBrandedPdfPanel({
     await onRefresh();
   }
 
+  function downloadCustomerProof() {
+    window.open(`/api/admin/jobs/${jobId}/proofs/${proof.id}/download`, "_blank");
+  }
+
   return (
     <div className="space-y-3 border-t border-border pt-3">
       <div>
         <p className="text-sm font-medium">Branded customer proof PDF</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          Analyse the attached artwork, review preflight checks, then generate the
-          Candid Creative branded PDF into the job&apos;s 03 Proofs folder. Source
-          artwork is retained in Dropbox.
+          Analyse the attached source artwork, review preflight checks, then generate
+          the Candid Creative branded PDF into 03 Proofs. Source artwork stays in its
+          original Dropbox location.
         </p>
       </div>
+
+      <dl className="grid gap-2 rounded-lg border border-border bg-muted/20 p-3 text-sm">
+        <div>
+          <dt className="text-muted-foreground">Source artwork</dt>
+          <dd className="font-medium">{sourceArtwork?.file_name ?? "Not attached"}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Customer proof</dt>
+          <dd className="font-medium">
+            {customerProof?.file_name ?? "Not generated yet"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Dropbox location</dt>
+          <dd>{customerProof ? "03 Proofs" : "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Generated</dt>
+          <dd>{formatTimestamp(proof.brandedPdfGeneratedAt) ?? "—"}</dd>
+        </div>
+      </dl>
+
+      {hasCustomerProof ? (
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={downloadCustomerProof}>
+            View/download generated proof
+          </Button>
+        </div>
+      ) : null}
 
       {step === "idle" ? (
         <div className="flex flex-wrap gap-2">
@@ -179,7 +221,7 @@ export function ProofBrandedPdfPanel({
               disabled={pending}
               onClick={() => void analyseArtwork()}
             >
-              Generate branded proof PDF
+              Analyse artwork & review preflight
             </Button>
           )}
         </div>
@@ -304,6 +346,12 @@ export function ProofBrandedPdfPanel({
             </Button>
           </div>
         </div>
+      ) : null}
+
+      {hasAttachment && !hasCustomerProof ? (
+        <p className="text-xs text-amber-800">
+          Generate the branded customer proof PDF before sending this proof to the customer.
+        </p>
       ) : null}
     </div>
   );
