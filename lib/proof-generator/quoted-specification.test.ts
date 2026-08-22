@@ -5,7 +5,10 @@ import {
   assertValidSourceArtworkBuffer,
   detectArtworkBufferKind,
 } from "@/lib/proof-generator/artwork-buffer";
-import { parseDimensionsFromText } from "@/lib/proof-generator/quoted-specification";
+import {
+  parseDimensionsFromText,
+  parseLabelledFieldFromText,
+} from "@/lib/proof-generator/quoted-specification";
 
 const MINIMAL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -25,6 +28,18 @@ describe("parseDimensionsFromText", () => {
       widthMm: 1200,
       heightMm: 800,
     });
+  });
+});
+
+describe("parseLabelledFieldFromText", () => {
+  it("parses material and print fields from quote descriptions", () => {
+    const description =
+      "Window vinyl graphics\nMaterial: Monomeric vinyl\nPrint: UV print\nSides: Single sided\nFinishing: Laminate";
+
+    assert.equal(parseLabelledFieldFromText(description, ["Material"]), "Monomeric vinyl");
+    assert.equal(parseLabelledFieldFromText(description, ["Print"]), "UV print");
+    assert.equal(parseLabelledFieldFromText(description, ["Sides"]), "Single sided");
+    assert.equal(parseLabelledFieldFromText(description, ["Finishing"]), "Laminate");
   });
 });
 

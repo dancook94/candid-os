@@ -1,7 +1,14 @@
 import type { PdfBoxDimensions } from "@/lib/proof-generator/types";
+import type { DetectedArtworkMetadata, PreflightCheck, SizeComparisonResult } from "@/lib/proof-generator/types";
 
-/** ASCII placeholder for missing values in generated proof PDFs. */
+/** Legacy placeholder retained for joins that still expect a dash. */
 export const PDF_MISSING_VALUE = "-";
+
+export const PDF_NOT_SPECIFIED = "Not specified";
+export const PDF_NOT_DETECTED = "Not detected";
+export const PDF_NONE_DETECTED = "None detected";
+export const PDF_MANUAL_REVIEW = "Manual review required";
+export const PDF_UNKNOWN = "Unknown";
 
 const EXPLICIT_REPLACEMENTS: ReadonlyArray<readonly [string, string]> = [
   ["\u2018", "'"],
@@ -55,13 +62,15 @@ export function sanitizePdfText(value: string | null | undefined): string {
 export function statusPrefixForCheck(status: string): string {
   switch (status) {
     case "pass":
-      return "PASS -";
+      return "PASS";
     case "warning":
-      return "WARNING -";
+      return "WARNING";
     case "manual_review":
-      return "REVIEW -";
+      return "REVIEW";
+    case "fail":
+      return "FAIL";
     default:
-      return "-";
+      return "REVIEW";
   }
 }
 
@@ -70,7 +79,7 @@ export function formatPdfDimensionsLabel(
   heightMm: number | null | undefined
 ): string {
   if (widthMm == null || heightMm == null) {
-    return PDF_MISSING_VALUE;
+    return PDF_NOT_SPECIFIED;
   }
 
   return sanitizePdfText(`${widthMm} x ${heightMm} mm`);
@@ -78,14 +87,92 @@ export function formatPdfDimensionsLabel(
 
 export function formatPdfDimensionsFromBox(dimensions: PdfBoxDimensions | null): string {
   if (!dimensions) {
-    return PDF_MISSING_VALUE;
+    return PDF_NOT_DETECTED;
   }
 
   return formatPdfDimensionsLabel(dimensions.widthMm, dimensions.heightMm);
 }
 
-export function joinPdfParts(parts: Array<string | null | undefined>, separator = " | "): string {
-  return sanitizePdfText(parts.filter(Boolean).join(separator) || PDF_MISSING_VALUE);
+export function joinPdfParts(
+  parts: Array<string | null | undefined>,
+  separator = " | ",
+  emptyLabel = PDF_NOT_SPECIFIED
+): string {
+  const joined = parts.filter(Boolean).join(separator);
+  return sanitizePdfText(joined || emptyLabel);
+}
+
+export function formatProofFieldValue(value: string | null | undefined): string {
+  if (!value?.trim()) {
+    return PDF_NOT_SPECIFIED;
+  }
+
+  return sanitizePdfText(value);
+}
+
+export function formatProofQuantity(value: number | null | undefined): string {
+  if (value == null) {
+    return PDF_NOT_SPECIFIED;
+  }
+
+  return String(value);
+}
+
+export function formatProofScaleLabel(value: string | null | undefined): string {
+  if (!value?.trim()) {
+    return PDF_NOT_DETECTED;
+  }
+
+  return sanitizePdfText(value);
+}
+
+export function formatEffectiveResolutionLabel(
+  sizeComparison: SizeComparisonResult | null | undefined
+): string {
+  if (sizeComparison?.effectiveResolutionDpi != null) {
+    return `${sizeComparison.effectiveResolutionDpi} DPI`;
+  }
+
+  if (sizeComparison?.artworkResolutionDpi != null) {
+    return `${sizeComparison.artworkResolutionDpi} DPI at artwork size`;
+  }
+
+  if (sizeComparison?.matchedScale != null) {
+    return PDF_MANUAL_REVIEW;
+  }
+
+  return PDF_NOT_DETECTED;
+}
+
+export function formatSpotColoursLabel(metadata: DetectedArtworkMetadata): string {
+  const names = metadata.spotColourNames.value;
+  const confidence = metadata.spotColourNames.confidence;
+
+  if (names.length > 0) {
+    return sanitizePdfText(names.join(", "));
+  }
+
+  if (confidence === "high" || confidence === "medium") {
+    return PDF_NONE_DETECTED;
+  }
+
+  return PDF_NOT_DETECTED;
+}
+
+export function formatBleedMetadataLabel(check: PreflightCheck | undefined): string {
+  if (!check) {
+    return PDF_MANUAL_REVIEW;
+  }
+
+  if (check.status === "manual_review") {
+    return PDF_MANUAL_REVIEW;
+  }
+
+  if (check.message?.trim()) {
+    return sanitizePdfText(check.message);
+  }
+
+  return PDF_NOT_DETECTED;
 }
 
 export function formatPreflightCheckLine(input: {
@@ -94,6 +181,6 @@ export function formatPreflightCheckLine(input: {
   message: string;
 }): string {
   return sanitizePdfText(
-    `${statusPrefixForCheck(input.status)} ${input.label}: ${input.message}`
+    `${statusPrefixForCheck(input.status)} - ${input.label}: ${input.message}`
   );
 }

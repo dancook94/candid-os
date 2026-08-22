@@ -2,6 +2,8 @@ import type { PDFDocument, PDFImage, PDFPage, PDFFont } from "pdf-lib";
 import { rgb } from "pdf-lib";
 
 import {
+  PROOF_PDF_LOGO_DISPLAY_WIDTH,
+  PROOF_PDF_LOGO_RASTER_SCALE,
   PROOF_PDF_MARGIN,
   PROOF_PDF_PAGE_HEIGHT,
   PROOF_PDF_PAGE_WIDTH,
@@ -9,7 +11,7 @@ import {
 } from "@/lib/proof-generator/pdf-brand";
 import type { PreflightCheck } from "@/lib/proof-generator/types";
 import {
-  PDF_MISSING_VALUE,
+  formatProofFieldValue,
   sanitizePdfText,
   statusPrefixForCheck,
 } from "@/lib/proof-generator/pdf-text";
@@ -40,11 +42,7 @@ export type ProofPdfFonts = {
 
 type DrawTextOptions = Parameters<PDFPage["drawText"]>[1];
 
-function drawText(
-  page: PDFPage,
-  text: string,
-  options: DrawTextOptions
-) {
+function drawText(page: PDFPage, text: string, options: DrawTextOptions) {
   page.drawText(sanitizePdfText(text), options);
 }
 
@@ -65,17 +63,17 @@ function statusColors(status: PreflightCheck["status"]) {
   }
 }
 
-function statusLabel(status: PreflightCheck["status"]) {
-  return statusPrefixForCheck(status).replace(/ -$/, "").trim();
-}
-
-export async function embedCandidLogo(doc: PDFDocument, maxWidth = 128) {
-  const pngBuffer = await loadCandidLogoPng(maxWidth);
+export async function embedCandidLogo(
+  doc: PDFDocument,
+  displayWidth = PROOF_PDF_LOGO_DISPLAY_WIDTH
+) {
+  const rasterWidth = Math.round(displayWidth * PROOF_PDF_LOGO_RASTER_SCALE);
+  const pngBuffer = await loadCandidLogoPng(rasterWidth);
   const image = await doc.embedPng(pngBuffer);
   const aspect = image.width / image.height;
-  const width = maxWidth;
+  const width = displayWidth;
   const height = width / aspect;
-  return { image, width, height };
+  return { image, width, height, rasterWidth };
 }
 
 export function drawProofPageHeader(
@@ -111,7 +109,7 @@ export function drawProofPageHeader(
     color: PROOF_PDF_THEME.yellow,
   });
 
-  const dividerY = top - logo.height - 10;
+  const dividerY = top - logo.height - 8;
   page.drawLine({
     start: { x: PROOF_PDF_MARGIN, y: dividerY },
     end: { x: PROOF_PDF_PAGE_WIDTH - PROOF_PDF_MARGIN, y: dividerY },
@@ -119,18 +117,18 @@ export function drawProofPageHeader(
     color: PROOF_PDF_THEME.border,
   });
 
-  return dividerY - 18;
+  return dividerY - 14;
 }
 
 export function drawProofHeroTitle(page: PDFPage, fonts: ProofPdfFonts, y: number) {
   const proofForText = sanitizePdfText("PROOF FOR");
   const approvalText = sanitizePdfText("APPROVAL");
-  const proofForWidth = fonts.bold.widthOfTextAtSize(proofForText, 28);
+  const proofForWidth = fonts.bold.widthOfTextAtSize(proofForText, 26);
 
   drawText(page, proofForText, {
     x: PROOF_PDF_MARGIN,
     y,
-    size: 28,
+    size: 26,
     font: fonts.bold,
     color: PROOF_PDF_THEME.text,
   });
@@ -138,12 +136,12 @@ export function drawProofHeroTitle(page: PDFPage, fonts: ProofPdfFonts, y: numbe
   drawText(page, approvalText, {
     x: PROOF_PDF_MARGIN + proofForWidth + 8,
     y,
-    size: 28,
+    size: 26,
     font: fonts.bold,
     color: PROOF_PDF_THEME.yellow,
   });
 
-  return y - 34;
+  return y - 28;
 }
 
 export function drawMetaField(
@@ -173,15 +171,15 @@ export function drawMetaField(
 
   drawText(page, value, {
     x,
-    y: y - 12,
+    y: y - 11,
     size: 10,
     font: fonts.regular,
     color: PROOF_PDF_THEME.text,
     maxWidth: width,
-    lineHeight: 12,
+    lineHeight: 11,
   });
 
-  return y - 28;
+  return y - 26;
 }
 
 export function drawMetaGrid(
@@ -212,7 +210,7 @@ export function drawMetaGrid(
     }
   });
 
-  return Math.min(leftY, rightY) - 8;
+  return Math.min(leftY, rightY) - 6;
 }
 
 export function drawArtworkPreviewFrame(
@@ -243,7 +241,7 @@ export function drawArtworkPreviewFrame(
     borderWidth: 0.75,
   });
 
-  const padding = 10;
+  const padding = 8;
   const innerWidth = width - padding * 2;
   const innerHeight = height - padding * 2;
 
@@ -318,7 +316,7 @@ export function drawCustomerMessagePanel(
   }
 ) {
   const lineCount = estimateWrappedLineCount(message, width - 24, fonts.regular, 10);
-  const panelHeight = 34 + lineCount * 12;
+  const panelHeight = 32 + lineCount * 12;
 
   page.drawRectangle({
     x,
@@ -340,7 +338,7 @@ export function drawCustomerMessagePanel(
 
   drawText(page, "CUSTOMER MESSAGE", {
     x: x + 14,
-    y: y - 16,
+    y: y - 15,
     size: 8,
     font: fonts.bold,
     color: PROOF_PDF_THEME.muted,
@@ -348,7 +346,7 @@ export function drawCustomerMessagePanel(
 
   drawText(page, message, {
     x: x + 14,
-    y: y - 30,
+    y: y - 28,
     size: 10,
     font: fonts.regular,
     color: PROOF_PDF_THEME.text,
@@ -356,13 +354,14 @@ export function drawCustomerMessagePanel(
     lineHeight: 12,
   });
 
-  return y - panelHeight - 10;
+  return y - panelHeight - 8;
 }
 
 export function drawApprovalFooterBar(
   page: PDFPage,
   fonts: ProofPdfFonts,
-  text: string
+  text: string,
+  secondaryText?: string
 ) {
   const barHeight = 34;
   const y = PROOF_PDF_MARGIN;
@@ -391,82 +390,175 @@ export function drawApprovalFooterBar(
     color: PROOF_PDF_THEME.footerText,
   });
 
+  if (secondaryText) {
+    drawText(page, secondaryText, {
+      x: PROOF_PDF_PAGE_WIDTH - PROOF_PDF_MARGIN - fonts.regular.widthOfTextAtSize(secondaryText, 8),
+      y: y + 12,
+      size: 8,
+      font: fonts.regular,
+      color: PROOF_PDF_THEME.footerText,
+    });
+  }
+
   return y + barHeight + 10;
 }
 
-export function drawSectionHeading(
-  page: PDFPage,
-  fonts: ProofPdfFonts,
-  title: string,
-  x: number,
-  y: number
+function estimateSpecificationRowsHeight(
+  rows: Array<{ label: string; value: string }>,
+  width: number,
+  fonts: ProofPdfFonts
 ) {
-  drawText(page, title, {
-    x,
-    y,
-    size: 11,
-    font: fonts.bold,
-    color: PROOF_PDF_THEME.text,
-  });
+  let height = 0;
 
-  return y - 16;
+  for (const row of rows) {
+    const valueLines = estimateWrappedLineCount(row.value, width - 108, fonts.regular, 9);
+    height += Math.max(13, valueLines * 11 + 1);
+  }
+
+  return height;
 }
 
-export function drawSubsectionHeading(
-  page: PDFPage,
-  fonts: ProofPdfFonts,
-  title: string,
-  x: number,
-  y: number
-) {
-  drawText(page, title.toUpperCase(), {
-    x,
-    y,
-    size: 8,
-    font: fonts.bold,
-    color: PROOF_PDF_THEME.muted,
-  });
-
-  return y - 14;
-}
-
-export function drawSpecificationRow(
+export function drawSpecificationSectionCard(
   page: PDFPage,
   fonts: ProofPdfFonts,
   {
-    label,
-    value,
+    title,
     x,
     y,
     width,
+    rows,
   }: {
-    label: string;
-    value: string;
+    title: string;
     x: number;
     y: number;
     width: number;
+    rows: Array<{ label: string; value: string }>;
   }
 ) {
-  drawText(page, label, {
+  const padding = 12;
+  const titleBlock = 22;
+  const rowsHeight = estimateSpecificationRowsHeight(rows, width - padding * 2, fonts);
+  const cardHeight = padding + titleBlock + rowsHeight + padding;
+
+  page.drawRectangle({
     x,
-    y,
-    size: 9,
-    font: fonts.regular,
-    color: PROOF_PDF_THEME.muted,
+    y: y - cardHeight,
+    width,
+    height: cardHeight,
+    color: PROOF_PDF_THEME.panel,
+    borderColor: PROOF_PDF_THEME.border,
+    borderWidth: 0.75,
   });
 
-  const valueLines = estimateWrappedLineCount(value, width - 96, fonts.regular, 9);
-  drawText(page, value, {
-    x: x + 96,
-    y,
+  page.drawRectangle({
+    x,
+    y: y - 2,
+    width,
+    height: 2,
+    color: PROOF_PDF_THEME.yellow,
+  });
+
+  drawText(page, title.toUpperCase(), {
+    x: x + padding,
+    y: y - padding - 10,
     size: 9,
     font: fonts.bold,
     color: PROOF_PDF_THEME.text,
-    maxWidth: width - 96,
-    lineHeight: 11,
   });
 
-  return y - Math.max(14, valueLines * 11 + 2);
+  let rowY = y - padding - titleBlock;
+
+  for (const row of rows) {
+    drawText(page, row.label, {
+      x: x + padding,
+      y: rowY,
+      size: 8,
+      font: fonts.regular,
+      color: PROOF_PDF_THEME.muted,
+    });
+
+    const valueLines = estimateWrappedLineCount(
+      row.value,
+      width - padding * 2 - 96,
+      fonts.regular,
+      9
+    );
+    drawText(page, row.value, {
+      x: x + padding + 96,
+      y: rowY,
+      size: 9,
+      font: fonts.bold,
+      color: PROOF_PDF_THEME.text,
+      maxWidth: width - padding * 2 - 96,
+      lineHeight: 11,
+    });
+
+    rowY -= Math.max(13, valueLines * 11 + 1);
+  }
+
+  return y - cardHeight - 12;
+}
+
+export function drawPreflightSectionCard(
+  page: PDFPage,
+  fonts: ProofPdfFonts,
+  {
+    title,
+    x,
+    y,
+    width,
+    checks,
+  }: {
+    title: string;
+    x: number;
+    y: number;
+    width: number;
+    checks: PreflightCheck[];
+  }
+) {
+  const padding = 12;
+  let checksHeight = 0;
+
+  for (const check of checks) {
+    const messageLines = estimateWrappedLineCount(check.message, width - padding * 2 - 24, fonts.regular, 8);
+    checksHeight += 34 + messageLines * 10 + 8;
+  }
+
+  const cardHeight = padding + 22 + checksHeight + padding;
+
+  page.drawRectangle({
+    x,
+    y: y - cardHeight,
+    width,
+    height: cardHeight,
+    color: PROOF_PDF_THEME.panel,
+    borderColor: PROOF_PDF_THEME.border,
+    borderWidth: 0.75,
+  });
+
+  page.drawRectangle({
+    x,
+    y: y - 2,
+    width,
+    height: 2,
+    color: PROOF_PDF_THEME.yellow,
+  });
+
+  drawText(page, title.toUpperCase(), {
+    x: x + padding,
+    y: y - padding - 10,
+    size: 9,
+    font: fonts.bold,
+    color: PROOF_PDF_THEME.text,
+  });
+
+  let cardY = y - padding - 22;
+
+  for (const check of checks) {
+    cardY = drawPreflightStatusCard(page, fonts, check, x + padding, cardY, width - padding * 2);
+  }
+
+  return y - cardHeight - 12;
 }
 
 export function drawPreflightStatusCard(
@@ -478,10 +570,10 @@ export function drawPreflightStatusCard(
   width: number
 ) {
   const colors = statusColors(check.status);
-  const label = statusLabel(check.status);
+  const label = statusPrefixForCheck(check.status);
   const message = sanitizePdfText(check.message);
-  const messageLines = estimateWrappedLineCount(message, width - 58, fonts.regular, 8);
-  const cardHeight = 28 + messageLines * 10;
+  const messageLines = estimateWrappedLineCount(message, width - 24, fonts.regular, 8);
+  const cardHeight = 34 + messageLines * 10;
 
   page.drawRectangle({
     x,
@@ -493,35 +585,43 @@ export function drawPreflightStatusCard(
     borderWidth: 0.5,
   });
 
+  page.drawRectangle({
+    x,
+    y: y - cardHeight,
+    width: 4,
+    height: cardHeight,
+    color: colors.accent,
+  });
+
   page.drawCircle({
-    x: x + 12,
+    x: x + 14,
     y: y - 14,
-    size: 4,
+    size: 3.5,
     color: colors.accent,
   });
 
   drawText(page, label, {
-    x: x + 22,
-    y: y - 16,
-    size: 8,
+    x: x + 24,
+    y: y - 13,
+    size: 7,
     font: fonts.bold,
     color: colors.accent,
   });
 
   drawText(page, check.label, {
-    x: x + 22,
-    y: y - 28,
+    x: x + 24,
+    y: y - 24,
     size: 9,
     font: fonts.bold,
     color: PROOF_PDF_THEME.text,
   });
 
   drawText(page, message, {
-    x: x + 22,
-    y: y - 40,
+    x: x + 24,
+    y: y - 36,
     size: 8,
     font: fonts.regular,
-    color: PROOF_PDF_THEME.text,
+    color: PROOF_PDF_THEME.muted,
     maxWidth: width - 28,
     lineHeight: 10,
   });
@@ -540,18 +640,14 @@ export function drawApprovalDisclaimer(
   drawText(page, text, {
     x,
     y,
-    size: 8,
+    size: 8.5,
     font: fonts.regular,
-    color: PROOF_PDF_THEME.muted,
+    color: PROOF_PDF_THEME.text,
     maxWidth: width,
-    lineHeight: 11,
+    lineHeight: 12,
   });
 }
 
 export function formatProofValue(value: string | null | undefined) {
-  if (!value?.trim()) {
-    return PDF_MISSING_VALUE;
-  }
-
-  return sanitizePdfText(value);
+  return formatProofFieldValue(value);
 }

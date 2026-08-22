@@ -4,6 +4,8 @@ import { describe, it } from "node:test";
 import {
   formatPdfDimensionsLabel,
   formatPreflightCheckLine,
+  formatProofFieldValue,
+  PDF_NOT_SPECIFIED,
   sanitizePdfText,
   statusPrefixForCheck,
 } from "@/lib/proof-generator/pdf-text";
@@ -36,9 +38,10 @@ describe("sanitizePdfText", () => {
 
 describe("statusPrefixForCheck", () => {
   it("uses ASCII status prefixes for preflight lines", () => {
-    assert.equal(statusPrefixForCheck("pass"), "PASS -");
-    assert.equal(statusPrefixForCheck("warning"), "WARNING -");
-    assert.equal(statusPrefixForCheck("manual_review"), "REVIEW -");
+    assert.equal(statusPrefixForCheck("pass"), "PASS");
+    assert.equal(statusPrefixForCheck("warning"), "WARNING");
+    assert.equal(statusPrefixForCheck("manual_review"), "REVIEW");
+    assert.equal(statusPrefixForCheck("fail"), "FAIL");
   });
 });
 
@@ -67,5 +70,16 @@ describe("formatPreflightCheckLine", () => {
 describe("formatPdfDimensionsLabel", () => {
   it("uses x instead of multiplication sign", () => {
     assert.equal(formatPdfDimensionsLabel(1200, 800), "1200 x 800 mm");
+  });
+
+  it("returns Not specified when dimensions are missing", () => {
+    assert.equal(formatPdfDimensionsLabel(null, 800), PDF_NOT_SPECIFIED);
+  });
+});
+
+describe("formatProofFieldValue", () => {
+  it("returns Not specified for empty values", () => {
+    assert.equal(formatProofFieldValue(null), PDF_NOT_SPECIFIED);
+    assert.equal(formatProofFieldValue("  "), PDF_NOT_SPECIFIED);
   });
 });

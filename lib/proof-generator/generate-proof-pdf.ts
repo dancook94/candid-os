@@ -13,27 +13,30 @@ import {
   drawArtworkPreviewFrame,
   drawCustomerMessagePanel,
   drawMetaGrid,
-  drawPreflightStatusCard,
+  drawPreflightSectionCard,
   drawProofHeroTitle,
   drawProofPageHeader,
-  drawSectionHeading,
-  drawSpecificationRow,
-  drawSubsectionHeading,
+  drawSpecificationSectionCard,
   embedCandidLogo,
   estimateWrappedLineCount,
-  formatProofValue,
 } from "@/lib/proof-generator/pdf-layout";
 import {
-  PDF_MISSING_VALUE,
-  formatPdfDimensionsFromBox,
+  PDF_NOT_SPECIFIED,
+  formatBleedMetadataLabel,
+  formatEffectiveResolutionLabel,
   formatPdfDimensionsLabel,
+  formatPdfDimensionsFromBox,
+  formatProofFieldValue,
+  formatProofQuantity,
+  formatProofScaleLabel,
+  formatSpotColoursLabel,
   joinPdfParts,
 } from "@/lib/proof-generator/pdf-text";
 import type { PreflightResult } from "@/lib/proof-generator/types";
 
 const TOTAL_PAGES = 2;
 const FOOTER_BAR_HEIGHT = 34;
-const FOOTER_GAP = 10;
+const FOOTER_GAP = 8;
 
 function contentWidth() {
   return PROOF_PDF_PAGE_WIDTH - PROOF_PDF_MARGIN * 2;
@@ -64,6 +67,11 @@ export async function generateCustomerProofPdf(input: {
     const fonts = { regular, bold };
     const logo = await embedCandidLogo(doc);
 
+    logProofGeneratorDebug("proof_pdf_logo_embedded", {
+      displayWidthPt: logo.width,
+      rasterWidthPx: logo.rasterWidth,
+    });
+
     const primaryItem = input.preflight.quotedItems[0] ?? null;
     const customerMessage = input.customerMessage?.trim() ?? "";
     const pageSize = input.preflight.metadata.pageSize.value;
@@ -81,8 +89,8 @@ export async function generateCustomerProofPdf(input: {
       {
         label: "Related item",
         value: primaryItem
-          ? joinPdfParts([primaryItem.itemReference ?? PDF_MISSING_VALUE, primaryItem.itemName])
-          : PDF_MISSING_VALUE,
+          ? joinPdfParts([primaryItem.itemReference, primaryItem.itemName], " | ", PDF_NOT_SPECIFIED)
+          : PDF_NOT_SPECIFIED,
       },
     ]);
 
@@ -91,10 +99,10 @@ export async function generateCustomerProofPdf(input: {
       ? estimateWrappedLineCount(customerMessage, contentWidth() - 24, regular, 10)
       : 0;
     const customerMessageHeight = customerMessage
-      ? 34 + customerMessageLines * 12 + 10
+      ? 32 + customerMessageLines * 12 + 8
       : 0;
-    const previewBoxBottom = footerTop + customerMessageHeight + 8;
-    const previewBoxHeight = Math.max(240, y - 12 - previewBoxBottom);
+    const previewBoxBottom = footerTop + customerMessageHeight + 6;
+    const previewBoxHeight = Math.max(260, y - 8 - previewBoxBottom);
     const previewBoxWidth = contentWidth();
 
     const preview = await embedArtworkPreview(doc, input.sourceBuffer, input.sourceFileName);
@@ -103,6 +111,10 @@ export async function generateCustomerProofPdf(input: {
       sourceFileName: input.sourceFileName,
       previewMethod: preview.previewMethod,
       previewKind: preview.kind,
+      previewPixelWidth:
+        preview.kind === "image" ? preview.image.width : Math.round(preview.width),
+      previewPixelHeight:
+        preview.kind === "image" ? preview.image.height : Math.round(preview.height),
     });
 
     drawArtworkPreviewFrame(page1, {
@@ -138,7 +150,8 @@ export async function generateCustomerProofPdf(input: {
     drawApprovalFooterBar(
       page1,
       fonts,
-      "Please review this proof carefully before approval."
+      "Please review this proof carefully before approval.",
+      "Candid Creative"
     );
 
     const leftX = PROOF_PDF_MARGIN;
@@ -149,76 +162,74 @@ export async function generateCustomerProofPdf(input: {
     const page2 = doc.addPage([PROOF_PDF_PAGE_WIDTH, PROOF_PDF_PAGE_HEIGHT]);
     const contentStartY = drawProofPageHeader(page2, fonts, logo, 2, TOTAL_PAGES);
 
-    let leftY = contentStartY;
-    leftY = drawSectionHeading(page2, fonts, "PRODUCTION SPECIFICATION", leftX, leftY);
-    leftY = drawSubsectionHeading(page2, fonts, "Quoted", leftX, leftY);
-
     const quotedRows = [
-      [
-        "Finished size",
-        primaryItem?.quotedWidthMm != null && primaryItem?.quotedHeightMm != null
-          ? formatPdfDimensionsLabel(primaryItem.quotedWidthMm, primaryItem.quotedHeightMm)
-          : PDF_MISSING_VALUE,
-      ],
-      ["Quantity", primaryItem?.quantity != null ? String(primaryItem.quantity) : PDF_MISSING_VALUE],
-      ["Material", formatProofValue(primaryItem?.material ?? null)],
-      ["Print specification", formatProofValue(primaryItem?.printSpecification ?? null)],
-      ["Sides / finishing", joinPdfParts([primaryItem?.sides, primaryItem?.finishing])],
-    ] as const;
-
-    for (const [label, value] of quotedRows) {
-      leftY = drawSpecificationRow(page2, fonts, {
-        label,
-        value,
-        x: leftX,
-        y: leftY,
-        width: leftWidth,
-      });
-    }
-
-    leftY -= 6;
-    leftY = drawSubsectionHeading(page2, fonts, "Artwork supplied", leftX, leftY);
+      {
+        label: "Finished size",
+        value:
+          primaryItem?.quotedWidthMm != null && primaryItem?.quotedHeightMm != null
+            ? formatPdfDimensionsLabel(primaryItem.quotedWidthMm, primaryItem.quotedHeightMm)
+            : PDF_NOT_SPECIFIED,
+      },
+      { label: "Quantity", value: formatProofQuantity(primaryItem?.quantity ?? null) },
+      { label: "Material", value: formatProofFieldValue(primaryItem?.material ?? null) },
+      {
+        label: "Print specification",
+        value: formatProofFieldValue(primaryItem?.printSpecification ?? null),
+      },
+      {
+        label: "Sides / finishing",
+        value: joinPdfParts([primaryItem?.sides, primaryItem?.finishing]),
+      },
+    ];
 
     const suppliedRows = [
-      ["Detected size", formatPdfDimensionsFromBox(pageSize)],
-      ["Scale", formatProofValue(sizeComparison?.matchedScaleLabel ?? null)],
-      [
-        "Page count",
-        input.preflight.metadata.pageCount != null
-          ? String(input.preflight.metadata.pageCount)
-          : PDF_MISSING_VALUE,
-      ],
-      ["Colour mode", formatProofValue(input.preflight.metadata.colourMode.value ?? "Unknown")],
-      [
-        "Effective resolution",
-        sizeComparison?.effectiveResolutionDpi != null
-          ? `${sizeComparison.effectiveResolutionDpi} DPI`
-          : PDF_MISSING_VALUE,
-      ],
-      ["Bleed metadata", formatProofValue(bleedCheck?.message ?? null)],
-      [
-        "Spot colours",
-        formatProofValue(input.preflight.metadata.spotColourNames.value.join(", ") || null),
-      ],
-    ] as const;
+      { label: "Detected size", value: formatPdfDimensionsFromBox(pageSize) },
+      { label: "Scale", value: formatProofScaleLabel(sizeComparison?.matchedScaleLabel ?? null) },
+      {
+        label: "Page count",
+        value:
+          input.preflight.metadata.pageCount != null
+            ? String(input.preflight.metadata.pageCount)
+            : PDF_NOT_SPECIFIED,
+      },
+      {
+        label: "Colour mode",
+        value: formatProofFieldValue(input.preflight.metadata.colourMode.value ?? null),
+      },
+      {
+        label: "Effective resolution",
+        value: formatEffectiveResolutionLabel(sizeComparison),
+      },
+      { label: "Bleed metadata", value: formatBleedMetadataLabel(bleedCheck) },
+      { label: "Spot colours", value: formatSpotColoursLabel(input.preflight.metadata) },
+    ];
 
-    for (const [label, value] of suppliedRows) {
-      leftY = drawSpecificationRow(page2, fonts, {
-        label,
-        value,
-        x: leftX,
-        y: leftY,
-        width: leftWidth,
-      });
-    }
+    let leftY = contentStartY;
+    leftY = drawSpecificationSectionCard(page2, fonts, {
+      title: "Quoted specification",
+      x: leftX,
+      y: leftY,
+      width: leftWidth,
+      rows: quotedRows,
+    });
 
-    let rightY = contentStartY;
-    rightY = drawSectionHeading(page2, fonts, "AUTOMATED PREFLIGHT", rightX, rightY);
+    drawSpecificationSectionCard(page2, fonts, {
+      title: "Artwork supplied",
+      x: leftX,
+      y: leftY,
+      width: leftWidth,
+      rows: suppliedRows,
+    });
 
     const preflightChecks = input.preflight.checks.filter((check) => check.status !== "info");
-    for (const check of preflightChecks.slice(0, 7)) {
-      rightY = drawPreflightStatusCard(page2, fonts, check, rightX, rightY, rightWidth);
-    }
+
+    drawPreflightSectionCard(page2, fonts, {
+      title: "Automated preflight",
+      x: rightX,
+      y: contentStartY,
+      width: rightWidth,
+      checks: preflightChecks.slice(0, 7),
+    });
 
     const disclaimer =
       "Please check all wording, spelling, positioning, dimensions and visual content carefully.\n\nApproval confirms that the artwork shown in this proof is authorised to proceed to production.\n\nColours shown on screen may vary from the final printed result.";
@@ -228,8 +239,15 @@ export async function generateCustomerProofPdf(input: {
       fonts,
       disclaimer,
       PROOF_PDF_MARGIN,
-      PROOF_PDF_MARGIN + 72,
+      PROOF_PDF_MARGIN + FOOTER_BAR_HEIGHT + 88,
       contentWidth()
+    );
+
+    drawApprovalFooterBar(
+      page2,
+      fonts,
+      "Please review this proof carefully before approval.",
+      "Candid Creative"
     );
 
     const bytes = await doc.save();

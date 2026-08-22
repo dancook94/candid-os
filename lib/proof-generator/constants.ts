@@ -35,7 +35,7 @@ export const SIZE_MATCH_TOLERANCE_MM = 2;
 export const SCALE_RATIO_TOLERANCE = 0.01;
 
 /** Maximum preview pixel dimension embedded in customer proof PDFs. */
-export const PROOF_PDF_PREVIEW_MAX_PX = 1400;
+export const PROOF_PDF_PREVIEW_MAX_PX = 2000;
 
 /** Tolerance when snapping calculated scale to a common production scale (1%). */
 export const COMMON_SCALE_SNAP_TOLERANCE = 0.01;

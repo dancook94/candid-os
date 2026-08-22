@@ -52,8 +52,129 @@ export function parseDimensionsFromText(
   return null;
 }
 
-function buildPrintSpecification(item: ManifestItemRecord) {
-  return [item.material, item.media_profile, item.machine].filter(Boolean).join(" | ") || null;
+export function parseLabelledFieldFromText(
+  text: string | null | undefined,
+  labels: string[]
+): string | null {
+  if (!text?.trim()) {
+    return null;
+  }
+
+  for (const label of labels) {
+    const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(
+      `(?:^|[\\n\\r]|\\|)\\s*${escaped}\\s*[:\\-]\\s*([^\\n\\r|]+)`,
+      "i"
+    );
+    const match = text.match(pattern);
+    if (match?.[1]?.trim()) {
+      return match[1].trim();
+    }
+  }
+
+  return null;
+}
+
+function firstNonEmpty(...values: Array<string | null | undefined>) {
+  for (const value of values) {
+    if (value?.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function collectDescriptionSources(
+  item: ManifestItemRecord,
+  quoteItem: QuoteItemRow | null
+) {
+  return [item.description, quoteItem?.description].filter(Boolean).join("\n");
+}
+
+function resolveMaterial(
+  item: ManifestItemRecord,
+  quoteItem: QuoteItemRow | null
+) {
+  const descriptionText = collectDescriptionSources(item, quoteItem);
+
+  return firstNonEmpty(
+    item.material,
+    parseLabelledFieldFromText(descriptionText, ["Material", "Substrate", "Media"]),
+    item.media_profile
+  );
+}
+
+function buildPrintSpecification(
+  item: ManifestItemRecord,
+  quoteItem: QuoteItemRow | null
+) {
+  const structured = [item.material, item.media_profile, item.machine]
+    .filter(Boolean)
+    .join(" | ");
+
+  if (structured) {
+    return structured;
+  }
+
+  const descriptionText = collectDescriptionSources(item, quoteItem);
+
+  return firstNonEmpty(
+    parseLabelledFieldFromText(descriptionText, [
+      "Print specification",
+      "Print spec",
+      "Print",
+      "Process",
+      "Media profile",
+      "Machine",
+    ]),
+    item.media_profile,
+    item.machine
+  );
+}
+
+function formatSidesValue(value: string | null) {
+  if (!value?.trim()) {
+    return null;
+  }
+
+  switch (value.trim().toLowerCase()) {
+    case "single":
+      return "Single sided";
+    case "double":
+      return "Double sided";
+    default:
+      return value.trim();
+  }
+}
+
+function resolveSides(
+  item: ManifestItemRecord,
+  quoteItem: QuoteItemRow | null
+) {
+  const descriptionText = collectDescriptionSources(item, quoteItem);
+
+  return firstNonEmpty(
+    item.sides ? formatSidesValue(item.sides) : null,
+    parseLabelledFieldFromText(descriptionText, ["Sides", "Side"])
+  );
+}
+
+function resolveFinishing(
+  item: ManifestItemRecord,
+  quoteItem: QuoteItemRow | null
+) {
+  const descriptionText = collectDescriptionSources(item, quoteItem);
+
+  return firstNonEmpty(
+    item.finishing_notes,
+    parseLabelledFieldFromText(descriptionText, [
+      "Finishing",
+      "Finish",
+      "Finishing notes",
+      "Lamination",
+    ])
+  );
 }
 
 function resolveQuotedDimensions(
@@ -97,10 +218,10 @@ function mapManifestItemToQuotedSpecification(
     quantity: parseNumeric(item.quantity) ?? parseNumeric(item.quoted_quantity),
     quotedWidthMm: widthMm,
     quotedHeightMm: heightMm,
-    material: item.material?.trim() || null,
-    printSpecification: buildPrintSpecification(item),
-    sides: item.sides?.trim() || null,
-    finishing: item.finishing_notes?.trim() || null,
+    material: resolveMaterial(item, quoteItem),
+    printSpecification: buildPrintSpecification(item, quoteItem),
+    sides: resolveSides(item, quoteItem),
+    finishing: resolveFinishing(item, quoteItem),
     notes: item.internal_note?.trim() || null,
   };
 }

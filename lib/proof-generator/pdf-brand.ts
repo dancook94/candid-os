@@ -13,8 +13,32 @@ export const PROOF_PDF_PAGE_WIDTH = 595.28;
 export const PROOF_PDF_PAGE_HEIGHT = 841.89;
 export const PROOF_PDF_MARGIN = 42;
 
-export async function loadCandidLogoPng(maxWidth = 128) {
-  const logoPath = path.join(process.cwd(), "public", "LOGO_YELLOW.svg");
-  const svg = await fs.readFile(logoPath);
-  return sharp(svg).png().resize({ width: maxWidth }).toBuffer();
+/** Logo width drawn in PDF points (slightly smaller than original 128pt). */
+export const PROOF_PDF_LOGO_DISPLAY_WIDTH = 96;
+
+/** Rasterise SVG at this multiple of display width for crisp zoom/print. */
+export const PROOF_PDF_LOGO_RASTER_SCALE = 4;
+
+export const PROOF_PDF_LOGO_PATH = path.join(process.cwd(), "public", "LOGO_YELLOW.svg");
+
+let cachedLogoPng: Buffer | null = null;
+let cachedLogoRasterWidth = 0;
+
+/**
+ * Rasterise the canonical Candid SVG logo to a high-resolution transparent PNG for pdf-lib.
+ * Cached in memory so repeated proof generations do not re-degrade the asset.
+ */
+export async function loadCandidLogoPng(rasterWidth: number) {
+  if (cachedLogoPng && cachedLogoRasterWidth === rasterWidth) {
+    return cachedLogoPng;
+  }
+
+  const svg = await fs.readFile(PROOF_PDF_LOGO_PATH);
+  cachedLogoPng = await sharp(svg, { density: 300 })
+    .png()
+    .resize({ width: rasterWidth })
+    .toBuffer();
+  cachedLogoRasterWidth = rasterWidth;
+
+  return cachedLogoPng;
 }
