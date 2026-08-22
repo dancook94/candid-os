@@ -1,6 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { applyEmailModeRedirect } from "@/lib/notifications/email-mode";
+import { applyEmailModeRedirect, getEmailMode } from "@/lib/notifications/email-mode";
+import { logNotificationStage } from "@/lib/notifications/debug-log";
+import {
+  getNotificationErrorDetails,
+  isNotificationsSchemaMissingError,
+  toAdminSafeNotificationFailureReason,
+  getSkippedReasonLabel,
+} from "@/lib/notifications/errors";
 import { resolveNotificationReplyTo } from "@/lib/notifications/reply-to";
 import { isCustomerEmailEnabled } from "@/lib/notifications/preferences";
 import { sendEmailThroughResend } from "@/lib/notifications/resend-client";
@@ -58,8 +65,28 @@ export type SendNotificationResult = {
     duplicate?: boolean;
   }>;
   skippedReason?: string | null;
+  failureReason?: string | null;
+  adminMessage?: string | null;
   duplicate?: boolean;
 };
+
+function buildSkippedResult(input: {
+  ok: boolean;
+  skippedReason: string;
+  notificationIds?: string[];
+  results?: SendNotificationResult["results"];
+  duplicate?: boolean;
+}): SendNotificationResult {
+  return {
+    ok: input.ok,
+    notificationIds: input.notificationIds ?? [],
+    results: input.results ?? [],
+    skippedReason: input.skippedReason,
+    failureReason: input.skippedReason,
+    adminMessage: getSkippedReasonLabel(input.skippedReason),
+    duplicate: input.duplicate,
+  };
+}
 
 type NotificationRowInsert = {
   notification_type: string;
@@ -99,7 +126,7 @@ async function findExistingByIdempotencyKey(
     .maybeSingle();
 
   if (error) {
-    if (error.code === "42P01") {
+    if (error.code === "42P01" || error.code === "PGRST205") {
       return null;
     }
 
@@ -120,8 +147,10 @@ async function insertNotification(
     .single();
 
   if (error) {
-    if (error.code === "42P01") {
-      throw new Error("notifications_schema_missing");
+    if (isNotificationsSchemaMissingError(error)) {
+      throw Object.assign(new Error("notifications_schema_missing"), {
+        cause: error,
+      });
     }
 
     throw error;
@@ -227,6 +256,24 @@ async function deliverEmailNotification(
 ) {
   const rendered = renderNotificationEmail(input.type, input.metadata ?? {});
   const audience = audienceForType(input.type);
+  const emailMode = getEmailMode();
+  const redirectPreview = applyEmailModeRedirect({
+    intendedRecipient,
+    subject: rendered.subject,
+  });
+
+  logNotificationStage("template_rendered", {
+    type: input.type,
+    profileId: input.profileId ?? null,
+    templateKey: input.type,
+    subject: rendered.subject,
+    audience,
+    emailMode: emailMode.mode,
+    intendedRecipient,
+    actualRecipient: redirectPreview.actualRecipient,
+    redirected: redirectPreview.redirected,
+  });
+
   const idempotencyKey = input.idempotencyKey
     ? idempotencySuffix
       ? `${input.idempotencyKey}:${idempotencySuffix}`
@@ -255,11 +302,32 @@ async function deliverEmailNotification(
     buildBaseRow(input, audience, intendedRecipient, rendered.subject)
   );
 
+  logNotificationStage("database_inserted", {
+    type: input.type,
+    profileId: input.profileId ?? null,
+    notificationId,
+    idempotencyKey,
+    intendedRecipient,
+  });
+
   const sendResult = await sendEmailThroughResend({
     intendedRecipient,
     subject: rendered.subject,
     html: rendered.html,
     replyTo: resolveNotificationReplyTo(input.type),
+  });
+
+  logNotificationStage("resend_result", {
+    type: input.type,
+    profileId: input.profileId ?? null,
+    notificationId,
+    ok: sendResult.ok,
+    intendedRecipient: sendResult.intendedRecipient,
+    actualRecipient: "actualRecipient" in sendResult ? sendResult.actualRecipient : null,
+    providerMessageId: sendResult.ok ? sendResult.providerMessageId : null,
+    errorCode: sendResult.ok ? null : sendResult.errorCode,
+    error: sendResult.ok ? null : sendResult.error,
+    emailMode: emailMode.mode,
   });
 
   const now = new Date().toISOString();
@@ -324,7 +392,26 @@ export async function sendNotification(
   input: SendNotificationInput
 ): Promise<SendNotificationResult> {
   try {
+    logNotificationStage("start", {
+      type: input.type,
+      profileId: input.profileId ?? null,
+      companyId: input.companyId ?? null,
+      contactId: input.contactId ?? null,
+      idempotencyKey: input.idempotencyKey ?? null,
+      emailMode: getEmailMode().mode,
+    });
+
     const settings = await loadNotificationSettings(adminClient);
+
+    logNotificationStage("settings_loaded", {
+      type: input.type,
+      customerEnabled: isCustomerType(input.type)
+        ? isCustomerNotificationEnabled(settings, input.type)
+        : null,
+      internalEnabled: isInternalType(input.type)
+        ? isInternalNotificationEnabled(settings, input.type)
+        : null,
+    });
 
     if (input.recipientEmailOverride) {
       const rendered = renderNotificationEmail(input.type, input.metadata ?? {});
@@ -348,17 +435,24 @@ export async function sendNotification(
           reason: "suppressed_by_admin_setting",
         });
 
-        return {
+        return buildSkippedResult({
           ok: true,
-          notificationIds: notificationId ? [notificationId] : [],
-          results: [],
           skippedReason: "suppressed_by_admin_setting",
-        };
+          notificationIds: notificationId ? [notificationId] : [],
+        });
       }
 
       const preference = await isCustomerEmailEnabled(adminClient, {
         contactId: input.contactId,
         notificationType: input.type,
+      });
+
+      logNotificationStage("preference_checked", {
+        type: input.type,
+        profileId: input.profileId ?? null,
+        contactId: input.contactId ?? null,
+        enabled: preference.enabled,
+        reason: preference.reason,
       });
 
       if (!preference.enabled) {
@@ -367,12 +461,11 @@ export async function sendNotification(
           reason: preference.reason ?? "suppressed_by_preference",
         });
 
-        return {
+        return buildSkippedResult({
           ok: true,
+          skippedReason: preference.reason ?? "suppressed_by_preference",
           notificationIds: notificationId ? [notificationId] : [],
-          results: [],
-          skippedReason: preference.reason,
-        };
+        });
       }
 
       const recipient = await resolveCustomerRecipient(adminClient, {
@@ -381,18 +474,24 @@ export async function sendNotification(
         profileId: input.profileId,
       });
 
+      logNotificationStage("recipient_resolved", {
+        type: input.type,
+        profileId: input.profileId ?? null,
+        recipientEmail: recipient?.email ?? null,
+        recipientProfileId: recipient?.profileId ?? null,
+      });
+
       if (!recipient) {
         const notificationId = await recordNotificationIssue(adminClient, input, {
           status: "failed",
           reason: "missing_recipient",
         });
 
-        return {
+        return buildSkippedResult({
           ok: false,
-          notificationIds: notificationId ? [notificationId] : [],
-          results: [],
           skippedReason: "missing_recipient",
-        };
+          notificationIds: notificationId ? [notificationId] : [],
+        });
       }
 
       const result = await deliverEmailNotification(
@@ -406,6 +505,12 @@ export async function sendNotification(
         notificationIds: [result.notificationId],
         results: [result],
         duplicate: result.duplicate,
+        skippedReason: result.status === "failed" ? result.errorCode ?? "resend_failed" : null,
+        failureReason: result.status === "failed" ? result.errorCode ?? "resend_failed" : null,
+        adminMessage:
+          result.status === "failed"
+            ? result.error ?? getSkippedReasonLabel(result.errorCode ?? "resend_failed")
+            : null,
       };
     }
 
@@ -416,12 +521,11 @@ export async function sendNotification(
           reason: "suppressed_by_admin_setting",
         });
 
-        return {
+        return buildSkippedResult({
           ok: true,
-          notificationIds: notificationId ? [notificationId] : [],
-          results: [],
           skippedReason: "suppressed_by_admin_setting",
-        };
+          notificationIds: notificationId ? [notificationId] : [],
+        });
       }
 
       const emails = resolveInternalRecipients(
@@ -434,12 +538,11 @@ export async function sendNotification(
           reason: "missing_internal_recipients",
         });
 
-        return {
+        return buildSkippedResult({
           ok: false,
-          notificationIds: notificationId ? [notificationId] : [],
-          results: [],
           skippedReason: "missing_internal_recipients",
-        };
+          notificationIds: notificationId ? [notificationId] : [],
+        });
       }
 
       const results = [];
@@ -461,25 +564,32 @@ export async function sendNotification(
       };
     }
 
-    return {
+    return buildSkippedResult({
       ok: false,
-      notificationIds: [],
-      results: [],
       skippedReason: "unsupported_notification_type",
-    };
+    });
   } catch (error) {
-    if (process.env.NODE_ENV === "development") {
-      console.error("[notifications] sendNotification failed", {
-        type: input.type,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
+    const details = getNotificationErrorDetails(error);
+    const adminFailure = toAdminSafeNotificationFailureReason(error);
+
+    logNotificationStage("failed", {
+      type: input.type,
+      profileId: input.profileId ?? null,
+      failureReason: adminFailure.reason,
+      adminMessage: adminFailure.message,
+      errorCode: details.code,
+      errorMessage: details.message,
+      errorDetails: details.details,
+      errorHint: details.hint,
+    });
 
     return {
       ok: false,
       notificationIds: [],
       results: [],
-      skippedReason: error instanceof Error ? error.message : "notification_failed",
+      skippedReason: adminFailure.reason,
+      failureReason: adminFailure.reason,
+      adminMessage: adminFailure.message,
     };
   }
 }

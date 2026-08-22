@@ -30,15 +30,25 @@ export function ResendAccountReadyButton({
       const payload = (await response.json()) as {
         error?: string;
         ok?: boolean;
-        notification?: { ok?: boolean; skippedReason?: string | null };
+        notification?: {
+          ok?: boolean;
+          skippedReason?: string | null;
+          failureReason?: string | null;
+          adminMessage?: string | null;
+        };
       };
 
       if (!response.ok) {
         throw new Error(payload.error ?? "Unable to resend account-ready email.");
       }
 
-      if (payload.notification?.ok === false && payload.notification.skippedReason) {
-        setError(`Email not sent: ${payload.notification.skippedReason}`);
+      if (payload.notification?.ok === false) {
+        const message =
+          payload.notification.adminMessage ??
+          payload.notification.failureReason ??
+          payload.notification.skippedReason ??
+          "Notification delivery failed.";
+        setError(`Email not sent: ${message}`);
       } else {
         setMessage("Account-ready email sent. Check Admin → Notifications for delivery details.");
       }

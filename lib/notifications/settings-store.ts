@@ -5,6 +5,7 @@ import {
   normalizeNotificationSettings,
   type NotificationSettingsPayload,
 } from "@/lib/notifications/settings";
+import { isNotificationsSchemaMissingError } from "@/lib/notifications/errors";
 
 const SINGLETON_KEY = "default";
 
@@ -18,7 +19,7 @@ export async function loadNotificationSettings(
     .maybeSingle();
 
   if (error) {
-    if (error.code === "42P01") {
+    if (isNotificationsSchemaMissingError(error)) {
       return getDefaultNotificationSettings();
     }
 

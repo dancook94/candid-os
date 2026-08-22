@@ -3,6 +3,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAdminArtworkSourceLabel } from "@/lib/jobs/artwork-source";
 import type { JobArtworkSource } from "@/lib/jobs/types";
 import { loadProfileNotificationContext } from "@/lib/notifications/profile-recipient";
+import {
+  getSkippedReasonLabel,
+  toAdminSafeNotificationFailureReason,
+} from "@/lib/notifications/errors";
 import { sendNotification } from "@/lib/notifications/send-notification";
 import { buildAbsoluteUrl } from "@/lib/notifications/templates";
 
@@ -200,6 +204,8 @@ export async function notifyCustomerAccountApproved(
     ok: result.ok,
     notificationIds: result.notificationIds,
     skippedReason: result.skippedReason ?? null,
+    failureReason: result.failureReason ?? null,
+    adminMessage: result.adminMessage ?? null,
   });
 
   return result;
@@ -214,11 +220,15 @@ export async function notifyCustomerAccountApprovedSafe(
     return await notifyCustomerAccountApproved(adminClient, profileId, options);
   } catch (error) {
     logNotificationFailure("customer_account_approved", error);
+    const adminFailure = toAdminSafeNotificationFailureReason(error);
+
     return {
       ok: false,
       notificationIds: [],
       results: [],
-      skippedReason: error instanceof Error ? error.message : "notification_failed",
+      skippedReason: adminFailure.reason,
+      failureReason: adminFailure.reason,
+      adminMessage: adminFailure.message,
     };
   }
 }

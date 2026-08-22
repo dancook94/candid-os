@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 
 import { getResendConfigStatus } from "@/lib/notifications/config";
+import { logNotificationStage } from "@/lib/notifications/debug-log";
 import { applyEmailModeRedirect } from "@/lib/notifications/email-mode";
 import { getFromHeader, getPlainTextFromHtml } from "@/lib/notifications/templates";
 
@@ -113,6 +114,16 @@ export async function sendEmailThroughResend(
   }
 
   const config = getResendConfigStatus();
+
+  logNotificationStage("resend_prepare", {
+    intendedRecipient,
+    actualRecipient: redirect.actualRecipient,
+    subject: redirect.subject,
+    emailMode: redirect.mode,
+    redirected: redirect.redirected,
+    from: `${config.fromName} <${config.fromEmail}>`,
+    shouldSend: redirect.shouldSend,
+  });
 
   if (!config.configured) {
     return {

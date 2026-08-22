@@ -62,8 +62,11 @@ export async function POST(
     notification: {
       ok: notification.ok,
       skippedReason: "skippedReason" in notification ? notification.skippedReason : null,
+      failureReason: "failureReason" in notification ? notification.failureReason : null,
+      adminMessage: "adminMessage" in notification ? notification.adminMessage : null,
       notificationIds:
         "notificationIds" in notification ? notification.notificationIds : [],
+      results: "results" in notification ? notification.results : [],
     },
   });
 }
