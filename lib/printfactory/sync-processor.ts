@@ -7,6 +7,8 @@ import {
   loadJobMatchingContext,
   matchPrintfactoryJobWithContext,
 } from "@/lib/printfactory/job-matching-context";
+import { upsertPrintfactoryJobDocuments } from "@/lib/printfactory/documents-sync";
+import { syncMultiJobLinksFromReferences } from "@/lib/printfactory/multi-job-links";
 
 type ExistingPrintfactoryRow = {
   id: string;
@@ -111,6 +113,16 @@ export async function batchUpsertPrintfactoryJobs(
 
     for (const row of data ?? []) {
       rowByGuid.set(row.printfactory_job_guid as string, row as Record<string, unknown>);
+
+      const apiJob = batch.find((job) => job.guid === row.printfactory_job_guid);
+
+      if (apiJob?.rawMetadata) {
+        await upsertPrintfactoryJobDocuments(
+          adminClient,
+          row.id as string,
+          apiJob.rawMetadata
+        );
+      }
     }
   }
 
@@ -169,6 +181,21 @@ export async function batchMatchPrintfactoryJobs(
 
       if (error) {
         throw error;
+      }
+
+      const linkedIds = match.matchSuggestionDetails?.linkedCandidJobIds;
+
+      if (
+        Array.isArray(linkedIds) &&
+        linkedIds.length > 1 &&
+        match.jobMatchStatus === "matched_automatically"
+      ) {
+        await syncMultiJobLinksFromReferences(
+          adminClient,
+          row.id as string,
+          linkedIds as string[],
+          "automatic"
+        );
       }
 
       updated += 1;

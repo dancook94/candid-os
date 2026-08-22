@@ -49,7 +49,9 @@ export function JobProductionBoardCardView({
       className={cn(
         "rounded-xl border border-border bg-card p-3 shadow-sm transition-shadow hover:shadow-md",
         isDragging && "opacity-60 shadow-md ring-2 ring-[var(--candid-yellow)]",
-        (card.is_overdue || card.is_due_today) && "border-amber-400/60"
+        (card.is_overdue || card.is_due_today) && "border-amber-400/60",
+        card.readiness_is_ready && card.production_board_stage === "accepted_quotes" &&
+          "border-emerald-400/50"
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -72,33 +74,26 @@ export function JobProductionBoardCardView({
         {card.required_date ? (
           <p className="flex items-center gap-1">
             <Clock className="h-3 w-3 shrink-0" aria-hidden />
-            Deadline {card.required_date}
+            Required {card.required_date}
+            {card.fulfilment_method ? ` · ${card.fulfilment_method}` : ""}
           </p>
+        ) : card.fulfilment_method ? (
+          <p>{card.fulfilment_method}</p>
         ) : null}
+        {card.priority_label ? <p>Priority: {card.priority_label}</p> : null}
+        {card.assigned_staff_name ? <p>Assigned: {card.assigned_staff_name}</p> : null}
         <p>Artwork: {card.artwork_status_label}</p>
+        <p>Proof: {card.proof_status_label}</p>
+        <p>Production readiness: {card.readiness_label}</p>
         <p>
-          Production readiness: {card.readiness_label}
-        </p>
-        <p>
-          Ripped requirements: {card.ripped_requirements_count} of{" "}
-          {card.readiness_active}
+          Ripped: {card.ripped_requirements_count} of {card.readiness_active || "0"}
         </p>
         {card.files_detected_count > 0 ? (
-          <p>Files detected: {card.files_detected_count}</p>
+          <p>PrintFactory files: {card.files_detected_count}</p>
         ) : null}
-        <p>
-          Dropbox: {card.dropbox_setup_status}
-          {card.dropbox_folder_path ? " · linked" : ""}
-        </p>
-        {card.fulfilment_method ? (
-          <p>Delivery: {card.fulfilment_method}</p>
-        ) : null}
-        <p className="text-[10px] text-muted-foreground/80">
-          Updated {formatCrmDateTime(card.updated_at)}
-        </p>
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-2">
+      <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1">
         <Link
           href={`/admin/jobs/${card.id}`}
           className="text-xs font-medium text-foreground underline-offset-4 hover:underline"
@@ -109,7 +104,13 @@ export function JobProductionBoardCardView({
           href={`/admin/production/printfactory-unmatched?job=${card.job_reference}`}
           className="text-xs font-medium text-foreground underline-offset-4 hover:underline"
         >
-          Match PrintFactory
+          PrintFactory
+        </Link>
+        <Link
+          href={`/admin/quotes/${card.quote_id}`}
+          className="text-xs font-medium text-foreground underline-offset-4 hover:underline"
+        >
+          Quote
         </Link>
         {card.opportunity_id ? (
           <Link
@@ -120,7 +121,24 @@ export function JobProductionBoardCardView({
             <ExternalLink className="h-3 w-3" aria-hidden />
           </Link>
         ) : null}
+        {card.dropbox_folder_path ? (
+          <span className="text-xs text-muted-foreground" title={card.dropbox_folder_path}>
+            Dropbox linked
+          </span>
+        ) : null}
+        {card.synology_path_hint ? (
+          <span
+            className="max-w-[10rem] truncate text-xs text-muted-foreground"
+            title={card.synology_path_hint}
+          >
+            Synology path
+          </span>
+        ) : null}
       </div>
+
+      <p className="mt-2 text-[10px] text-muted-foreground/80">
+        Updated {formatCrmDateTime(card.updated_at)}
+      </p>
     </div>
   );
 }

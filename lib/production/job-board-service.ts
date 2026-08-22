@@ -7,12 +7,14 @@ import {
   JOB_BOARD_SELECT,
   JOB_PRODUCTION_BOARD_COLUMNS,
   JOB_PRODUCTION_BOARD_STAGE_LABELS,
+  JOB_BOARD_ACTIVITY_TYPES,
   type JobProductionBoardStage,
 } from "@/lib/production/job-board-constants";
 import { ProductionError } from "@/lib/production/errors";
 import { computeDeadlineFlags } from "@/lib/production/board";
 import type { ProductionBoardFilters } from "@/lib/production/types";
 import { isPrintFactoryJobRipped } from "@/lib/printfactory/ripped";
+import { createCrmActivity } from "@/lib/crm/create-crm-activity";
 
 export type JobProductionBoardCard = {
   id: string;
@@ -31,6 +33,10 @@ export type JobProductionBoardCard = {
   readiness_is_ready: boolean;
   ripped_requirements_count: number;
   files_detected_count: number;
+  priority_label: string | null;
+  assigned_staff_name: string | null;
+  proof_status_label: string;
+  synology_path_hint: string | null;
   dropbox_folder_path: string | null;
   dropbox_setup_status: string;
   opportunity_id: string | null;
@@ -156,11 +162,48 @@ export async function fetchJobProductionBoard(
 
   const searchTerm = filters.search.toLowerCase();
 
+  const profileIds = new Set<string>();
+
+  for (const item of manifestItems ?? []) {
+    if (item.assigned_to_profile_id) {
+      profileIds.add(item.assigned_to_profile_id as string);
+    }
+  }
+
+  const profileNameById = new Map<string, string>();
+
+  if (profileIds.size > 0) {
+    const { data: profiles } = await adminClient
+      .from("profiles")
+      .select("id, full_name")
+      .in("id", [...profileIds]);
+
+    for (const profile of profiles ?? []) {
+      profileNameById.set(profile.id as string, (profile.full_name as string) ?? "Staff");
+    }
+  }
+
+  const { data: proofRows } = await adminClient
+    .from("jobs")
+    .select("id, proof_required")
+    .in("id", jobIds.length ? jobIds : ["00000000-0000-0000-0000-000000000000"]);
+
+  const proofRequiredByJob = new Map<string, boolean>();
+
+  for (const row of proofRows ?? []) {
+    proofRequiredByJob.set(row.id as string, row.proof_required !== false);
+  }
+
   const cards: JobProductionBoardCard[] = jobRows
     .map((job) => {
       const items = itemsByJob.get(job.id as string) ?? [];
+      const proofRequired = proofRequiredByJob.get(job.id as string) ?? true;
+      const proofStatusLabel = proofRequired ? "Awaiting proof workflow" : "Proof not required";
+
       const readiness = calculateProductionReadiness(items as never[], {
         hasOverride: Boolean(job.ready_to_print_override_at),
+        proofGateSatisfied: !proofRequired,
+        proofStatusLabel,
       });
 
       const rippedCount = items.filter(
@@ -168,6 +211,17 @@ export async function fetchJobProductionBoard(
           item.printfactory_satisfied &&
           item.production_requirement_status === "required"
       ).length;
+
+      const priorityItem = items
+        .filter((item) => item.priority && item.priority !== "normal")
+        .sort((a, b) => {
+          const rank = (value: string) =>
+            value === "urgent" ? 0 : value === "high" ? 1 : 2;
+          return rank(String(a.priority)) - rank(String(b.priority));
+        })[0];
+
+      const assignedItem = items.find((item) => item.assigned_to_profile_id);
+      const synologyItem = items.find((item) => item.synology_source_path);
 
       const deadlineFlags = computeDeadlineFlags(
         job.required_date ? `${job.required_date}T12:00:00.000Z` : null,
@@ -199,6 +253,14 @@ export async function fetchJobProductionBoard(
         readiness_is_ready: readiness.isReady,
         ripped_requirements_count: rippedCount,
         files_detected_count: filesDetectedByJob.get(job.id as string) ?? 0,
+        priority_label: priorityItem?.priority
+          ? String(priorityItem.priority)
+          : null,
+        assigned_staff_name: assignedItem?.assigned_to_profile_id
+          ? profileNameById.get(assignedItem.assigned_to_profile_id as string) ?? null
+          : null,
+        proof_status_label: proofStatusLabel,
+        synology_path_hint: (synologyItem?.synology_source_path as string | null) ?? null,
         dropbox_folder_path: job.dropbox_folder_path as string | null,
         dropbox_setup_status: job.dropbox_setup_status as string,
         opportunity_id: job.opportunity_id as string | null,
@@ -208,6 +270,8 @@ export async function fetchJobProductionBoard(
         is_on_hold:
           job.production_board_stage === "on_hold" ||
           Boolean(job.production_board_on_hold),
+        _items: items,
+        _artwork_source: job.artwork_source as string,
       };
     })
     .filter((card) => {
@@ -223,6 +287,26 @@ export async function fetchJobProductionBoard(
         return false;
       }
 
+      if (filters.assignedToProfileId) {
+        const items = card._items as Array<{ assigned_to_profile_id?: string | null }>;
+        const hasStaff = items.some(
+          (item) => item.assigned_to_profile_id === filters.assignedToProfileId
+        );
+
+        if (!hasStaff) {
+          return false;
+        }
+      }
+
+      if (filters.priority) {
+        const items = card._items as Array<{ priority?: string | null }>;
+        const hasPriority = items.some((item) => item.priority === filters.priority);
+
+        if (!hasPriority && card.priority_label !== filters.priority) {
+          return false;
+        }
+      }
+
       if (!searchTerm) {
         return true;
       }
@@ -232,13 +316,16 @@ export async function fetchJobProductionBoard(
         card.project_name,
         card.company_name,
         card.readiness_label,
+        card.priority_label,
+        card.assigned_staff_name,
       ]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
 
       return haystack.includes(searchTerm);
-    });
+    })
+    .map(({ _items, _artwork_source: _artworkSource, ...card }) => card);
 
   const boardData = emptyJobBoardData();
 
@@ -321,6 +408,31 @@ export async function applyJobProductionBoardStageChange(
     changed_by_profile_id: actorProfileId,
     change_reason: reason?.trim() || null,
     is_automatic: false,
+  });
+
+  const stageLabel = JOB_PRODUCTION_BOARD_STAGE_LABELS[newStage];
+
+  await createCrmActivity(adminClient, {
+    companyId: job.company_id as string,
+    contactId: job.contact_id as string | null,
+    opportunityId: job.opportunity_id as string | null,
+    quoteId: job.quote_id as string,
+    activityType: JOB_BOARD_ACTIVITY_TYPES.stageChanged,
+    description: `Job ${job.job_reference} moved to ${stageLabel}.`,
+    actorProfileId,
+    metadata: {
+      job_id: jobId,
+      previous_stage: previousStage,
+      new_stage: newStage,
+      reason: reason?.trim() || null,
+    },
+    validatedLinks: {
+      companyId: job.company_id as string,
+      contactId: job.contact_id as string | null,
+      opportunityId: job.opportunity_id as string | null,
+      quoteId: job.quote_id as string,
+      taskId: null,
+    },
   });
 
   return {

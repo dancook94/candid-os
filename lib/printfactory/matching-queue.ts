@@ -15,6 +15,7 @@ export type PrintfactoryQueueRecord = {
     link_status: string;
     match_confidence: number | null;
     suggestion_reason?: string | null;
+    is_possible_reprint?: boolean;
   }>;
 };
 
@@ -38,9 +39,12 @@ export function assignPrintfactoryRecordTab(
     record.job_match_status === "matched_automatically" ||
     record.job_match_status === "matched_manually";
 
+  const hasPossibleReprint = links.some((link) => link.is_possible_reprint);
+
   if (
     record.job_match_status === "unmatched" ||
-    record.job_match_status === "conflict"
+    record.job_match_status === "conflict" ||
+    hasPossibleReprint
   ) {
     return "needs_attention";
   }
@@ -104,8 +108,8 @@ export function filterPrintfactoryRecordsByTab(
 
 export const EXCEPTION_QUEUE_TAB_LABELS: Record<ExceptionQueueTab, string> = {
   needs_attention: "Needs attention",
-  suggested_matches: "Suggested matches",
+  suggested_matches: "Suggested",
   confirmed: "Confirmed",
   ignored: "Ignored",
-  all_imported: "All imported",
+  all_imported: "All",
 };

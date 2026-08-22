@@ -233,6 +233,18 @@ export function ProductionManifestPanel({
               <span className="ml-2 text-amber-700">Not ready</span>
             )}
           </p>
+          {readiness.proofBlocked ? (
+            <p className="mt-1 text-sm text-amber-800">
+              Ready to Print blocked: {readiness.proofStatusLabel ?? "Proof approval required"}
+            </p>
+          ) : null}
+          {readiness.unresolvedRequirements && readiness.unresolvedRequirements.length > 0 ? (
+            <ul className="mt-2 list-inside list-disc text-xs text-muted-foreground">
+              {readiness.unresolvedRequirements.map((item) => (
+                <li key={item}>Unresolved: {item}</li>
+              ))}
+            </ul>
+          ) : null}
         </div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" onClick={() => void createManifest()} disabled={busy}>

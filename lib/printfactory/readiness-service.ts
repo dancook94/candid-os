@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { calculateProductionReadiness } from "@/lib/manifest/readiness";
+import { loadProductionProofGate } from "@/lib/manifest/production-gates";
 import { loadManifestItemsForJob } from "@/lib/manifest/service";
 import { isPrintFactoryJobRipped } from "@/lib/printfactory/ripped";
 import {
@@ -173,13 +174,16 @@ export async function refreshJobProductionReadiness(
 ) {
   const job = await loadJob(adminClient, jobId);
   const { items } = await loadManifestItemsForJob(adminClient, jobId);
+  const proofGate = await loadProductionProofGate(adminClient, jobId);
 
   const readiness = calculateProductionReadiness(items, {
     hasOverride: Boolean(job.ready_to_print_override_at),
+    proofGateSatisfied: !proofGate.proofBlocked,
+    proofStatusLabel: proofGate.proofStatusLabel,
   });
 
   if (!readiness.isReady) {
-    return { readiness, movedToReadyToPrint: false };
+    return { readiness, movedToReadyToPrint: false, proofGate };
   }
 
   if (
@@ -194,10 +198,11 @@ export async function refreshJobProductionReadiness(
       readiness,
       movedToReadyToPrint: result.moved,
       archiveWarning: result.archiveWarning ?? null,
+      proofGate,
     };
   }
 
-  return { readiness, movedToReadyToPrint: false };
+  return { readiness, movedToReadyToPrint: false, proofGate };
 }
 
 export async function confirmPrintfactoryItemLink(

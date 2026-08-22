@@ -7,6 +7,9 @@ export type ProductionReadinessSummary = {
   isReady: boolean;
   hasOverride: boolean;
   label: string;
+  proofBlocked?: boolean;
+  proofStatusLabel?: string;
+  unresolvedRequirements?: string[];
 };
 
 const SATISFIED_REQUIREMENT_STATUSES: ProductionRequirementStatus[] = [
@@ -60,25 +63,45 @@ export function isActiveRequiredItem(
 
 export function calculateProductionReadiness(
   items: ManifestItemRecord[],
-  options: { hasOverride?: boolean } = {}
+  options: {
+    hasOverride?: boolean;
+    proofGateSatisfied?: boolean;
+    proofStatusLabel?: string;
+  } = {}
 ): ProductionReadinessSummary {
   const activeRequired = items.filter(isActiveRequiredItem);
   const satisfied = activeRequired.filter(isRequirementSatisfied);
   const activeRequiredCount = activeRequired.length;
   const satisfiedCount = satisfied.length;
-  const isReady =
+  const productionReady =
     options.hasOverride ||
     activeRequiredCount === 0 ||
     satisfiedCount === activeRequiredCount;
+
+  const proofGateSatisfied = options.proofGateSatisfied !== false;
+  const isReady = productionReady && proofGateSatisfied;
+
+  const unresolvedRequirements = activeRequired
+    .filter((item) => !isRequirementSatisfied(item))
+    .map((item) => item.item_reference ?? item.item_name);
+
+  let label =
+    activeRequiredCount === 0
+      ? "No active production requirements"
+      : `${satisfiedCount} of ${activeRequiredCount} active requirements satisfied`;
+
+  if (productionReady && !proofGateSatisfied) {
+    label = `${label} · ${options.proofStatusLabel ?? "Proof approval required"}`;
+  }
 
   return {
     activeRequiredCount,
     satisfiedCount,
     isReady,
     hasOverride: Boolean(options.hasOverride),
-    label:
-      activeRequiredCount === 0
-        ? "No active production requirements"
-        : `${satisfiedCount} of ${activeRequiredCount} active requirements satisfied`,
+    proofBlocked: productionReady && !proofGateSatisfied,
+    proofStatusLabel: options.proofStatusLabel,
+    unresolvedRequirements,
+    label,
   };
 }

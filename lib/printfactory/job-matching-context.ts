@@ -112,6 +112,31 @@ export function matchPrintfactoryJobWithContext(
   const conflicts = extractConflictingJobReferences(input);
 
   if (conflicts.length > 1) {
+    const resolvedJobs = conflicts
+      .map((reference) => context.jobsByReference.get(reference.toUpperCase()))
+      .filter(Boolean) as Array<{ id: string; jobReference: string }>;
+
+    const uniqueIds = new Set(resolvedJobs.map((job) => job.id));
+
+    if (resolvedJobs.length === conflicts.length && uniqueIds.size === conflicts.length) {
+      const primary = resolvedJobs[0];
+
+      return {
+        candidJobId: primary.id,
+        suggestedCandidJobId: null,
+        jobMatchStatus: "matched_automatically",
+        jobMatchMethod: "synology_path",
+        jobMatchConfidence: 1,
+        extractedJobReference: conflicts.join(", "),
+        matchSuggestionReason: null,
+        matchSuggestionDetails: {
+          multiJobSheet: true,
+          linkedCandidJobIds: resolvedJobs.map((job) => job.id),
+          references: conflicts,
+        },
+      };
+    }
+
     return {
       candidJobId: null,
       suggestedCandidJobId: null,
@@ -119,8 +144,12 @@ export function matchPrintfactoryJobWithContext(
       jobMatchMethod: "synology_path",
       jobMatchConfidence: null,
       extractedJobReference: conflicts.join(", "),
-      matchSuggestionReason: null,
-      matchSuggestionDetails: { conflictReferences: conflicts },
+      matchSuggestionReason:
+        "Multiple job references detected — confirm multi-job sheet linking manually.",
+      matchSuggestionDetails: {
+        conflictReferences: conflicts,
+        resolvedCount: resolvedJobs.length,
+      },
     };
   }
 

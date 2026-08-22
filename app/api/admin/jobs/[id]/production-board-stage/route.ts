@@ -6,6 +6,7 @@ import {
   applyJobProductionBoardStageChange,
   isValidJobProductionBoardStage,
 } from "@/lib/production/job-board-service";
+import { reconcileJobCommercialCloseout } from "@/lib/production/job-commercial-closeout";
 import type { JobProductionBoardStage } from "@/lib/production/job-board-constants";
 import { ProductionError } from "@/lib/production/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -56,8 +57,19 @@ export async function POST(
 
     revalidatePath("/admin/production");
     revalidatePath(`/admin/jobs/${jobId}`);
+    revalidatePath(`/admin/jobs/${jobId}/invoice`);
 
-    return NextResponse.json(result);
+    let commercialCloseout = null;
+
+    if (newStage === "complete_job") {
+      commercialCloseout = await reconcileJobCommercialCloseout(
+        adminClient,
+        jobId,
+        auth.userId
+      );
+    }
+
+    return NextResponse.json({ ...result, commercialCloseout });
   } catch (error) {
     if (error instanceof ProductionError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

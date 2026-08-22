@@ -15,6 +15,15 @@ import {
 import {
   createProductionItemFromPrintfactoryJob,
 } from "@/lib/printfactory/manifest-actions";
+import {
+  addLinkedCandidJob,
+  removeLinkedCandidJob,
+} from "@/lib/printfactory/multi-job-links";
+import {
+  classifyReprintLink,
+  detectPossibleReprintsForManifestItem,
+  markPossibleReprintLink,
+} from "@/lib/printfactory/reprint-detection";
 import { ProductionError } from "@/lib/production/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -24,6 +33,7 @@ type PrintfactoryJobActionBody = {
   candidJobId?: string;
   productionItemId?: string;
   productionItemIds?: string[];
+  linkId?: string;
   reason?: string;
   classification?: string;
   title?: string;
@@ -134,14 +144,24 @@ export async function POST(
         const links = [];
 
         for (const productionItemId of itemIds) {
-          links.push(
-            await confirmPrintfactoryItemLink(
-              adminClient,
-              printfactoryJobId,
-              productionItemId,
-              auth.userId
-            )
+          const possible = await detectPossibleReprintsForManifestItem(
+            adminClient,
+            productionItemId,
+            printfactoryJobId
           );
+
+          const link = await confirmPrintfactoryItemLink(
+            adminClient,
+            printfactoryJobId,
+            productionItemId,
+            auth.userId
+          );
+
+          if (possible.length > 0 && link?.id) {
+            await markPossibleReprintLink(adminClient, link.id as string, true);
+          }
+
+          links.push(link);
         }
 
         revalidatePath("/admin/production");
@@ -186,6 +206,63 @@ export async function POST(
         );
 
         revalidatePath("/admin/production/printfactory-unmatched");
+        return NextResponse.json({ ok: true, row });
+      }
+
+      case "add_linked_job": {
+        if (!body.candidJobId) {
+          return NextResponse.json({ error: "Candid job is required." }, { status: 400 });
+        }
+
+        await addLinkedCandidJob(adminClient, {
+          printfactoryJobId,
+          candidJobId: body.candidJobId,
+          actorProfileId: auth.userId,
+        });
+
+        revalidatePath("/admin/production/printfactory-unmatched");
+        revalidatePath("/admin/production");
+        return NextResponse.json({ ok: true });
+      }
+
+      case "remove_linked_job": {
+        if (!body.candidJobId) {
+          return NextResponse.json({ error: "Candid job is required." }, { status: 400 });
+        }
+
+        await removeLinkedCandidJob(adminClient, {
+          printfactoryJobId,
+          candidJobId: body.candidJobId,
+          actorProfileId: auth.userId,
+        });
+
+        revalidatePath("/admin/production/printfactory-unmatched");
+        revalidatePath("/admin/production");
+        return NextResponse.json({ ok: true });
+      }
+
+      case "classify_reprint": {
+        if (!body.linkId || !body.classification || !body.reason?.trim()) {
+          return NextResponse.json(
+            { error: "Link, classification, and reason are required." },
+            { status: 400 }
+          );
+        }
+
+        const row = await classifyReprintLink(adminClient, {
+          linkId: body.linkId,
+          classification: body.classification as
+            | "production_retry_no_charge"
+            | "customer_reprint_billable"
+            | "replacement"
+            | "additional_quantity"
+            | "ignored",
+          reason: body.reason,
+          actorProfileId: auth.userId,
+        });
+
+        revalidatePath("/admin/production/printfactory-unmatched");
+        revalidatePath("/admin/jobs");
         return NextResponse.json({ ok: true, row });
       }
 
