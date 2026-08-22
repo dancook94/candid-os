@@ -23,8 +23,9 @@ import { loadAdminJobDetail } from "@/lib/jobs/loaders";
 import { JOB_STATUS_LABELS } from "@/lib/jobs/constants";
 import { getAdminArtworkSourceLabel } from "@/lib/jobs/artwork-source";
 import { isDropboxConfigured } from "@/lib/dropbox/client";
-import { getJobProductionReadiness, loadManifestItemsForJob } from "@/lib/manifest/service";
+import { getJobProductionReadiness, loadManifestItemsForJob, reconcileProductionManifestForJob } from "@/lib/manifest/service";
 import { loadAdminJobProofingContext } from "@/lib/proofs/loaders";
+import { mapManifestItemToProofSelectable } from "@/lib/proofs/manifest-items";
 import { loadJobFileManifestLinks } from "@/lib/proofs/service";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -85,8 +86,23 @@ export default async function AdminJobDetailPage({
 
   const shellProps = await buildAdminAppShellProps(supabase, profile);
 
-  const [manifestResult, readiness, proofing, fileManifestLinks] = await Promise.all([
-    loadManifestItemsForJob(adminClient, id),
+  let manifestResult = await loadManifestItemsForJob(adminClient, id);
+
+  if (!manifestResult.schemaMissing && manifestResult.items.length === 0) {
+    await reconcileProductionManifestForJob(adminClient, id);
+    manifestResult = await loadManifestItemsForJob(adminClient, id);
+  }
+
+  const proofSelectableItems = manifestResult.schemaMissing
+    ? { items: [], schemaMissing: true }
+    : {
+        items: manifestResult.items
+          .filter((item) => !item.deleted_at && !item.combined_into_item_id)
+          .map(mapManifestItemToProofSelectable),
+        schemaMissing: false,
+      };
+
+  const [readiness, proofing, fileManifestLinks] = await Promise.all([
     getJobProductionReadiness(adminClient, id).catch(() => ({
       activeRequiredCount: 0,
       satisfiedCount: 0,
@@ -224,7 +240,9 @@ export default async function AdminJobDetailPage({
           <CardContent className="pt-6">
             <AdminJobProofsPanel
               jobId={detail.job.id}
-              manifestItems={manifestResult.items}
+              selectableItems={proofSelectableItems.items}
+              manifestSchemaMissing={proofSelectableItems.schemaMissing}
+              dropboxLinked={Boolean(detail.job.dropbox_folder_path)}
               jobFiles={detail.files.map((file) => ({
                 id: file.id,
                 file_name: file.file_name,

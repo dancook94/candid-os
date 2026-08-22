@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,11 +19,14 @@ import {
   type ProofBypassReason,
 } from "@/lib/proofs/constants";
 import type { JobProofView } from "@/lib/proofs/types";
-import type { ManifestItemRecord } from "@/lib/manifest/types";
+import type { ProofSelectableManifestItem } from "@/lib/proofs/manifest-items";
+import { ProofFileAttachmentPanel } from "@/components/proofs/proof-file-attachment-panel";
 
 type AdminJobProofsPanelProps = {
   jobId: string;
-  manifestItems: ManifestItemRecord[];
+  selectableItems: ProofSelectableManifestItem[];
+  manifestSchemaMissing?: boolean;
+  dropboxLinked: boolean;
   jobFiles: Array<{ id: string; file_name: string; upload_status: string }>;
   initialRequirement: {
     proofRequired: boolean;
@@ -53,7 +56,9 @@ function mapProofStatusToBadge(status: string) {
 
 export function AdminJobProofsPanel({
   jobId,
-  manifestItems,
+  selectableItems,
+  manifestSchemaMissing,
+  dropboxLinked,
   jobFiles,
   initialRequirement,
   initialProofs,
@@ -79,12 +84,15 @@ export function AdminJobProofsPanel({
   >([]);
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
 
-  const activeItems = useMemo(
-    () => manifestItems.filter((item) => !item.deleted_at && !item.combined_into_item_id),
-    [manifestItems]
-  );
-
   const completeJobFiles = jobFiles.filter((file) => file.upload_status === "complete");
+
+  const canSaveDraft =
+    title.trim().length > 0 && selectedItemIds.length > 0 && !pending;
+
+  const createArtworkOrigins: ProofArtworkOrigin[] = [
+    "customer_uploaded",
+    "candid_created",
+  ];
 
   async function refreshProofs() {
     const response = await fetch(`/api/admin/jobs/${jobId}/proof-requirement`);
@@ -137,6 +145,11 @@ export function AdminJobProofsPanel({
   }
 
   async function loadDropboxFiles(origin: ProofArtworkOrigin) {
+    if (!dropboxLinked) {
+      setDropboxFiles([]);
+      return;
+    }
+
     setError(null);
     const response = await fetch(`/api/admin/jobs/${jobId}/proofs`, {
       method: "PUT",
@@ -146,6 +159,7 @@ export function AdminJobProofsPanel({
 
     const payload = (await response.json()) as {
       files?: Array<{ id: string; name: string; path: string; size: number }>;
+      dropboxLinked?: boolean;
       error?: string;
     };
 
@@ -158,6 +172,11 @@ export function AdminJobProofsPanel({
   }
 
   async function createProof() {
+    if (!canSaveDraft) {
+      setError("Enter a proof title and select at least one quoted item.");
+      return;
+    }
+
     setError(null);
     setPending(true);
 
@@ -194,6 +213,11 @@ export function AdminJobProofsPanel({
     await refreshProofs();
   }
 
+  async function refreshAfterProofAction() {
+    await refreshProofs();
+    window.location.reload();
+  }
+
   async function proofAction(proofId: string, action: string, extra?: Record<string, unknown>) {
     setError(null);
     setPending(true);
@@ -212,8 +236,7 @@ export function AdminJobProofsPanel({
       return;
     }
 
-    await refreshProofs();
-    window.location.reload();
+    await refreshAfterProofAction();
   }
 
   if (schemaMissing) {
@@ -311,36 +334,109 @@ export function AdminJobProofsPanel({
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
       {showCreate ? (
-        <div className="rounded-lg border border-border p-4 space-y-4">
-          <h3 className="font-semibold">Create proof</h3>
-
-          <div className="space-y-2">
-            <Label>Manifest items</Label>
-            <div className="space-y-2">
-              {activeItems.map((item) => (
-                <label key={item.id} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={selectedItemIds.includes(item.id)}
-                    onChange={(event) => {
-                      setSelectedItemIds((current) =>
-                        event.target.checked
-                          ? [...current, item.id]
-                          : current.filter((id) => id !== item.id)
-                      );
-                    }}
-                  />
-                  <span>
-                    {item.item_reference ? `${item.item_reference} · ` : ""}
-                    {item.item_name}
-                  </span>
-                </label>
-              ))}
-            </div>
+        <div className="rounded-lg border border-border p-4 space-y-5">
+          <div>
+            <h3 className="font-semibold">Create proof</h3>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Saves an internal draft only. Nothing is sent to the customer yet.
+            </p>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="artworkOrigin">Artwork source</Label>
+          <div className="space-y-3">
+            <Label>Quoted / production items</Label>
+            <p className="text-sm text-muted-foreground">
+              Select every manifest line this proof covers. One proof can span multiple items.
+            </p>
+
+            {manifestSchemaMissing ? (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                Production manifest schema is not available. Apply the production manifest
+                migration before linking proofs to quoted items.
+              </p>
+            ) : selectableItems.length === 0 ? (
+              <p className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+                No production manifest items were found for this job. Items are created from
+                the accepted quote in the production manifest. Check the manifest section
+                above or ensure this job has an accepted quote version.
+              </p>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2">
+                {selectableItems.map((item) => {
+                  const selected = selectedItemIds.includes(item.id);
+                  return (
+                    <label
+                      key={item.id}
+                      className={`block cursor-pointer rounded-lg border p-3 transition-colors ${
+                        selected
+                          ? "border-[var(--candid-yellow)] bg-[var(--candid-yellow)]/10"
+                          : "border-border hover:border-muted-foreground/40"
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={selected}
+                          onChange={(event) => {
+                            setSelectedItemIds((current) =>
+                              event.target.checked
+                                ? [...current, item.id]
+                                : current.filter((id) => id !== item.id)
+                            );
+                          }}
+                        />
+                        <div className="min-w-0 space-y-1 text-sm">
+                          <p className="font-medium text-neutral-950">
+                            {item.itemReference ? `${item.itemReference} · ` : ""}
+                            {item.itemName}
+                          </p>
+                          {item.description ? (
+                            <p className="text-muted-foreground">{item.description}</p>
+                          ) : null}
+                          <dl className="grid gap-1 text-muted-foreground">
+                            {item.quantity != null ? (
+                              <div>
+                                <span className="font-medium text-neutral-700">Quantity: </span>
+                                {item.quantity}
+                              </div>
+                            ) : null}
+                            {item.finishedSize ? (
+                              <div>
+                                <span className="font-medium text-neutral-700">Size: </span>
+                                {item.finishedSize}
+                              </div>
+                            ) : null}
+                            {item.materialSpec ? (
+                              <div>
+                                <span className="font-medium text-neutral-700">
+                                  Material/spec:{" "}
+                                </span>
+                                {item.materialSpec}
+                              </div>
+                            ) : null}
+                          </dl>
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3 border-t border-border pt-4">
+            <Label htmlFor="artworkOrigin">Artwork source (optional for draft)</Label>
+            <p className="text-sm text-muted-foreground">
+              Artwork can be connected later. When a Dropbox folder exists, files will load
+              from the relevant job folder.
+            </p>
+
+            {!dropboxLinked ? (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                No Dropbox folder is linked to this job yet.
+              </p>
+            ) : null}
+
             <select
               id="artworkOrigin"
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
@@ -349,85 +445,116 @@ export function AdminJobProofsPanel({
                 const origin = event.target.value as ProofArtworkOrigin;
                 setArtworkOrigin(origin);
                 setDropboxSourcePath("");
-                if (origin === "candid_created") {
+                setSourceJobFileId("");
+                if (dropboxLinked && origin === "candid_created") {
                   await loadDropboxFiles(origin);
                 }
               }}
             >
-              {Object.entries(PROOF_ARTWORK_ORIGIN_LABELS).map(([value, label]) => (
+              {createArtworkOrigins.map((value) => (
                 <option key={value} value={value}>
-                  {label}
+                  {PROOF_ARTWORK_ORIGIN_LABELS[value]}
                 </option>
               ))}
             </select>
-          </div>
 
-          {artworkOrigin === "customer_uploaded" || artworkOrigin === "existing_repeat" ? (
-            <div className="space-y-2">
-              <Label htmlFor="sourceJobFileId">Customer artwork file</Label>
-              <select
-                id="sourceJobFileId"
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-                value={sourceJobFileId}
-                onChange={(event) => setSourceJobFileId(event.target.value)}
-              >
-                <option value="">Select file…</option>
-                {completeJobFiles.map((file) => (
-                  <option key={file.id} value={file.id}>
-                    {file.file_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <div className="flex gap-2">
-                <Button type="button" variant="outline" onClick={() => loadDropboxFiles(artworkOrigin)}>
-                  Load working files
-                </Button>
+            {artworkOrigin === "customer_uploaded" ? (
+              <div className="space-y-2">
+                <Label htmlFor="sourceJobFileId">Customer artwork file (optional)</Label>
+                {completeJobFiles.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    No completed customer artwork uploads on this job yet.
+                  </p>
+                ) : (
+                  <select
+                    id="sourceJobFileId"
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                    value={sourceJobFileId}
+                    onChange={(event) => setSourceJobFileId(event.target.value)}
+                  >
+                    <option value="">Connect artwork later</option>
+                    {completeJobFiles.map((file) => (
+                      <option key={file.id} value={file.id}>
+                        {file.file_name}
+                      </option>
+                    ))}
+                  </select>
+                )}
               </div>
-              <select
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-                value={dropboxSourcePath}
-                onChange={(event) => setDropboxSourcePath(event.target.value)}
-              >
-                <option value="">Select Dropbox file…</option>
-                {dropboxFiles.map((file) => (
-                  <option key={file.path} value={file.path}>
-                    {file.name}
-                  </option>
-                ))}
-              </select>
+            ) : (
+              <div className="space-y-2">
+                <Label>Candid working file (optional)</Label>
+                {!dropboxLinked ? (
+                  <p className="text-sm text-muted-foreground">
+                    Link a Dropbox folder to this job before selecting working files.
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => loadDropboxFiles(artworkOrigin)}
+                      >
+                        Load working files
+                      </Button>
+                    </div>
+                    <select
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                      value={dropboxSourcePath}
+                      onChange={(event) => setDropboxSourcePath(event.target.value)}
+                    >
+                      <option value="">Connect artwork later</option>
+                      {dropboxFiles.map((file) => (
+                        <option key={file.path} value={file.path}>
+                          {file.name}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-4 border-t border-border pt-4">
+            <div className="space-y-2">
+              <Label htmlFor="proofTitle">Proof title</Label>
+              <Input
+                id="proofTitle"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g. Lobby panels proof"
+              />
             </div>
-          )}
 
-          <div className="space-y-2">
-            <Label htmlFor="proofTitle">Proof title</Label>
-            <Input id="proofTitle" value={title} onChange={(e) => setTitle(e.target.value)} />
-          </div>
+            <div className="space-y-2">
+              <Label htmlFor="customerMessage">Customer message</Label>
+              <Textarea
+                id="customerMessage"
+                value={customerMessage}
+                onChange={(e) => setCustomerMessage(e.target.value)}
+                rows={3}
+                placeholder="Message shown to the customer when the proof is sent."
+              />
+            </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="customerMessage">Customer message</Label>
-            <Textarea
-              id="customerMessage"
-              value={customerMessage}
-              onChange={(e) => setCustomerMessage(e.target.value)}
-              rows={3}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="internalNote">Internal note</Label>
-            <Textarea
-              id="internalNote"
-              value={internalNote}
-              onChange={(e) => setInternalNote(e.target.value)}
-              rows={2}
-            />
+            <div className="space-y-2">
+              <Label htmlFor="internalNote">Internal note</Label>
+              <p className="text-xs text-muted-foreground">
+                Internal only — never visible to customer
+              </p>
+              <Textarea
+                id="internalNote"
+                value={internalNote}
+                onChange={(e) => setInternalNote(e.target.value)}
+                rows={2}
+              />
+            </div>
           </div>
 
           <div className="flex gap-2">
-            <Button type="button" disabled={pending} onClick={createProof}>
+            <Button type="button" disabled={!canSaveDraft} onClick={createProof}>
               Save draft proof
             </Button>
             <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>
@@ -457,10 +584,7 @@ export function AdminJobProofsPanel({
               </div>
 
               <div className="text-sm text-muted-foreground">
-                <p>
-                  Source: {PROOF_ARTWORK_ORIGIN_LABELS[proof.artwork_origin]} ·{" "}
-                  {proof.files[0]?.file_name ?? "No file"}
-                </p>
+                <p>Source: {PROOF_ARTWORK_ORIGIN_LABELS[proof.artwork_origin]}</p>
                 {proof.sent_at ? (
                   <p>Sent: {new Date(proof.sent_at).toLocaleString("en-GB")}</p>
                 ) : null}
@@ -482,6 +606,17 @@ export function AdminJobProofsPanel({
                   ))}
                 </ul>
               ) : null}
+
+              <ProofFileAttachmentPanel
+                jobId={jobId}
+                proof={proof}
+                dropboxLinked={dropboxLinked}
+                jobFiles={jobFiles}
+                pending={pending}
+                onPendingChange={setPending}
+                onError={setError}
+                onRefresh={refreshProofs}
+              />
 
               {proof.status === "draft" ? (
                 <div className="space-y-3 border-t border-border pt-3">

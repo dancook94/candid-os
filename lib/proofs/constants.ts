@@ -82,6 +82,26 @@ export const PROOF_ARTWORK_ORIGIN_LABELS: Record<ProofArtworkOrigin, string> = {
   existing_repeat: "Existing / repeat",
 };
 
+export const PROOF_FILE_LOCATION_TYPES = [
+  "customer_artwork",
+  "working_file",
+  "proofs_folder",
+] as const;
+
+export type ProofFileLocationType = (typeof PROOF_FILE_LOCATION_TYPES)[number];
+
+export const PROOF_FILE_LOCATION_LABELS: Record<ProofFileLocationType, string> = {
+  customer_artwork: "Customer Artwork",
+  working_file: "Working File",
+  proofs_folder: "Proofs",
+};
+
+export const PROOF_ATTACHABLE_STATUSES = [
+  "draft",
+  "internal_review",
+  "ready_to_send",
+] as const satisfies readonly ProofStatus[];
+
 export const PROOF_INTERNAL_CHECKLIST_KEYS = [
   "size_checked",
   "quantity_checked",

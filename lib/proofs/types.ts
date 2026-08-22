@@ -1,5 +1,6 @@
 import type {
   ProofArtworkOrigin,
+  ProofFileLocationType,
   ProofInternalChecklistKey,
   ProofStatus,
   ProofWorkflowStatus,
@@ -53,8 +54,13 @@ export type JobProofFileRecord = {
 
 export type ProofInternalChecklist = Partial<Record<ProofInternalChecklistKey, boolean>>;
 
+export type JobProofFileView = JobProofFileRecord & {
+  location_type: ProofFileLocationType | null;
+  is_customer_facing: boolean;
+};
+
 export type JobProofView = JobProofRecord & {
-  files: JobProofFileRecord[];
+  files: JobProofFileView[];
   manifestItems: Array<{
     id: string;
     item_reference: string | null;
@@ -72,6 +78,12 @@ export type JobProofRequirementState = {
   bypassReason: string | null;
   bypassedAt: string | null;
   proofApprovedAt: string | null;
+};
+
+export type AttachProofFileInput = {
+  source: "customer_artwork" | "working_file" | "proofs_folder";
+  sourceJobFileId?: string | null;
+  dropboxSourcePath?: string | null;
 };
 
 export type CreateProofInput = {

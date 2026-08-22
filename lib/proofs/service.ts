@@ -4,6 +4,7 @@ import { revalidateJobPages } from "@/lib/jobs/revalidation";
 import { ProofError, isMissingProofSchemaError } from "@/lib/proofs/errors";
 import {
   PROOF_ACTIVITY_TYPES,
+  PROOF_ATTACHABLE_STATUSES,
   PROOF_BYPASS_REASON_LABELS,
   PROOF_CONFIRMATION_TEXT,
   PROOF_FILE_SELECT,
@@ -15,15 +16,39 @@ import {
 import { logProofActivity } from "@/lib/proofs/activity";
 import {
   copyProofFileToProofsFolder,
+  assertDropboxPathInJobSubfolder,
+  buildProofUploadTargetFileName,
+  isPathInProofsFolder,
   resolveDropboxFileMetadata,
+  resolveProofsFolderPath,
+  resolveProofsFolderPathForJob,
+  resolveProofsFolderPathOrThrow,
 } from "@/lib/proofs/dropbox";
+import {
+  assertProofUploadFile,
+  isCustomerFacingProofAsset,
+  isCustomerFacingProofExtension,
+  resolveProofFileLocationType,
+} from "@/lib/proofs/file-validation";
 import { syncJobProofWorkflowStatus } from "@/lib/proofs/gates";
 import {
   prepareProofApprovedNotification,
   prepareProofChangesRequestedNotification,
   prepareProofReadyNotification,
 } from "@/lib/proofs/notifications";
-import type { CreateProofInput, JobProofView } from "@/lib/proofs/types";
+import type {
+  AttachProofFileInput,
+  CreateProofInput,
+  JobProofFileView,
+  JobProofView,
+} from "@/lib/proofs/types";
+import { uploadSmallDropboxFile } from "@/lib/dropbox/upload-session";
+import {
+  CUSTOMER_UPLOAD_SUBFOLDER,
+  PROOFS_SUBFOLDER,
+  WORKING_FILES_SUBFOLDER,
+} from "@/lib/dropbox/job-folders";
+import { getFileExtension } from "@/lib/proofs/file-validation";
 
 type JobContext = {
   id: string;
@@ -33,7 +58,32 @@ type JobContext = {
   job_reference: string;
   project_name: string;
   proof_required: boolean;
+  dropbox_folder_path: string | null;
 };
+
+function mapProofFileView(
+  file: Record<string, unknown>,
+  dropboxFolderPath: string | null
+): JobProofFileView {
+  const dropboxPath = (file.dropbox_path as string | null) ?? null;
+  const jobFileId = (file.job_file_id as string | null) ?? null;
+  const fileName = file.file_name as string;
+
+  return {
+    ...(file as JobProofFileView),
+    location_type: resolveProofFileLocationType({
+      dropboxPath,
+      dropboxFolderPath,
+      jobFileId,
+    }),
+    is_customer_facing: isCustomerFacingProofAsset({
+      fileName,
+      dropboxPath,
+      dropboxFolderPath,
+      jobFileId,
+    }),
+  };
+}
 
 async function loadJobContext(
   adminClient: SupabaseClient,
@@ -42,7 +92,7 @@ async function loadJobContext(
   const { data, error } = await adminClient
     .from("jobs")
     .select(
-      "id, company_id, quote_id, opportunity_id, job_reference, project_name, proof_required"
+      "id, company_id, quote_id, opportunity_id, job_reference, project_name, proof_required, dropbox_folder_path"
     )
     .eq("id", jobId)
     .maybeSingle();
@@ -101,6 +151,13 @@ async function resolveSourceFileMetadata(
   job: JobContext,
   input: CreateProofInput
 ) {
+  const hasSource =
+    Boolean(input.sourceJobFileId) || Boolean(input.dropboxSourcePath?.trim());
+
+  if (!hasSource) {
+    return null;
+  }
+
   if (input.sourceJobFileId) {
     const { data: jobFile, error } = await adminClient
       .from("job_files")
@@ -152,11 +209,14 @@ export async function loadProofsForJob(
   jobId: string,
   options: { customerSafe?: boolean } = {}
 ): Promise<{ schemaMissing: boolean; proofs: JobProofView[] }> {
-  const { data: proofs, error } = await adminClient
-    .from("job_proofs")
-    .select(PROOF_SELECT)
-    .eq("job_id", jobId)
-    .order("version_number", { ascending: false });
+  const [{ data: proofs, error }, { data: job }] = await Promise.all([
+    adminClient
+      .from("job_proofs")
+      .select(PROOF_SELECT)
+      .eq("job_id", jobId)
+      .order("version_number", { ascending: false }),
+    adminClient.from("jobs").select("dropbox_folder_path").eq("id", jobId).maybeSingle(),
+  ]);
 
   if (error) {
     if (isMissingProofSchemaError(error)) {
@@ -164,6 +224,8 @@ export async function loadProofsForJob(
     }
     throw new ProofError(error.message, 500);
   }
+
+  const dropboxFolderPath = (job?.dropbox_folder_path as string | null) ?? null;
 
   const proofIds = (proofs ?? []).map((proof) => proof.id);
   if (proofIds.length === 0) {
@@ -195,7 +257,9 @@ export async function loadProofsForJob(
 
       const mapped: JobProofView = {
         ...(proof as JobProofView),
-        files: (files ?? []).filter((file) => file.proof_id === proof.id),
+        files: (files ?? [])
+          .filter((file) => file.proof_id === proof.id)
+          .map((file) => mapProofFileView(file, dropboxFolderPath)),
         manifestItems: linkedItemIds
           .map((id) => manifestById.get(id))
           .filter(Boolean) as JobProofView["manifestItems"],
@@ -383,20 +447,22 @@ export async function createJobProof(
     throw new ProofError(error?.message ?? "Unable to create proof.", 500);
   }
 
-  const { error: fileError } = await adminClient.from("job_proof_files").insert({
-    proof_id: proof.id,
-    job_file_id: sourceFile.jobFileId,
-    dropbox_file_id: sourceFile.dropboxFileId,
-    dropbox_path: sourceFile.dropboxPath,
-    dropbox_revision: sourceFile.dropboxRevision,
-    file_name: sourceFile.fileName,
-    mime_type: sourceFile.mimeType,
-    file_size_bytes: sourceFile.fileSizeBytes,
-    content_hash: sourceFile.contentHash,
-  });
+  if (sourceFile) {
+    const { error: fileError } = await adminClient.from("job_proof_files").insert({
+      proof_id: proof.id,
+      job_file_id: sourceFile.jobFileId,
+      dropbox_file_id: sourceFile.dropboxFileId,
+      dropbox_path: sourceFile.dropboxPath,
+      dropbox_revision: sourceFile.dropboxRevision,
+      file_name: sourceFile.fileName,
+      mime_type: sourceFile.mimeType,
+      file_size_bytes: sourceFile.fileSizeBytes,
+      content_hash: sourceFile.contentHash,
+    });
 
-  if (fileError) {
-    throw new ProofError(fileError.message, 500);
+    if (fileError) {
+      throw new ProofError(fileError.message, 500);
+    }
   }
 
   const { error: linkError } = await adminClient.from("job_proof_manifest_items").insert(
@@ -480,6 +546,410 @@ export async function submitProofInternalReview(
   return { ok: true };
 }
 
+async function loadProofFileRecord(
+  adminClient: SupabaseClient,
+  proofId: string
+) {
+  const { data, error } = await adminClient
+    .from("job_proof_files")
+    .select(PROOF_FILE_SELECT)
+    .eq("proof_id", proofId)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new ProofError(error.message, 500);
+  }
+
+  return data;
+}
+
+function assertProofStatusAllowsAttachment(status: string) {
+  if (
+    !PROOF_ATTACHABLE_STATUSES.includes(
+      status as (typeof PROOF_ATTACHABLE_STATUSES)[number]
+    )
+  ) {
+    throw new ProofError("Proof file can no longer be changed.", 409);
+  }
+}
+
+async function assertCustomerFacingProofAttached(
+  adminClient: SupabaseClient,
+  proofId: string,
+  dropboxFolderPath: string | null,
+  message: string
+) {
+  const proofFile = await loadProofFileRecord(adminClient, proofId);
+
+  if (!proofFile?.dropbox_path) {
+    throw new ProofError(message, 409);
+  }
+
+  if (
+    !isCustomerFacingProofAsset({
+      fileName: proofFile.file_name,
+      dropboxPath: proofFile.dropbox_path,
+      dropboxFolderPath,
+      jobFileId: proofFile.job_file_id,
+    })
+  ) {
+    throw new ProofError(message, 409);
+  }
+
+  return proofFile;
+}
+
+async function resolveAttachProofFileMetadata(
+  adminClient: SupabaseClient,
+  job: JobContext,
+  input: AttachProofFileInput
+) {
+  if (!job.dropbox_folder_path) {
+    throw new ProofError("No Dropbox folder is linked to this job yet.", 409);
+  }
+
+  if (input.source === "customer_artwork") {
+    if (!input.sourceJobFileId) {
+      throw new ProofError("Select a customer artwork file.", 400);
+    }
+
+    const { data: jobFile, error } = await adminClient
+      .from("job_files")
+      .select("*")
+      .eq("id", input.sourceJobFileId)
+      .eq("job_id", job.id)
+      .is("deleted_at", null)
+      .maybeSingle();
+
+    if (error || !jobFile) {
+      throw new ProofError("Source artwork file not found.", 404);
+    }
+
+    if (jobFile.upload_status !== "complete" || !jobFile.dropbox_path_lower) {
+      throw new ProofError("Source artwork file is not ready.", 409);
+    }
+
+    assertDropboxPathInJobSubfolder(
+      jobFile.dropbox_path_lower as string,
+      job.dropbox_folder_path,
+      CUSTOMER_UPLOAD_SUBFOLDER
+    );
+
+    return {
+      jobFileId: jobFile.id as string,
+      dropboxFileId: jobFile.dropbox_file_id as string | null,
+      dropboxPath: jobFile.dropbox_path_lower as string,
+      dropboxRevision: jobFile.dropbox_revision as string | null,
+      fileName: jobFile.file_name as string,
+      mimeType: jobFile.mime_type as string | null,
+      fileSizeBytes: Number(jobFile.file_size_bytes ?? 0),
+      contentHash: jobFile.content_hash as string | null,
+    };
+  }
+
+  const dropboxSourcePath = input.dropboxSourcePath?.trim();
+  if (!dropboxSourcePath) {
+    throw new ProofError("Select a Dropbox file.", 400);
+  }
+
+  const subfolder =
+    input.source === "working_file"
+      ? WORKING_FILES_SUBFOLDER
+      : PROOFS_SUBFOLDER;
+
+  assertDropboxPathInJobSubfolder(
+    dropboxSourcePath,
+    job.dropbox_folder_path,
+    subfolder
+  );
+
+  const metadata = await resolveDropboxFileMetadata(dropboxSourcePath);
+
+  return {
+    jobFileId: null,
+    dropboxFileId: metadata.id,
+    dropboxPath: metadata.path_lower ?? metadata.path_display,
+    dropboxRevision: metadata.rev,
+    fileName: metadata.name,
+    mimeType: null,
+    fileSizeBytes: metadata.size,
+    contentHash: metadata.content_hash ?? null,
+  };
+}
+
+async function upsertProofFileRecord(
+  adminClient: SupabaseClient,
+  proofId: string,
+  metadata: {
+    jobFileId: string | null;
+    dropboxFileId: string | null;
+    dropboxPath: string;
+    dropboxRevision: string | null;
+    fileName: string;
+    mimeType: string | null;
+    fileSizeBytes: number;
+    contentHash: string | null;
+  }
+) {
+  const existing = await loadProofFileRecord(adminClient, proofId);
+  const payload = {
+    job_file_id: metadata.jobFileId,
+    dropbox_file_id: metadata.dropboxFileId,
+    dropbox_path: metadata.dropboxPath,
+    dropbox_revision: metadata.dropboxRevision,
+    file_name: metadata.fileName,
+    mime_type: metadata.mimeType,
+    file_size_bytes: metadata.fileSizeBytes,
+    content_hash: metadata.contentHash,
+  };
+
+  if (existing?.id) {
+    const { error } = await adminClient
+      .from("job_proof_files")
+      .update(payload)
+      .eq("id", existing.id);
+
+    if (error) {
+      throw new ProofError(error.message, 500);
+    }
+
+    return existing.id as string;
+  }
+
+  const { data, error } = await adminClient
+    .from("job_proof_files")
+    .insert({
+      proof_id: proofId,
+      ...payload,
+    })
+    .select("id")
+    .single();
+
+  if (error || !data?.id) {
+    throw new ProofError(error?.message ?? "Unable to attach proof file.", 500);
+  }
+
+  return data.id as string;
+}
+
+export async function attachProofFile(
+  adminClient: SupabaseClient,
+  {
+    jobId,
+    proofId,
+    input,
+    actorProfileId,
+  }: {
+    jobId: string;
+    proofId: string;
+    input: AttachProofFileInput;
+    actorProfileId: string;
+  }
+) {
+  const job = await loadJobContext(adminClient, jobId);
+  const proof = await loadMutableProof(adminClient, jobId, proofId);
+
+  assertProofStatusAllowsAttachment(proof.status);
+
+  const metadata = await resolveAttachProofFileMetadata(adminClient, job, input);
+
+  await upsertProofFileRecord(adminClient, proofId, metadata);
+
+  await adminClient
+    .from("job_proofs")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", proofId);
+
+  await logProofActivity(adminClient, {
+    activityType: PROOF_ACTIVITY_TYPES.proofCreated,
+    description: `Proof file attached to ${proof.proof_reference}.`,
+    companyId: job.company_id,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
+    actorProfileId,
+    metadata: {
+      job_id: jobId,
+      proof_id: proofId,
+      file_name: metadata.fileName,
+      source: input.source,
+    },
+  });
+
+  revalidateJobPages({
+    jobId,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
+  });
+
+  return { ok: true };
+}
+
+export async function removeProofFile(
+  adminClient: SupabaseClient,
+  {
+    jobId,
+    proofId,
+    actorProfileId,
+  }: {
+    jobId: string;
+    proofId: string;
+    actorProfileId: string;
+  }
+) {
+  const job = await loadJobContext(adminClient, jobId);
+  const proof = await loadMutableProof(adminClient, jobId, proofId);
+
+  assertProofStatusAllowsAttachment(proof.status);
+
+  const existing = await loadProofFileRecord(adminClient, proofId);
+  if (!existing?.id) {
+    return { ok: true };
+  }
+
+  const { error } = await adminClient
+    .from("job_proof_files")
+    .delete()
+    .eq("id", existing.id);
+
+  if (error) {
+    throw new ProofError(error.message, 500);
+  }
+
+  await adminClient
+    .from("job_proofs")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", proofId);
+
+  await logProofActivity(adminClient, {
+    activityType: PROOF_ACTIVITY_TYPES.proofCreated,
+    description: `Proof file removed from ${proof.proof_reference}.`,
+    companyId: job.company_id,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
+    actorProfileId,
+    metadata: { job_id: jobId, proof_id: proofId },
+  });
+
+  revalidateJobPages({
+    jobId,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
+  });
+
+  return { ok: true };
+}
+
+export async function uploadProofFileToProofsFolder(
+  adminClient: SupabaseClient,
+  {
+    jobId,
+    proofId,
+    fileName,
+    mimeType,
+    fileBuffer,
+    actorProfileId,
+  }: {
+    jobId: string;
+    proofId: string;
+    fileName: string;
+    mimeType: string | null;
+    fileBuffer: ArrayBuffer;
+    actorProfileId: string;
+  }
+) {
+  const job = await loadJobContext(adminClient, jobId);
+  const proof = await loadMutableProof(adminClient, jobId, proofId);
+
+  assertProofStatusAllowsAttachment(proof.status);
+
+  if (!job.dropbox_folder_path) {
+    throw new ProofError("No Dropbox folder is linked to this job yet.", 409);
+  }
+
+  const validationError = assertProofUploadFile({
+    fileName,
+    mimeType,
+    fileSizeBytes: fileBuffer.byteLength,
+  });
+
+  if (validationError) {
+    throw new ProofError(validationError, 400);
+  }
+
+  const proofsFolderPath = resolveProofsFolderPathForJob(job.dropbox_folder_path);
+  if (!proofsFolderPath) {
+    throw new ProofError("Proofs folder path is unavailable.", 500);
+  }
+
+  const { data: itemLinks } = await adminClient
+    .from("job_proof_manifest_items")
+    .select("production_item_id, production_items(item_reference)")
+    .eq("proof_id", proofId);
+
+  const itemReferences = (itemLinks ?? [])
+    .map(
+      (link) =>
+        (link.production_items as { item_reference?: string | null } | null)
+          ?.item_reference ?? null
+    )
+    .filter(Boolean) as string[];
+
+  const itemReference = itemReferences.length === 1 ? itemReferences[0] : null;
+  const extension = getFileExtension(fileName);
+  const targetFileName = buildProofUploadTargetFileName({
+    itemReference,
+    proofReference: proof.proof_reference,
+    versionNumber: proof.version_number,
+    extension,
+  });
+  const dropboxPath = `${proofsFolderPath}/${targetFileName}`;
+
+  const uploaded = await uploadSmallDropboxFile({
+    dropboxPath,
+    body: fileBuffer,
+  });
+
+  await upsertProofFileRecord(adminClient, proofId, {
+    jobFileId: null,
+    dropboxFileId: uploaded.id,
+    dropboxPath: uploaded.path_lower ?? uploaded.path_display,
+    dropboxRevision: uploaded.rev,
+    fileName: uploaded.name,
+    mimeType,
+    fileSizeBytes: uploaded.size,
+    contentHash: uploaded.content_hash ?? null,
+  });
+
+  await adminClient
+    .from("job_proofs")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", proofId);
+
+  await logProofActivity(adminClient, {
+    activityType: PROOF_ACTIVITY_TYPES.proofCreated,
+    description: `Proof file uploaded to ${proof.proof_reference}.`,
+    companyId: job.company_id,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
+    actorProfileId,
+    metadata: {
+      job_id: jobId,
+      proof_id: proofId,
+      file_name: uploaded.name,
+      source: "proofs_folder_upload",
+    },
+  });
+
+  revalidateJobPages({
+    jobId,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
+  });
+
+  return { ok: true, fileName: uploaded.name };
+}
+
 export async function markProofReadyToSend(
   adminClient: SupabaseClient,
   {
@@ -498,6 +968,13 @@ export async function markProofReadyToSend(
   if (proof.status !== "internal_review") {
     throw new ProofError("Proof must be in internal review before marking ready to send.", 409);
   }
+
+  await assertCustomerFacingProofAttached(
+    adminClient,
+    proofId,
+    job.dropbox_folder_path,
+    "Attach a proof PDF or image before marking this proof ready to send."
+  );
 
   const now = new Date().toISOString();
 
@@ -562,6 +1039,26 @@ export async function sendJobProof(
     throw new ProofError("Proof file metadata is missing.", 409);
   }
 
+  if (
+    !isCustomerFacingProofAsset({
+      fileName: proofFile.file_name,
+      dropboxPath: proofFile.dropbox_path,
+      dropboxFolderPath: job.dropbox_folder_path,
+      jobFileId: proofFile.job_file_id,
+    })
+  ) {
+    throw new ProofError(
+      "Attach a lightweight PDF or image proof before sending. Production artwork files cannot be sent to the customer.",
+      409
+    );
+  }
+
+  const proofsFolderPath = resolveProofsFolderPathOrThrow(
+    job.dropbox_folder_path,
+    job.job_reference,
+    job.project_name
+  );
+
   const { data: itemLinks } = await adminClient
     .from("job_proof_manifest_items")
     .select("production_item_id, production_items(item_reference)")
@@ -572,25 +1069,70 @@ export async function sendJobProof(
     (itemLinks?.[0]?.production_items as { item_reference?: string | null } | null)
       ?.item_reference ?? null;
 
-  const copied = await copyProofFileToProofsFolder({
-    sourcePath: proofFile.dropbox_path,
-    jobReference: job.job_reference,
-    projectName: job.project_name,
-    versionNumber: proof.version_number,
-    itemReference,
-    fileName: proofFile.file_name,
-  });
+  const alreadyInProofsFolder = isPathInProofsFolder(
+    proofFile.dropbox_path,
+    job.dropbox_folder_path,
+    job.job_reference,
+    job.project_name
+  );
+
+  let finalMetadata: {
+    dropboxFileId: string | null;
+    dropboxPath: string;
+    dropboxRevision: string | null;
+    fileName: string;
+    fileSizeBytes: number;
+    contentHash: string | null;
+  };
+
+  if (alreadyInProofsFolder) {
+    const metadata = await resolveDropboxFileMetadata(proofFile.dropbox_path);
+    finalMetadata = {
+      dropboxFileId: metadata.id,
+      dropboxPath: metadata.path_lower ?? metadata.path_display,
+      dropboxRevision: metadata.rev,
+      fileName: metadata.name,
+      fileSizeBytes: metadata.size,
+      contentHash: metadata.content_hash ?? null,
+    };
+  } else {
+    if (!isCustomerFacingProofExtension(proofFile.file_name)) {
+      throw new ProofError(
+        "Attach a lightweight PDF or image proof before sending. Production artwork files cannot be sent to the customer.",
+        409
+      );
+    }
+
+    const copied = await copyProofFileToProofsFolder({
+      sourcePath: proofFile.dropbox_path,
+      proofsFolderPath,
+      versionNumber: proof.version_number,
+      itemReference,
+      proofReference: proof.proof_reference,
+      fileName: proofFile.file_name,
+    });
+
+    finalMetadata = {
+      dropboxFileId: copied.dropboxFileId,
+      dropboxPath: copied.dropboxPath,
+      dropboxRevision: copied.dropboxRevision,
+      fileName: copied.fileName,
+      fileSizeBytes: copied.fileSizeBytes,
+      contentHash: copied.contentHash,
+    };
+  }
 
   const now = new Date().toISOString();
 
   await adminClient
     .from("job_proof_files")
     .update({
-      dropbox_file_id: copied.dropboxFileId,
-      dropbox_path: copied.dropboxPath,
-      dropbox_revision: copied.dropboxRevision,
-      file_name: copied.fileName,
-      file_size_bytes: copied.fileSizeBytes,
+      dropbox_file_id: finalMetadata.dropboxFileId,
+      dropbox_path: finalMetadata.dropboxPath,
+      dropbox_revision: finalMetadata.dropboxRevision,
+      file_name: finalMetadata.fileName,
+      file_size_bytes: finalMetadata.fileSizeBytes,
+      content_hash: finalMetadata.contentHash,
     })
     .eq("id", proofFile.id);
 

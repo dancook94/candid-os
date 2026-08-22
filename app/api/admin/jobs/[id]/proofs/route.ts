@@ -5,7 +5,7 @@ import { jobErrorResponse } from "@/lib/jobs/api-response";
 import { requireAdminJobAccess } from "@/lib/jobs/auth";
 import type { ProofArtworkOrigin } from "@/lib/proofs/constants";
 import { ProofError } from "@/lib/proofs/errors";
-import { listProofSourceDropboxFiles } from "@/lib/proofs/dropbox";
+import { listProofFolderDropboxFiles, listProofSourceDropboxFiles } from "@/lib/proofs/dropbox";
 import { createJobProof, loadProofsForJob } from "@/lib/proofs/service";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -103,17 +103,31 @@ export async function PUT(request: Request, context: RouteContext) {
       );
     }
 
-    const body = (await request.json()) as { artworkOrigin?: ProofArtworkOrigin };
+    const body = (await request.json()) as {
+      artworkOrigin?: ProofArtworkOrigin;
+      listFolder?: "proofs_folder";
+    };
     const adminClient = createAdminClient();
     const job = await requireAdminJobAccess(adminClient, jobId);
 
-    const files = await listProofSourceDropboxFiles(
-      body.artworkOrigin ?? "customer_uploaded",
-      job.job_reference,
-      job.project_name
-    );
+    if (body.listFolder === "proofs_folder") {
+      const files = await listProofFolderDropboxFiles(job.dropbox_folder_path);
+      return NextResponse.json({
+        files,
+        dropboxLinked: Boolean(job.dropbox_folder_path),
+      });
+    }
 
-    return NextResponse.json({ files });
+    const files = await listProofSourceDropboxFiles(body.artworkOrigin ?? "customer_uploaded", {
+      dropboxFolderPath: job.dropbox_folder_path,
+      jobReference: job.job_reference,
+      projectName: job.project_name,
+    });
+
+    return NextResponse.json({
+      files,
+      dropboxLinked: Boolean(job.dropbox_folder_path),
+    });
   } catch (error) {
     return proofErrorResponse(error);
   }
