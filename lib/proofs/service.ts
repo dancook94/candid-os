@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
+import { resolveJobProofRequired } from "@/lib/notifications/artwork-copy";
 import { ProofError, isMissingProofSchemaError } from "@/lib/proofs/errors";
 import {
   PROOF_ACTIVITY_TYPES,
@@ -299,7 +300,7 @@ export async function loadJobProofRequirement(
   const { data, error } = await adminClient
     .from("jobs")
     .select(
-      "proof_required, proof_workflow_status, proof_bypass_reason, proof_bypassed_at, proof_approved_at"
+      "proof_required, proof_workflow_status, proof_bypass_reason, proof_bypassed_at, proof_bypassed_by_profile_id, proof_approved_at"
     )
     .eq("id", jobId)
     .maybeSingle();
@@ -313,10 +314,11 @@ export async function loadJobProofRequirement(
 
   return {
     schemaMissing: false,
-    proofRequired: Boolean(data?.proof_required ?? true),
+    proofRequired: resolveJobProofRequired({ proof_required: data?.proof_required }),
     workflowStatus: (data?.proof_workflow_status ?? "no_proof") as string,
     bypassReason: data?.proof_bypass_reason ?? null,
     bypassedAt: data?.proof_bypassed_at ?? null,
+    bypassedByProfileId: data?.proof_bypassed_by_profile_id ?? null,
     proofApprovedAt: data?.proof_approved_at ?? null,
   };
 }

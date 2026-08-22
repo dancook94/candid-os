@@ -32,6 +32,8 @@ type AdminJobProofsPanelProps = {
     proofRequired: boolean;
     workflowStatus: string;
     bypassReason: string | null;
+    bypassedAt: string | null;
+    bypassedByName: string | null;
   };
   initialProofs: JobProofView[];
   schemaMissing?: boolean;
@@ -66,6 +68,9 @@ export function AdminJobProofsPanel({
 }: AdminJobProofsPanelProps) {
   const [proofRequired, setProofRequired] = useState(initialRequirement.proofRequired);
   const [workflowStatus, setWorkflowStatus] = useState(initialRequirement.workflowStatus);
+  const [bypassReasonText, setBypassReasonText] = useState(initialRequirement.bypassReason);
+  const [bypassedAt, setBypassedAt] = useState(initialRequirement.bypassedAt);
+  const [bypassedByName, setBypassedByName] = useState(initialRequirement.bypassedByName);
   const [proofs, setProofs] = useState(initialProofs);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -100,6 +105,9 @@ export function AdminJobProofsPanel({
       requirement?: {
         proofRequired: boolean;
         workflowStatus: string;
+        bypassReason?: string | null;
+        bypassedAt?: string | null;
+        bypassedByName?: string | null;
       };
       proofs?: JobProofView[];
       error?: string;
@@ -113,6 +121,9 @@ export function AdminJobProofsPanel({
     if (payload.requirement) {
       setProofRequired(payload.requirement.proofRequired);
       setWorkflowStatus(payload.requirement.workflowStatus);
+      setBypassReasonText(payload.requirement.bypassReason ?? null);
+      setBypassedAt(payload.requirement.bypassedAt ?? null);
+      setBypassedByName(payload.requirement.bypassedByName ?? null);
     }
 
     if (payload.proofs) {
@@ -271,7 +282,12 @@ export function AdminJobProofsPanel({
         <div className="grid gap-4 md:grid-cols-2">
           <div>
             <p className="text-muted-foreground">Proof requirement</p>
-            <p className="mt-1 font-medium">{proofRequired ? "Required" : "Not required"}</p>
+            <div className="mt-2">
+              <StatusBadge
+                status={proofRequired ? "pending" : "disabled"}
+                label={proofRequired ? "Required" : "Not required"}
+              />
+            </div>
           </div>
           <div>
             <p className="text-muted-foreground">Proof status</p>
@@ -283,11 +299,30 @@ export function AdminJobProofsPanel({
           </div>
         </div>
 
+        {!proofRequired ? (
+          <div className="mt-4 space-y-1 rounded-md border border-border bg-background/80 p-3 text-sm">
+            <p className="font-medium text-foreground">Proof bypass</p>
+            {bypassReasonText ? (
+              <p className="text-muted-foreground">Reason: {bypassReasonText}</p>
+            ) : (
+              <p className="text-muted-foreground">Reason not recorded.</p>
+            )}
+            {bypassedByName || bypassedAt ? (
+              <p className="text-muted-foreground">
+                {bypassedByName ? `By ${bypassedByName}` : "By staff"}
+                {bypassedAt
+                  ? ` on ${new Date(bypassedAt).toLocaleString("en-GB")}`
+                  : ""}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         <div className="mt-4 flex flex-wrap gap-2">
           {proofRequired ? (
             <>
               <div className="w-full space-y-2">
-                <Label htmlFor="bypassReason">Bypass reason</Label>
+                <Label htmlFor="bypassReason">Reason for not requiring proof</Label>
                 <select
                   id="bypassReason"
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
@@ -309,7 +344,7 @@ export function AdminJobProofsPanel({
                 disabled={pending}
                 onClick={() => updateProofRequirement(false)}
               >
-                Bypass proof
+                Mark not required
               </Button>
             </>
           ) : (
@@ -323,12 +358,6 @@ export function AdminJobProofsPanel({
             </Button>
           )}
         </div>
-
-        {!proofRequired && initialRequirement.bypassReason ? (
-          <p className="mt-3 text-sm text-muted-foreground">
-            Bypass reason: {initialRequirement.bypassReason}
-          </p>
-        ) : null}
       </div>
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}

@@ -1,4 +1,10 @@
+import { resolveJobProofRequired } from "@/lib/notifications/artwork-copy";
 import type { JobProofView } from "@/lib/proofs/types";
+
+/** True unless the job is explicitly marked proof_required = false. */
+export function isJobProofRequired(job: { proof_required?: boolean | null }) {
+  return resolveJobProofRequired(job);
+}
 
 export type CustomerProofSummary = Pick<
   JobProofView,
@@ -186,8 +192,8 @@ export function deriveCustomerProofState({
       awaitingApprovalCount: 0,
       changesRequestedCount: changesRequested.length,
       changesRequestedComment: primary.changes_requested_comment,
-      cardActionLabel: "Changes requested",
-      cardActionUrl: buildCustomerProofReviewUrl(jobId, primary.id),
+      cardActionLabel: null,
+      cardActionUrl: null,
       awaitingApprovalProofs: [],
     };
   }
@@ -204,8 +210,8 @@ export function deriveCustomerProofState({
       awaitingApprovalCount: 0,
       changesRequestedCount: 0,
       changesRequestedComment: null,
-      cardActionLabel: "Proof approved",
-      cardActionUrl: buildCustomerProofReviewUrl(jobId, primary.id),
+      cardActionLabel: null,
+      cardActionUrl: null,
       awaitingApprovalProofs: [],
     };
   }
@@ -236,12 +242,20 @@ export function mapCustomerProofStatusToBadge(status: CustomerProofStatus) {
     case "awaiting_approval":
       return "sent" as const;
     case "changes_requested":
-      return "pending" as const;
+      return "declined" as const;
     case "preparing":
       return "pending" as const;
     case "not_required":
-      return "draft" as const;
+      return "disabled" as const;
     default:
-      return "draft" as const;
+      return "disabled" as const;
   }
+}
+
+export function shouldShowCustomerProofActionLink(state: CustomerProofState) {
+  return (
+    state.requiresCustomerAction &&
+    Boolean(state.cardActionUrl) &&
+    Boolean(state.cardActionLabel)
+  );
 }

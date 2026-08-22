@@ -7,7 +7,26 @@ import {
   type CustomerProofState,
   type CustomerProofSummary,
 } from "@/lib/proofs/customer-state";
+import { isJobProofRequired } from "@/lib/proofs/customer-state";
 import { loadJobProofRequirement, loadProofsForJob } from "@/lib/proofs/service";
+
+async function loadProfileDisplayName(
+  adminClient: SupabaseClient,
+  profileId: string | null | undefined
+) {
+  if (!profileId) {
+    return null;
+  }
+
+  const { data } = await adminClient
+    .from("profiles")
+    .select("full_name, email")
+    .eq("id", profileId)
+    .maybeSingle();
+
+  const fullName = data?.full_name?.trim();
+  return fullName || data?.email || null;
+}
 
 export async function loadAdminJobProofingContext(jobId: string) {
   const adminClient = createAdminClient();
@@ -18,12 +37,19 @@ export async function loadAdminJobProofingContext(jobId: string) {
       loadProofsForJob(adminClient, jobId),
     ]);
 
+    const bypassedByName = await loadProfileDisplayName(
+      adminClient,
+      requirement.bypassedByProfileId
+    );
+
     return {
       schemaMissing: requirement.schemaMissing || proofsResult.schemaMissing,
       requirement: {
         proofRequired: requirement.proofRequired,
         workflowStatus: requirement.workflowStatus,
         bypassReason: requirement.bypassReason,
+        bypassedAt: requirement.bypassedAt,
+        bypassedByName,
       },
       proofs: proofsResult.proofs,
     };
@@ -34,6 +60,8 @@ export async function loadAdminJobProofingContext(jobId: string) {
         proofRequired: true,
         workflowStatus: "no_proof",
         bypassReason: null,
+        bypassedAt: null,
+        bypassedByName: null,
       },
       proofs: [],
     };
@@ -142,7 +170,7 @@ export async function loadCustomerProofStatesByJobId(
     states.set(
       job.id,
       deriveCustomerProofState({
-        proofRequired: Boolean(job.proof_required ?? true),
+        proofRequired: isJobProofRequired(job),
         proofs: jobProofs,
         jobId: job.id,
         jobReference: job.job_reference,

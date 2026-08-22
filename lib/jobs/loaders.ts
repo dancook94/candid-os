@@ -30,6 +30,7 @@ import type { CustomerJobRecord } from "@/lib/customer-jobs";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   CUSTOMER_PROOF_STATUS_LABELS,
+  isJobProofRequired,
   type CustomerProofState,
 } from "@/lib/proofs/customer-state";
 import { loadCustomerProofStatesByJobId } from "@/lib/proofs/loaders";
@@ -41,9 +42,10 @@ function mapJobToCustomerListRecord(
   proofState?: CustomerProofState
 ): CustomerJobRecord {
   const statusView = resolveCustomerJobStatus(job, files);
+  const proofRequired = isJobProofRequired(job);
   const resolvedProofState = proofState ?? {
-    status: job.proof_required ? "preparing" : "not_required",
-    label: job.proof_required
+    status: proofRequired ? "preparing" : "not_required",
+    label: proofRequired
       ? CUSTOMER_PROOF_STATUS_LABELS.preparing
       : CUSTOMER_PROOF_STATUS_LABELS.not_required,
     requiresCustomerAction: false,

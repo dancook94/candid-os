@@ -11,7 +11,10 @@ import {
   PROOF_STATUS_LABELS,
 } from "@/lib/proofs/constants";
 import { manifestItemsForProofDisplay } from "@/lib/proofs/gates";
-import type { CustomerProofState } from "@/lib/proofs/customer-state";
+import {
+  mapCustomerProofStatusToBadge,
+  type CustomerProofState,
+} from "@/lib/proofs/customer-state";
 import type { JobProofView } from "@/lib/proofs/types";
 
 type CustomerJobProofsSectionProps = {
@@ -110,17 +113,12 @@ export function CustomerJobProofsSection({
     <div className="space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Proofs</h2>
-        {!proofRequired ? (
-          <p className="mt-1 text-sm text-muted-foreground">
-            No proof is required for this job.
-          </p>
-        ) : proofs.length === 0 ? (
-          <p className="mt-1 text-sm text-muted-foreground">
-            Your proof is being prepared.
-          </p>
-        ) : (
-          <p className="mt-1 text-sm text-muted-foreground">{proofState.label}</p>
-        )}
+        <div className="mt-2">
+          <StatusBadge
+            status={mapCustomerProofStatusToBadge(proofState.status)}
+            label={proofState.label}
+          />
+        </div>
       </div>
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}

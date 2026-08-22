@@ -110,7 +110,7 @@ export function CustomerJobsList({ jobs }: CustomerJobsListProps) {
                     )}
                     label={job.proofStatusLabel}
                   />
-                  {job.proofActionUrl && job.proofActionLabel ? (
+                  {job.proofRequiresAction && job.proofActionUrl && job.proofActionLabel ? (
                     <Link
                       href={job.proofActionUrl}
                       className="block text-sm font-medium text-foreground underline-offset-4 hover:underline"
