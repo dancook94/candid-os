@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { StatusBadge } from "@/components/status-badge";
@@ -20,7 +20,31 @@ type NotificationsListClientProps = {
   totalCount: number;
   schemaMissing: boolean;
   canRetry: boolean;
+  initialFilters?: {
+    status?: string;
+    type?: string;
+    audience?: string;
+    email?: string;
+    failed?: string;
+  };
 };
+
+const TYPE_FILTER_OPTIONS = [
+  { value: "", label: "All types" },
+  { value: "customer_registration_received", label: "Customer registration" },
+  { value: "internal_new_registration", label: "Internal registration" },
+  { value: "customer_account_approved", label: "Account approved" },
+  { value: "quote_ready", label: "Quote ready" },
+  { value: "quote_accepted_customer", label: "Quote accepted (customer)" },
+  { value: "quote_accepted_internal", label: "Quote accepted (internal)" },
+];
+
+const AUDIENCE_FILTER_OPTIONS = [
+  { value: "", label: "All audiences" },
+  { value: "customer", label: "Customer" },
+  { value: "internal", label: "Internal" },
+  { value: "staff", label: "Staff" },
+];
 
 function notificationStatusBadge(status: string) {
   switch (status) {
@@ -43,10 +67,54 @@ export function NotificationsListClient({
   totalCount,
   schemaMissing,
   canRetry,
+  initialFilters,
 }: NotificationsListClientProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
+  const [typeFilter, setTypeFilter] = useState(initialFilters?.type ?? "");
+  const [audienceFilter, setAudienceFilter] = useState(initialFilters?.audience ?? "");
+  const [emailFilter, setEmailFilter] = useState(initialFilters?.email ?? "");
+  const [failedOnly, setFailedOnly] = useState(initialFilters?.failed === "1");
+
+  function applyFilters() {
+    const params = new URLSearchParams(searchParams.toString());
+
+    if (typeFilter) {
+      params.set("type", typeFilter);
+    } else {
+      params.delete("type");
+    }
+
+    if (audienceFilter) {
+      params.set("audience", audienceFilter);
+    } else {
+      params.delete("audience");
+    }
+
+    if (emailFilter.trim()) {
+      params.set("email", emailFilter.trim());
+    } else {
+      params.delete("email");
+    }
+
+    if (failedOnly) {
+      params.set("failed", "1");
+    } else {
+      params.delete("failed");
+    }
+
+    router.push(`/admin/notifications?${params.toString()}`);
+  }
+
+  function clearFilters() {
+    setTypeFilter("");
+    setAudienceFilter("");
+    setEmailFilter("");
+    setFailedOnly(false);
+    router.push("/admin/notifications");
+  }
 
   async function retryNotification(id: string) {
     setBusyId(id);
@@ -90,6 +158,73 @@ export function NotificationsListClient({
           {actionError}
         </p>
       ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Filters</CardTitle>
+          <CardDescription>Narrow the delivery log by type, audience, or recipient.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted-foreground">Type</span>
+              <select
+                value={typeFilter}
+                onChange={(event) => setTypeFilter(event.target.value)}
+                className="min-w-48 rounded-lg border border-neutral-300 bg-white px-3 py-2"
+              >
+                {TYPE_FILTER_OPTIONS.map((option) => (
+                  <option key={option.value || "all"} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted-foreground">Audience</span>
+              <select
+                value={audienceFilter}
+                onChange={(event) => setAudienceFilter(event.target.value)}
+                className="min-w-40 rounded-lg border border-neutral-300 bg-white px-3 py-2"
+              >
+                {AUDIENCE_FILTER_OPTIONS.map((option) => (
+                  <option key={option.value || "all"} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-muted-foreground">Recipient email</span>
+              <input
+                type="search"
+                value={emailFilter}
+                onChange={(event) => setEmailFilter(event.target.value)}
+                placeholder="Search recipient"
+                className="min-w-56 rounded-lg border border-neutral-300 bg-white px-3 py-2"
+              />
+            </label>
+
+            <label className="flex items-center gap-2 pb-2 text-sm">
+              <input
+                type="checkbox"
+                checked={failedOnly}
+                onChange={(event) => setFailedOnly(event.target.checked)}
+              />
+              Failed only
+            </label>
+
+            <Button type="button" onClick={applyFilters}>
+              Apply
+            </Button>
+            <Button type="button" variant="outline" onClick={clearFilters}>
+              Clear
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

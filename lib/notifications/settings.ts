@@ -17,8 +17,11 @@ export type NotificationSettingsPayload = {
 
 function defaultCustomerToggles(): Record<CustomerNotificationType, boolean> {
   return {
+    customer_registration_received: true,
+    customer_account_approved: true,
     quote_ready: true,
     quote_revised: true,
+    quote_accepted_customer: true,
     quote_accepted_confirmation: true,
     artwork_uploaded_confirmation: true,
     artwork_changes_requested: true,
@@ -35,7 +38,9 @@ function defaultCustomerToggles(): Record<CustomerNotificationType, boolean> {
 
 function defaultInternalToggles(): Record<InternalNotificationType, boolean> {
   return {
+    internal_new_registration: true,
     new_quote_request: true,
+    quote_accepted_internal: true,
     quote_accepted: true,
     artwork_uploaded: true,
     proof_approved: true,

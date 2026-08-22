@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { applyEmailModeRedirect } from "@/lib/notifications/email-mode";
+import { resolveNotificationReplyTo } from "@/lib/notifications/reply-to";
 import { isCustomerEmailEnabled } from "@/lib/notifications/preferences";
 import { sendEmailThroughResend } from "@/lib/notifications/resend-client";
 import {
@@ -213,6 +214,7 @@ async function deliverEmailNotification(
     intendedRecipient,
     subject: rendered.subject,
     html: rendered.html,
+    replyTo: resolveNotificationReplyTo(input.type),
   });
 
   const now = new Date().toISOString();
@@ -321,6 +323,7 @@ export async function sendNotification(
       const recipient = await resolveCustomerRecipient(adminClient, {
         contactId: input.contactId,
         companyId: input.companyId,
+        profileId: input.profileId,
       });
 
       if (!recipient) {
@@ -452,6 +455,7 @@ export async function retryFailedNotification(
     intendedRecipient,
     subject: rendered.subject,
     html: rendered.html,
+    replyTo: resolveNotificationReplyTo(data.notification_type as NotificationType),
   });
 
   const now = new Date().toISOString();

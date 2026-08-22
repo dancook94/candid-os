@@ -11,7 +11,9 @@ import {
   resolvePostLoginPath,
   sanitizeNextPath,
 } from "@/lib/auth-redirect";
+import { notifyCustomerRegistrationSafe } from "@/lib/notifications/triggers";
 import { createRouteHandlerClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 const isDevelopment = process.env.NODE_ENV === "development";
 
@@ -207,6 +209,16 @@ export async function GET(request: Request) {
     }
 
     destination = resolvePostLoginPath(profile, sanitizeNextPath(next));
+
+    const isRegistrationVerification = otpType === "signup" || otpType === "email";
+
+    if (
+      profile.user_role === "customer" &&
+      isRegistrationVerification
+    ) {
+      const adminClient = createAdminClient();
+      void notifyCustomerRegistrationSafe(adminClient, user.id);
+    }
   }
 
   return redirectWithCookies(new URL(destination, requestUrl.origin), cookieResponse);

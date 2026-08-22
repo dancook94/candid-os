@@ -8,6 +8,7 @@ export type SendEmailInput = {
   intendedRecipient: string;
   subject: string;
   html: string;
+  replyTo?: string;
 };
 
 export type SendEmailResult =
@@ -144,6 +145,7 @@ export async function sendEmailThroughResend(
       subject: redirect.subject,
       html: input.html,
       text: getPlainTextFromHtml(input.html),
+      ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     });
 
     if (response.error) {

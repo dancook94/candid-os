@@ -1,5 +1,8 @@
 import { getAppBaseUrl, getResendFromAddress } from "@/lib/notifications/config";
-import type { NotificationType } from "@/lib/notifications/notification-types";
+import {
+  normalizeNotificationType,
+  type NotificationType,
+} from "@/lib/notifications/notification-types";
 
 const ACCENT = "#fbd12c";
 const TEXT = "#1a1a1a";
@@ -123,13 +126,58 @@ export function renderNotificationEmail(
   type: NotificationType,
   metadata: Record<string, unknown>
 ) {
+  const normalizedType = normalizeNotificationType(type);
   const project = String(metadata.projectName ?? metadata.project ?? "your project");
   const company = String(metadata.companyName ?? "your company");
-  const customerName = String(metadata.customerName ?? "there");
+  const customerName = String(metadata.customerName ?? metadata.firstName ?? "there");
   const jobReference = String(metadata.jobReference ?? "");
   const quoteReference = String(metadata.quoteReference ?? "");
 
-  switch (type) {
+  switch (normalizedType) {
+    case "customer_registration_received":
+      return {
+        subject: "Registration received — Candid OS",
+        html: renderEmailShell({
+          preheader: "Your Candid OS registration has been received.",
+          headline: "Your Candid OS registration has been received",
+          bodyParagraphs: [
+            `Hi ${customerName},`,
+            "Thank you for registering with Candid Creative.",
+            String(
+              metadata.approvalCopy ??
+                "We'll review your account before portal access is approved."
+            ),
+            ...(metadata.accountStatus === "approved"
+              ? []
+              : ["You'll receive another email once your account is ready."]),
+          ],
+          detailRows: [
+            { label: "Name", value: customerName },
+            ...(company ? [{ label: "Company", value: company }] : []),
+            { label: "Email", value: String(metadata.email ?? "") },
+            {
+              label: "Registered",
+              value: String(metadata.registrationDate ?? "Recently"),
+            },
+          ],
+        }),
+      };
+
+    case "customer_account_approved":
+      return {
+        subject: "Your Candid OS account is ready",
+        html: renderEmailShell({
+          preheader: "Your Candid OS account has been approved.",
+          headline: "Welcome to Candid OS",
+          bodyParagraphs: [
+            `Hi ${customerName},`,
+            "Your Candid OS account is now approved. You can use the portal to request quotations, view and accept quotes, upload artwork, view jobs, and receive production updates.",
+          ],
+          ctaLabel: "Log in to Candid OS",
+          ctaHref: buildAbsoluteUrl("/login"),
+        }),
+      };
+
     case "quote_ready":
       return {
         subject: `Your quotation is ready — ${project}`,
@@ -144,30 +192,43 @@ export function renderNotificationEmail(
             { label: "Project", value: project },
             { label: "Company", value: company },
             ...(quoteReference ? [{ label: "Quote", value: quoteReference }] : []),
+            ...(metadata.quoteTotal
+              ? [{ label: "Total", value: String(metadata.quoteTotal) }]
+              : []),
+            ...(metadata.quoteVersion
+              ? [{ label: "Version", value: String(metadata.quoteVersion) }]
+              : []),
           ],
           ctaLabel: "View quotation",
           ctaHref: buildAbsoluteUrl(String(metadata.quoteUrl ?? `/quotes/${metadata.quoteId ?? ""}`)),
         }),
       };
 
-    case "quote_accepted_confirmation":
+    case "quote_accepted_customer":
       return {
         subject: `Quotation accepted — ${project}`,
         html: renderEmailShell({
-          headline: "Quotation accepted",
+          headline: "Thank you — your quotation has been accepted",
           bodyParagraphs: [
             `Hi ${customerName},`,
-            `Thank you for accepting the quotation for ${project}. Your job is now being set up in Candid OS.`,
-            String(metadata.nextStep ?? "We'll be in touch about artwork and next steps shortly."),
+            `Thank you for accepting the quotation for ${project}.`,
+            String(metadata.nextStep ?? "Your job has now been created in Candid OS."),
           ],
           detailRows: [
-            { label: "Project", value: project },
+            ...(quoteReference ? [{ label: "Quote", value: quoteReference }] : []),
             ...(jobReference ? [{ label: "Job", value: jobReference }] : []),
+            { label: "Project", value: project },
+            ...(metadata.acceptedValue
+              ? [{ label: "Accepted value", value: String(metadata.acceptedValue) }]
+              : []),
           ],
           ctaLabel: "View job",
           ctaHref: buildAbsoluteUrl(String(metadata.jobUrl ?? `/jobs/${metadata.jobId ?? ""}`)),
         }),
       };
+
+    case "quote_accepted_confirmation":
+      return renderNotificationEmail("quote_accepted_customer", metadata);
 
     case "artwork_uploaded_confirmation":
       return {
@@ -215,9 +276,35 @@ export function renderNotificationEmail(
         }),
       };
 
-    case "quote_accepted":
+    case "internal_new_registration":
       return {
-        subject: `Quote accepted — ${project}`,
+        subject: `New Candid OS registration — ${customerName}`,
+        html: renderEmailShell({
+          headline: "New Candid OS registration",
+          bodyParagraphs: [
+            "A new customer registration was received in Candid OS.",
+          ],
+          detailRows: [
+            { label: "Customer", value: customerName },
+            { label: "Email", value: String(metadata.email ?? "") },
+            { label: "Company", value: company },
+            {
+              label: "Registered",
+              value: String(metadata.registrationDate ?? "Recently"),
+            },
+            {
+              label: "Account status",
+              value: String(metadata.accountStatus ?? "pending"),
+            },
+          ],
+          ctaLabel: "Review customer",
+          ctaHref: buildAbsoluteUrl("/admin"),
+        }),
+      };
+
+    case "quote_accepted_internal":
+      return {
+        subject: `Quote accepted — ${jobReference || quoteReference} — ${project}`,
         html: renderEmailShell({
           headline: "Quote accepted",
           bodyParagraphs: [
@@ -225,6 +312,8 @@ export function renderNotificationEmail(
           ],
           detailRows: [
             { label: "Company", value: company },
+            { label: "Customer", value: customerName },
+            ...(quoteReference ? [{ label: "Quote", value: quoteReference }] : []),
             ...(jobReference ? [{ label: "Job", value: jobReference }] : []),
             {
               label: "Accepted value",
@@ -234,6 +323,14 @@ export function renderNotificationEmail(
               label: "Required date",
               value: String(metadata.requiredDate ?? "Not specified"),
             },
+            {
+              label: "Fulfilment",
+              value: String(metadata.fulfilmentMethod ?? "Not specified"),
+            },
+            {
+              label: "Artwork",
+              value: String(metadata.artworkStatusLabel ?? "Not specified"),
+            },
           ],
           ctaLabel: "View job",
           ctaHref: buildAbsoluteUrl(String(metadata.jobUrl ?? `/admin/jobs/${metadata.jobId ?? ""}`)),
@@ -242,6 +339,9 @@ export function renderNotificationEmail(
             : undefined,
         }),
       };
+
+    case "quote_accepted":
+      return renderNotificationEmail("quote_accepted_internal", metadata);
 
     case "artwork_uploaded":
       return {

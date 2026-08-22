@@ -1,6 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
+  loadProfileNotificationContext,
+  type ProfileNotificationContext,
+} from "@/lib/notifications/profile-recipient";
+import {
   INTERNAL_NOTIFICATION_TYPES,
   type CustomerNotificationType,
   type InternalNotificationType,
@@ -16,8 +20,25 @@ export function isValidEmail(value: string) {
 
 export async function resolveCustomerRecipient(
   adminClient: SupabaseClient,
-  input: { contactId?: string | null; companyId?: string | null }
+  input: {
+    contactId?: string | null;
+    companyId?: string | null;
+    profileId?: string | null;
+  }
 ) {
+  if (input.profileId) {
+    const profile = await loadProfileNotificationContext(adminClient, input.profileId);
+
+    if (profile) {
+      return {
+        email: profile.email,
+        name: profile.fullName,
+        contactId: input.contactId ?? null,
+        profileId: profile.id,
+      };
+    }
+  }
+
   if (input.contactId) {
     const { data: contact, error } = await adminClient
       .from("contacts")

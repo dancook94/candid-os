@@ -3,8 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-import { createClient } from "@/lib/supabase/client";
-
 type Company = {
   id: string;
   company_name: string;
@@ -20,7 +18,6 @@ export function ApproveCustomer({
   companies,
 }: ApproveCustomerProps) {
   const router = useRouter();
-  const supabase = createClient();
 
   const [companyId, setCompanyId] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -35,22 +32,28 @@ export function ApproveCustomer({
     setError("");
     setIsSubmitting(true);
 
-    const { error: approvalError } = await supabase.rpc(
-      "approve_customer",
-      {
-        profile_id: profileId,
-        selected_company_id: companyId,
+    try {
+      const response = await fetch(`/api/admin/customers/${profileId}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ companyId }),
+      });
+      const payload = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to approve customer.");
       }
-    );
 
-    setIsSubmitting(false);
-
-    if (approvalError) {
-      setError(approvalError.message);
-      return;
+      router.refresh();
+    } catch (approveError) {
+      setError(
+        approveError instanceof Error
+          ? approveError.message
+          : "Unable to approve customer."
+      );
+    } finally {
+      setIsSubmitting(false);
     }
-
-    router.refresh();
   }
 
   return (
@@ -72,7 +75,7 @@ export function ApproveCustomer({
 
         <button
           type="button"
-          onClick={handleApprove}
+          onClick={() => void handleApprove()}
           disabled={isSubmitting}
           className="rounded-lg bg-neutral-950 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
         >

@@ -1,5 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { getAdminArtworkSourceLabel } from "@/lib/jobs/artwork-source";
+import type { JobArtworkSource } from "@/lib/jobs/types";
+import { loadProfileNotificationContext } from "@/lib/notifications/profile-recipient";
 import { sendNotification } from "@/lib/notifications/send-notification";
 import { buildAbsoluteUrl } from "@/lib/notifications/templates";
 
@@ -8,6 +11,148 @@ function logNotificationFailure(event: string, error: unknown) {
     console.error(`[notifications] ${event}`, {
       message: error instanceof Error ? error.message : String(error),
     });
+  }
+}
+
+function extractSingle<T>(value: T | T[] | null | undefined): T | null {
+  if (!value) return null;
+  return Array.isArray(value) ? (value[0] ?? null) : value;
+}
+
+function formatQuoteReference(quoteNumber: unknown) {
+  if (quoteNumber == null) return "";
+  return `Q-${quoteNumber}`;
+}
+
+function formatMoney(value: unknown) {
+  const amount = Number(value ?? 0);
+  if (!Number.isFinite(amount)) return "—";
+  return new Intl.NumberFormat("en-GB", {
+    style: "currency",
+    currency: "GBP",
+  }).format(amount);
+}
+
+function formatDisplayDate(value: string | null | undefined) {
+  if (!value) return "Recently";
+
+  return new Intl.DateTimeFormat("en-GB", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function buildQuoteAcceptedNextStep(job: {
+  artwork_required: boolean | null;
+  artwork_source: string | null;
+  artwork_status: string | null;
+}) {
+  if (job.artwork_source === "candid_creating") {
+    return "Your job has now been created and our team will prepare the artwork.";
+  }
+
+  if (
+    job.artwork_source === "manual_receipt" ||
+    job.artwork_source === "portal_upload" ||
+    job.artwork_status === "received" ||
+    job.artwork_status === "uploaded"
+  ) {
+    return "Your job has now been created and we'll continue preparing it for production.";
+  }
+
+  if (job.artwork_required) {
+    return "Your job has now been created. You can upload artwork from the job page.";
+  }
+
+  return "Your job has now been created and we'll keep you updated as production progresses.";
+}
+
+export async function notifyCustomerRegistration(
+  adminClient: SupabaseClient,
+  profileId: string
+) {
+  const profile = await loadProfileNotificationContext(adminClient, profileId);
+
+  if (!profile || profile.userRole !== "customer") {
+    return;
+  }
+
+  const companyLabel =
+    profile.companyName ?? profile.requestedCompanyName ?? "Not assigned yet";
+
+  const registrationMetadata = {
+    customerName: profile.fullName ?? profile.firstName ?? "there",
+    firstName: profile.firstName ?? "there",
+    companyName: companyLabel,
+    email: profile.email,
+    registrationDate: formatDisplayDate(profile.createdAt),
+    accountStatus: profile.accountStatus,
+    approvalCopy:
+      profile.accountStatus === "approved"
+        ? "Your account is already approved and ready to use."
+        : "Candid Creative will review your account before portal access is approved.",
+  };
+
+  await sendNotification(adminClient, {
+    type: "customer_registration_received",
+    profileId: profile.id,
+    companyId: profile.companyId,
+    idempotencyKey: `registration_received:${profile.id}`,
+    metadata: registrationMetadata,
+  });
+
+  await sendNotification(adminClient, {
+    type: "internal_new_registration",
+    profileId: profile.id,
+    companyId: profile.companyId,
+    idempotencyKey: `internal_registration:${profile.id}`,
+    metadata: registrationMetadata,
+  });
+}
+
+export async function notifyCustomerRegistrationSafe(
+  adminClient: SupabaseClient,
+  profileId: string
+) {
+  try {
+    await notifyCustomerRegistration(adminClient, profileId);
+  } catch (error) {
+    logNotificationFailure("customer_registration", error);
+  }
+}
+
+export async function notifyCustomerAccountApproved(
+  adminClient: SupabaseClient,
+  profileId: string
+) {
+  const profile = await loadProfileNotificationContext(adminClient, profileId);
+
+  if (!profile || profile.userRole !== "customer") {
+    return;
+  }
+
+  await sendNotification(adminClient, {
+    type: "customer_account_approved",
+    profileId: profile.id,
+    companyId: profile.companyId,
+    idempotencyKey: `account_approved:${profile.id}`,
+    metadata: {
+      customerName: profile.fullName ?? profile.firstName ?? "there",
+      firstName: profile.firstName ?? "there",
+      companyName: profile.companyName ?? profile.requestedCompanyName ?? "Your company",
+      email: profile.email,
+    },
+  });
+}
+
+export async function notifyCustomerAccountApprovedSafe(
+  adminClient: SupabaseClient,
+  profileId: string
+) {
+  try {
+    await notifyCustomerAccountApproved(adminClient, profileId);
+  } catch (error) {
+    logNotificationFailure("customer_account_approved", error);
   }
 }
 
@@ -27,21 +172,42 @@ export async function notifyQuoteReady(
     throw error ?? new Error("Quote not found.");
   }
 
+  let versionQuery = adminClient
+    .from("quote_versions")
+    .select("id, version_number, total, version_status")
+    .eq("quote_id", input.quoteId)
+    .eq("version_status", "sent");
+
+  if (input.versionId) {
+    versionQuery = versionQuery.eq("id", input.versionId);
+  } else {
+    versionQuery = versionQuery
+      .order("version_number", { ascending: false })
+      .limit(1);
+  }
+
+  const { data: version } = await versionQuery.maybeSingle();
+
+  if (!version || version.version_status !== "sent") {
+    return;
+  }
+
   const company = extractSingle(quote.companies);
   const contact = extractSingle(quote.contacts);
-  const versionSuffix = input.versionId ?? "latest";
 
   await sendNotification(adminClient, {
     type: "quote_ready",
     companyId: quote.company_id as string,
     contactId: (input.contactId ?? quote.contact_id) as string | null,
     quoteId: quote.id as string,
-    idempotencyKey: `quote_ready:${quote.id}:${versionSuffix}`,
+    idempotencyKey: `quote_ready:${quote.id}:${version.id}`,
     metadata: {
       projectName: quote.project_name,
       companyName: company?.company_name ?? "Your company",
       customerName: contact?.full_name ?? "there",
       quoteReference: formatQuoteReference(quote.quote_number),
+      quoteTotal: formatMoney(version.total),
+      quoteVersion: `Version ${version.version_number}`,
       quoteId: quote.id,
       quoteUrl: `/quotes/${quote.id}`,
     },
@@ -73,13 +239,15 @@ export async function notifyQuoteAccepted(
     adminClient
       .from("quotes")
       .select(
-        "id, project_name, quote_number, total, required_date, companies(company_name), contacts(full_name, email)"
+        "id, project_name, quote_number, total, required_date, fulfilment_method, companies(company_name), contacts(full_name, email)"
       )
       .eq("id", input.quoteId)
       .maybeSingle(),
     adminClient
       .from("jobs")
-      .select("id, job_reference, artwork_required, artwork_status")
+      .select(
+        "id, job_reference, artwork_required, artwork_status, artwork_source, fulfilment_method, required_date"
+      )
       .eq("id", input.jobId)
       .maybeSingle(),
   ]);
@@ -90,31 +258,42 @@ export async function notifyQuoteAccepted(
 
   const company = extractSingle(quote.companies);
   const contact = extractSingle(quote.contacts);
+  const nextStep = buildQuoteAcceptedNextStep(job);
+  const artworkStatusLabel = job.artwork_source
+    ? getAdminArtworkSourceLabel(job.artwork_source as JobArtworkSource)
+    : job.artwork_required
+      ? "Awaiting customer artwork"
+      : "Not required";
 
-  const customerMetadata = {
+  const sharedMetadata = {
     projectName: quote.project_name,
     companyName: company?.company_name ?? "Your company",
-    customerName: contact?.full_name ?? "there",
+    customerName: contact?.full_name ?? "Customer",
     jobReference: job.job_reference,
+    quoteReference: formatQuoteReference(quote.quote_number),
     jobId: job.id,
-    jobUrl: `/jobs/${job.id}`,
-    nextStep: job.artwork_required
-      ? "Please upload your artwork when you're ready."
-      : "We'll keep you updated as production progresses.",
+    acceptedValue: formatMoney(quote.total),
+    requiredDate: quote.required_date ?? job.required_date ?? "Not specified",
+    fulfilmentMethod: quote.fulfilment_method ?? job.fulfilment_method ?? "Not specified",
+    artworkStatusLabel,
+    nextStep,
   };
 
   await sendNotification(adminClient, {
-    type: "quote_accepted_confirmation",
+    type: "quote_accepted_customer",
     companyId: input.companyId,
     contactId: input.contactId ?? null,
     quoteId: input.quoteId,
     jobId: input.jobId,
-    idempotencyKey: `quote_accepted:${input.quoteId}`,
-    metadata: customerMetadata,
+    idempotencyKey: `quote_accepted_customer:${input.quoteId}`,
+    metadata: {
+      ...sharedMetadata,
+      jobUrl: `/jobs/${job.id}`,
+    },
   });
 
   await sendNotification(adminClient, {
-    type: "quote_accepted",
+    type: "quote_accepted_internal",
     companyId: input.companyId,
     contactId: input.contactId ?? null,
     quoteId: input.quoteId,
@@ -122,9 +301,7 @@ export async function notifyQuoteAccepted(
     opportunityId: input.opportunityId ?? null,
     idempotencyKey: `quote_accepted_internal:${input.quoteId}`,
     metadata: {
-      ...customerMetadata,
-      acceptedValue: formatMoney(quote.total),
-      requiredDate: quote.required_date ?? "Not specified",
+      ...sharedMetadata,
       jobUrl: `/admin/jobs/${job.id}`,
       opportunityUrl: input.opportunityId
         ? `/admin/opportunities/${input.opportunityId}`
@@ -331,25 +508,6 @@ export async function notifyJobReadyForInvoiceSafe(
   } catch (error) {
     logNotificationFailure("job_ready_for_invoice", error);
   }
-}
-
-function extractSingle<T>(value: T | T[] | null | undefined): T | null {
-  if (!value) return null;
-  return Array.isArray(value) ? (value[0] ?? null) : value;
-}
-
-function formatQuoteReference(quoteNumber: unknown) {
-  if (quoteNumber == null) return "";
-  return `Q-${quoteNumber}`;
-}
-
-function formatMoney(value: unknown) {
-  const amount = Number(value ?? 0);
-  if (!Number.isFinite(amount)) return "—";
-  return new Intl.NumberFormat("en-GB", {
-    style: "currency",
-    currency: "GBP",
-  }).format(amount);
 }
 
 export { buildAbsoluteUrl };

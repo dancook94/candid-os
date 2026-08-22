@@ -50,6 +50,9 @@ export default function RegisterPage() {
     }
 
     if (data.session) {
+      await fetch("/api/notifications/customer-registered", {
+        method: "POST",
+      });
       router.push("/dashboard");
       router.refresh();
       return;

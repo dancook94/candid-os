@@ -17,8 +17,11 @@ export const NOTIFICATION_STATUSES = [
 export type NotificationStatus = (typeof NOTIFICATION_STATUSES)[number];
 
 export const CUSTOMER_NOTIFICATION_TYPES = [
+  "customer_registration_received",
+  "customer_account_approved",
   "quote_ready",
   "quote_revised",
+  "quote_accepted_customer",
   "quote_accepted_confirmation",
   "artwork_uploaded_confirmation",
   "artwork_changes_requested",
@@ -33,7 +36,9 @@ export const CUSTOMER_NOTIFICATION_TYPES = [
 ] as const;
 
 export const INTERNAL_NOTIFICATION_TYPES = [
+  "internal_new_registration",
   "new_quote_request",
+  "quote_accepted_internal",
   "quote_accepted",
   "artwork_uploaded",
   "proof_approved",
@@ -67,8 +72,10 @@ export const DEFAULT_INTERNAL_ROUTING: Record<
   InternalNotificationType,
   InternalRecipientGroup[]
 > = {
+  internal_new_registration: ["admin"],
   new_quote_request: ["sales"],
-  quote_accepted: ["sales", "admin"],
+  quote_accepted_internal: ["sales", "production"],
+  quote_accepted: ["sales", "production"],
   artwork_uploaded: ["artwork"],
   proof_approved: ["production"],
   production_exception: ["production"],
@@ -94,14 +101,22 @@ export const CUSTOMER_TYPE_PREFERENCE_KEY: Partial<
 
 /** Transactional types that ignore contact opt-out. */
 export const ESSENTIAL_CUSTOMER_NOTIFICATION_TYPES = new Set<CustomerNotificationType>([
+  "customer_registration_received",
+  "customer_account_approved",
+  "quote_accepted_customer",
   "quote_accepted_confirmation",
 ]);
 
 export const TESTABLE_NOTIFICATION_TYPES = [
+  "customer_registration_received",
+  "customer_account_approved",
   "quote_ready",
+  "quote_accepted_customer",
   "quote_accepted_confirmation",
   "artwork_uploaded_confirmation",
   "new_quote_request",
+  "internal_new_registration",
+  "quote_accepted_internal",
   "quote_accepted",
   "artwork_uploaded",
   "job_ready_for_invoice",
@@ -114,4 +129,16 @@ export function formatNotificationTypeLabel(type: string) {
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+export function normalizeNotificationType(type: string): NotificationType {
+  if (type === "quote_accepted_confirmation") {
+    return "quote_accepted_customer";
+  }
+
+  if (type === "quote_accepted") {
+    return "quote_accepted_internal";
+  }
+
+  return type as NotificationType;
 }

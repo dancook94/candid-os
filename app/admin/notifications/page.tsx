@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 
 import { AppShell } from "@/components/app-shell";
 import { NotificationsListClient } from "@/components/notifications/notifications-list-client";
@@ -58,12 +59,15 @@ export default async function AdminNotificationsPage({
           }
         />
 
-        <NotificationsListClient
-          items={items}
-          totalCount={totalCount}
-          schemaMissing={schemaMissing}
-          canRetry={isCandidAdminRole(profile.user_role)}
-        />
+        <Suspense fallback={<p className="text-sm text-muted-foreground">Loading notifications…</p>}>
+          <NotificationsListClient
+            items={items}
+            totalCount={totalCount}
+            schemaMissing={schemaMissing}
+            canRetry={isCandidAdminRole(profile.user_role)}
+            initialFilters={filters}
+          />
+        </Suspense>
       </div>
     </AppShell>
   );
