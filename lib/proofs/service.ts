@@ -35,6 +35,7 @@ import {
   prepareProofApprovedNotification,
   prepareProofChangesRequestedNotification,
   prepareProofReadyNotification,
+  prepareProofReadyResendNotification,
 } from "@/lib/proofs/notifications";
 import type {
   AttachProofFileInput,
@@ -267,6 +268,23 @@ export async function loadProofsForJob(
 
       if (options.customerSafe) {
         mapped.internal_note = null;
+        mapped.files = mapped.files.map((file) => ({
+          id: file.id,
+          proof_id: file.proof_id,
+          job_file_id: null,
+          dropbox_file_id: null,
+          dropbox_path: null,
+          dropbox_revision: null,
+          file_name: file.file_name,
+          mime_type: file.mime_type,
+          file_size_bytes: file.file_size_bytes,
+          content_hash: null,
+          preview_dropbox_path: null,
+          preview_metadata: null,
+          created_at: file.created_at,
+          location_type: null,
+          is_customer_facing: file.is_customer_facing,
+        }));
       }
 
       return mapped;
@@ -1161,9 +1179,19 @@ export async function sendJobProof(
   });
 
   prepareProofReadyNotification({
+    adminClient,
     companyId: job.company_id,
     jobId,
     proofId,
+  }).catch((notificationError) => {
+    console.error("[proofs] proof_ready notification failed", {
+      jobId,
+      proofId,
+      message:
+        notificationError instanceof Error
+          ? notificationError.message
+          : "Unable to send proof ready notification.",
+    });
   });
 
   revalidateJobPages({
@@ -1312,9 +1340,21 @@ export async function approveJobProof(
   });
 
   prepareProofApprovedNotification({
+    adminClient,
     companyId: job.company_id,
     jobId,
     proofId,
+    actorProfileId,
+    customerEmail,
+  }).catch((notificationError) => {
+    console.error("[proofs] proof_approved notification failed", {
+      jobId,
+      proofId,
+      message:
+        notificationError instanceof Error
+          ? notificationError.message
+          : "Unable to send proof approved notification.",
+    });
   });
 
   revalidateJobPages({
@@ -1381,9 +1421,87 @@ export async function requestJobProofChanges(
   });
 
   prepareProofChangesRequestedNotification({
+    adminClient,
     companyId: job.company_id,
     jobId,
     proofId,
+    actorProfileId,
+  }).catch((notificationError) => {
+    console.error("[proofs] proof_changes_requested notification failed", {
+      jobId,
+      proofId,
+      message:
+        notificationError instanceof Error
+          ? notificationError.message
+          : "Unable to send proof changes requested notification.",
+    });
+  });
+
+  revalidateJobPages({
+    jobId,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
+  });
+
+  return { ok: true };
+}
+
+export async function resendProofReadyNotification(
+  adminClient: SupabaseClient,
+  {
+    jobId,
+    proofId,
+    actorProfileId,
+  }: {
+    jobId: string;
+    proofId: string;
+    actorProfileId: string;
+  }
+) {
+  const job = await loadJobContext(adminClient, jobId);
+
+  const { data: proof, error } = await adminClient
+    .from("job_proofs")
+    .select(PROOF_SELECT)
+    .eq("id", proofId)
+    .eq("job_id", jobId)
+    .maybeSingle();
+
+  if (error || !proof) {
+    throw new ProofError("Proof not found.", 404);
+  }
+
+  if (!["sent", "viewed"].includes(proof.status)) {
+    throw new ProofError(
+      "Only proofs awaiting customer approval can have their notification resent.",
+      409
+    );
+  }
+
+  await prepareProofReadyResendNotification({
+    adminClient,
+    companyId: job.company_id,
+    jobId,
+    proofId,
+  }).catch((notificationError) => {
+    console.error("[proofs] proof_ready resend notification failed", {
+      jobId,
+      proofId,
+      message:
+        notificationError instanceof Error
+          ? notificationError.message
+          : "Unable to resend proof ready notification.",
+    });
+  });
+
+  await logProofActivity(adminClient, {
+    activityType: PROOF_ACTIVITY_TYPES.proofSent,
+    description: `${proof.proof_reference} notification resent to customer.`,
+    companyId: job.company_id,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
+    actorProfileId,
+    metadata: { job_id: jobId, proof_id: proofId, resend: true },
   });
 
   revalidateJobPages({

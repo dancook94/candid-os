@@ -41,8 +41,12 @@ export function resolveNotificationReplyTo(type: NotificationType | string): str
       return readReplyTo("RESEND_REPLY_TO_ARTWORK", DEFAULT_SALES_REPLY_TO);
 
     case "proof_ready":
-    case "proof_changes_requested":
-    case "proof_approved":
+    case "proof_approved_customer":
+    case "proof_changes_requested_customer":
+      return readReplyTo("RESEND_REPLY_TO_ARTWORK", DEFAULT_SALES_REPLY_TO);
+
+    case "proof_approved_internal":
+    case "proof_changes_requested_internal":
     case "production_started":
     case "production_exception":
     case "printfactory_unmatched_file":

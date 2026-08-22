@@ -137,6 +137,7 @@ export function CustomerJobProofsSection({
         return (
           <div
             key={proof.id}
+            id={`proof-${proof.id}`}
             className={`rounded-lg border p-4 space-y-3 ${
               proof.status === "superseded" ? "opacity-70 bg-muted/20" : "border-border"
             }`}

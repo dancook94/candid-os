@@ -677,6 +677,17 @@ export function AdminJobProofsPanel({
                 </Button>
               ) : null}
 
+              {["sent", "viewed"].includes(proof.status) ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={pending}
+                  onClick={() => proofAction(proof.id, "resend_notification")}
+                >
+                  Resend proof notification
+                </Button>
+              ) : null}
+
               {["changes_requested", "superseded"].includes(proof.status) ? (
                 <p className="text-xs text-muted-foreground">Archived version — read only.</p>
               ) : null}

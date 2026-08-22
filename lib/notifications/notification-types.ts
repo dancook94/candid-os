@@ -28,8 +28,8 @@ export const CUSTOMER_NOTIFICATION_TYPES = [
   "candid_creating_artwork",
   "artwork_changes_requested",
   "proof_ready",
-  "proof_changes_requested",
-  "proof_approved",
+  "proof_changes_requested_customer",
+  "proof_approved_customer",
   "production_started",
   "ready_for_collection",
   "dispatched",
@@ -44,7 +44,8 @@ export const INTERNAL_NOTIFICATION_TYPES = [
   "quote_accepted_internal",
   "quote_accepted",
   "internal_artwork_uploaded",
-  "proof_approved",
+  "proof_approved_internal",
+  "proof_changes_requested_internal",
   "production_exception",
   "printfactory_unmatched_file",
   "additional_billable_work",
@@ -81,7 +82,8 @@ export const DEFAULT_INTERNAL_ROUTING: Record<
   quote_accepted_internal: ["sales", "production"],
   quote_accepted: ["sales", "production"],
   internal_artwork_uploaded: ["artwork"],
-  proof_approved: ["production"],
+  proof_approved_internal: ["artwork", "production"],
+  proof_changes_requested_internal: ["artwork"],
   production_exception: ["production"],
   printfactory_unmatched_file: ["production"],
   additional_billable_work: ["accounts"],
@@ -98,6 +100,8 @@ export const CUSTOMER_TYPE_PREFERENCE_KEY: Partial<
   customer_artwork_received: "job_started",
   artwork_received_manually: "job_started",
   candid_creating_artwork: "job_started",
+  proof_ready: "artwork_approval_required",
+  proof_changes_requested_customer: "artwork_approval_required",
   production_started: "job_started",
   ready_for_collection: "job_ready",
   dispatched: "job_dispatched",
@@ -128,6 +132,11 @@ export const TESTABLE_NOTIFICATION_TYPES = [
   "quote_accepted_internal",
   "quote_accepted",
   "internal_artwork_uploaded",
+  "proof_ready",
+  "proof_approved_customer",
+  "proof_approved_internal",
+  "proof_changes_requested_customer",
+  "proof_changes_requested_internal",
   "job_ready_for_invoice",
 ] as const satisfies readonly NotificationType[];
 
@@ -159,6 +168,14 @@ export function normalizeNotificationType(type: string): NotificationType {
 
   if (type === "artwork_uploaded") {
     return "internal_artwork_uploaded";
+  }
+
+  if (type === "proof_approved") {
+    return "proof_approved_internal";
+  }
+
+  if (type === "proof_changes_requested") {
+    return "proof_changes_requested_customer";
   }
 
   return type as NotificationType;

@@ -7,6 +7,7 @@ import type { ProofInternalChecklistKey } from "@/lib/proofs/constants";
 import { ProofError } from "@/lib/proofs/errors";
 import {
   markProofReadyToSend,
+  resendProofReadyNotification,
   sendJobProof,
   submitProofInternalReview,
 } from "@/lib/proofs/service";
@@ -61,6 +62,13 @@ export async function POST(request: Request, context: RouteContext) {
         break;
       case "send":
         await sendJobProof(adminClient, {
+          jobId,
+          proofId,
+          actorProfileId: authResult.userId,
+        });
+        break;
+      case "resend_notification":
+        await resendProofReadyNotification(adminClient, {
           jobId,
           proofId,
           actorProfileId: authResult.userId,

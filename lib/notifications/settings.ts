@@ -28,8 +28,8 @@ function defaultCustomerToggles(): Record<CustomerNotificationType, boolean> {
     candid_creating_artwork: true,
     artwork_changes_requested: true,
     proof_ready: true,
-    proof_changes_requested: true,
-    proof_approved: true,
+    proof_changes_requested_customer: true,
+    proof_approved_customer: true,
     production_started: true,
     ready_for_collection: true,
     dispatched: true,
@@ -46,7 +46,8 @@ function defaultInternalToggles(): Record<InternalNotificationType, boolean> {
     quote_accepted_internal: true,
     quote_accepted: true,
     internal_artwork_uploaded: true,
-    proof_approved: true,
+    proof_approved_internal: true,
+    proof_changes_requested_internal: true,
     production_exception: true,
     printfactory_unmatched_file: true,
     additional_billable_work: true,
@@ -116,6 +117,32 @@ export function normalizeNotificationSettings(
     record.customer.artwork_uploaded_confirmation !== undefined
   ) {
     customer.customer_artwork_received = Boolean(record.customer.artwork_uploaded_confirmation);
+  }
+
+  if (
+    isRecord(record.customer) &&
+    record.customer.proof_approved_customer === undefined &&
+    record.customer.proof_approved !== undefined
+  ) {
+    customer.proof_approved_customer = Boolean(record.customer.proof_approved);
+  }
+
+  if (
+    isRecord(record.customer) &&
+    record.customer.proof_changes_requested_customer === undefined &&
+    record.customer.proof_changes_requested !== undefined
+  ) {
+    customer.proof_changes_requested_customer = Boolean(
+      record.customer.proof_changes_requested
+    );
+  }
+
+  if (
+    isRecord(record.internal) &&
+    record.internal.proof_approved_internal === undefined &&
+    record.internal.proof_approved !== undefined
+  ) {
+    internal.proof_approved_internal = Boolean(record.internal.proof_approved);
   }
 
   return {

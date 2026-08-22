@@ -473,6 +473,145 @@ export function renderNotificationEmail(
     case "quote_accepted":
       return renderNotificationEmail("quote_accepted_internal", metadata);
 
+    case "proof_ready":
+      return {
+        subject: `Proof ready for approval — ${jobReference} — ${project}`,
+        html: renderEmailShell({
+          preheader: `Your proof for ${project} is ready to review.`,
+          headline: "Your proof is ready to review",
+          bodyParagraphs: [
+            `Hi ${customerName},`,
+            `We've prepared a proof for ${project}. Please review the artwork, content, dimensions and specification in Candid OS before approving.`,
+            ...(metadata.customerMessage
+              ? [String(metadata.customerMessage)]
+              : []),
+          ],
+          detailRows: [
+            { label: "Job", value: jobReference || "—" },
+            { label: "Project", value: project },
+            { label: "Proof", value: String(metadata.proofTitle ?? "—") },
+            { label: "Version", value: String(metadata.proofVersion ?? "—") },
+            ...(metadata.relatedItems
+              ? [{ label: "Items", value: String(metadata.relatedItems) }]
+              : []),
+          ],
+          ctaLabel: "Review proof",
+          ctaHref: buildAbsoluteUrl(
+            String(metadata.proofUrl ?? metadata.jobUrl ?? `/jobs/${metadata.jobId ?? ""}`)
+          ),
+        }),
+      };
+
+    case "proof_approved_customer":
+      return {
+        subject: `Proof approved — ${jobReference}`,
+        html: renderEmailShell({
+          preheader: `Your proof approval for ${jobReference} has been recorded.`,
+          headline: "Your proof has been approved",
+          bodyParagraphs: [
+            `Hi ${customerName},`,
+            "Thank you for approving your proof. Your approval has been recorded and your job can continue toward production.",
+          ],
+          detailRows: [
+            { label: "Job", value: jobReference || "—" },
+            { label: "Project", value: project },
+            { label: "Proof", value: String(metadata.proofTitle ?? "—") },
+            { label: "Version", value: String(metadata.proofVersion ?? "—") },
+          ],
+          ctaLabel: "View job",
+          ctaHref: buildAbsoluteUrl(
+            String(metadata.jobUrl ?? `/jobs/${metadata.jobId ?? ""}`)
+          ),
+        }),
+      };
+
+    case "proof_approved_internal":
+      return {
+        subject: `Proof approved — ${jobReference} — ${project}`,
+        html: renderEmailShell({
+          headline: "Proof approved by customer",
+          bodyParagraphs: [
+            `${customerName} at ${company} approved the proof for ${project}.`,
+          ],
+          detailRows: [
+            { label: "Customer", value: customerName },
+            { label: "Company", value: company },
+            { label: "Job", value: jobReference || "—" },
+            { label: "Project", value: project },
+            { label: "Proof", value: String(metadata.proofTitle ?? "—") },
+            { label: "Version", value: String(metadata.proofVersion ?? "—") },
+            { label: "Approved by", value: String(metadata.approvedBy ?? customerName) },
+            {
+              label: "Approved at",
+              value: String(metadata.approvedAt ?? "Recently"),
+            },
+            ...(metadata.relatedItems
+              ? [{ label: "Items", value: String(metadata.relatedItems) }]
+              : []),
+          ],
+          ctaLabel: "Open job",
+          ctaHref: buildAbsoluteUrl(
+            String(metadata.jobUrl ?? `/admin/jobs/${metadata.jobId ?? ""}`)
+          ),
+        }),
+      };
+
+    case "proof_changes_requested_customer":
+      return {
+        subject: `Changes requested — ${jobReference}`,
+        html: renderEmailShell({
+          preheader: `We've received your proof change request for ${jobReference}.`,
+          headline: "We've received your changes",
+          bodyParagraphs: [
+            `Hi ${customerName},`,
+            "Thank you for your feedback. Candid will review the requested amendments and send a new proof version when ready.",
+          ],
+          detailRows: [
+            { label: "Job", value: jobReference || "—" },
+            { label: "Project", value: project },
+            { label: "Proof", value: String(metadata.proofTitle ?? "—") },
+            { label: "Version", value: String(metadata.proofVersion ?? "—") },
+          ],
+          ctaLabel: "View job",
+          ctaHref: buildAbsoluteUrl(
+            String(metadata.jobUrl ?? `/jobs/${metadata.jobId ?? ""}`)
+          ),
+        }),
+      };
+
+    case "proof_changes_requested_internal":
+      return {
+        subject: `Proof changes requested — ${jobReference} — ${project}`,
+        html: renderEmailShell({
+          headline: "Proof changes requested",
+          bodyParagraphs: [
+            `${customerName} at ${company} requested changes to the proof for ${project}.`,
+          ],
+          detailRows: [
+            { label: "Customer", value: customerName },
+            { label: "Company", value: company },
+            { label: "Job", value: jobReference || "—" },
+            { label: "Proof", value: String(metadata.proofTitle ?? "—") },
+            { label: "Version", value: String(metadata.proofVersion ?? "—") },
+            {
+              label: "Customer comments",
+              value: String(metadata.customerComment ?? "—"),
+            },
+            ...(metadata.relatedItems
+              ? [{ label: "Items", value: String(metadata.relatedItems) }]
+              : []),
+            {
+              label: "Requested at",
+              value: String(metadata.requestedAt ?? "Recently"),
+            },
+          ],
+          ctaLabel: "Review proof",
+          ctaHref: buildAbsoluteUrl(
+            String(metadata.jobUrl ?? `/admin/jobs/${metadata.jobId ?? ""}`)
+          ),
+        }),
+      };
+
     case "job_ready_for_invoice":
       return {
         subject: `Job ready for invoice — ${jobReference || project}`,
