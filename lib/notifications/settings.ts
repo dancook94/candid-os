@@ -23,7 +23,9 @@ function defaultCustomerToggles(): Record<CustomerNotificationType, boolean> {
     quote_revised: true,
     quote_accepted_customer: true,
     quote_accepted_confirmation: true,
-    artwork_uploaded_confirmation: true,
+    customer_artwork_received: true,
+    artwork_received_manually: true,
+    candid_creating_artwork: true,
     artwork_changes_requested: true,
     proof_ready: true,
     proof_changes_requested: true,
@@ -43,7 +45,7 @@ function defaultInternalToggles(): Record<InternalNotificationType, boolean> {
     new_quote_request: true,
     quote_accepted_internal: true,
     quote_accepted: true,
-    artwork_uploaded: true,
+    internal_artwork_uploaded: true,
     proof_approved: true,
     production_exception: true,
     printfactory_unmatched_file: true,
@@ -95,11 +97,29 @@ export function normalizeNotificationSettings(
     internal.internal_quote_request_received = Boolean(record.internal.new_quote_request);
   }
 
+  if (
+    isRecord(record.internal) &&
+    record.internal.internal_artwork_uploaded === undefined &&
+    record.internal.artwork_uploaded !== undefined
+  ) {
+    internal.internal_artwork_uploaded = Boolean(record.internal.artwork_uploaded);
+  }
+
+  const customer = {
+    ...defaults.customer,
+    ...(isRecord(record.customer) ? (record.customer as typeof defaults.customer) : {}),
+  };
+
+  if (
+    isRecord(record.customer) &&
+    record.customer.customer_artwork_received === undefined &&
+    record.customer.artwork_uploaded_confirmation !== undefined
+  ) {
+    customer.customer_artwork_received = Boolean(record.customer.artwork_uploaded_confirmation);
+  }
+
   return {
-    customer: {
-      ...defaults.customer,
-      ...(isRecord(record.customer) ? (record.customer as typeof defaults.customer) : {}),
-    },
+    customer,
     internal,
     recipientGroups: {
       ...defaults.recipientGroups,

@@ -12,6 +12,7 @@ import { resolveArtworkUploadedAtIso } from "@/lib/jobs/artwork-display";
 import { JOB_ACTIVITY_TYPES, logJobActivity } from "@/lib/jobs/activity";
 import { JobError } from "@/lib/jobs/errors";
 import { JOB_LIST_COLUMNS } from "@/lib/jobs/job-select";
+import { prepareArtworkUploadedNotification } from "@/lib/jobs/notifications";
 import { syncJobAfterPortalUpload } from "@/lib/jobs/update-artwork-source";
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
 import type { JobFileRecord, JobRecord } from "@/lib/jobs/types";
@@ -293,6 +294,24 @@ export async function reconcileArtworkUploadRecord(
             : "Unable to log reconciliation activity.",
       });
     }
+  }
+
+  try {
+    await prepareArtworkUploadedNotification({
+      adminClient,
+      companyId: typedJob.company_id,
+      jobId: typedJob.id,
+      fileId: file.id,
+    });
+  } catch (notificationError) {
+    logReconcileStep("notification_prepare_failed", {
+      jobFileId: file.id,
+      jobId: typedJob.id,
+      message:
+        notificationError instanceof Error
+          ? notificationError.message
+          : "Unable to prepare artwork notification.",
+    });
   }
 
   try {

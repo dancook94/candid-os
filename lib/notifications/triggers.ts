@@ -1,7 +1,17 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { getAdminArtworkSourceLabel } from "@/lib/jobs/artwork-source";
+import { describeArtworkSource } from "@/lib/jobs/artwork-model";
+import {
+  formatArtworkCustomerNote,
+  formatArtworkUploadedAt,
+} from "@/lib/jobs/artwork-display";
+import { loadJobProofRequired } from "@/lib/jobs/proof-required";
 import type { JobArtworkSource } from "@/lib/jobs/types";
+import {
+  formatArtworkFileSize,
+  getCustomerArtworkStatusLabel,
+} from "@/lib/notifications/artwork-copy";
 import { loadProfileNotificationContext } from "@/lib/notifications/profile-recipient";
 import {
   getSkippedReasonLabel,
@@ -56,6 +66,7 @@ function formatDisplayDate(value: string | null | undefined) {
 function buildQuoteAcceptedNextStep(job: {
   artwork_required: boolean | null;
   artwork_source: string | null;
+  proof_required?: boolean | null;
   artwork_status: string | null;
 }) {
   switch (job.artwork_source) {
@@ -486,14 +497,14 @@ export async function notifyQuoteAcceptedSafe(
   }
 }
 
-export async function notifyArtworkUploaded(
+export async function notifyCustomerArtworkReceived(
   adminClient: SupabaseClient,
   input: { companyId: string; jobId: string; fileId: string }
 ) {
   const { data: job, error } = await adminClient
     .from("jobs")
     .select(
-      "id, job_reference, project_name, quote_id, opportunity_id, contact_id, companies(company_name), contacts(full_name, email)"
+      "id, job_reference, project_name, quote_id, opportunity_id, contact_id, artwork_source, status, companies(company_name), contacts(full_name, email)"
     )
     .eq("id", input.jobId)
     .maybeSingle();
@@ -502,32 +513,66 @@ export async function notifyArtworkUploaded(
     throw error ?? new Error("Job not found.");
   }
 
-  const { data: file } = await adminClient
+  const { data: file, error: fileError } = await adminClient
     .from("job_files")
-    .select("id, file_name")
+    .select(
+      "id, file_name, original_file_name, file_size_bytes, customer_notes, uploaded_at, created_at, uploaded_by_profile_id, upload_status"
+    )
     .eq("id", input.fileId)
     .maybeSingle();
 
+  if (fileError || !file) {
+    throw fileError ?? new Error("Artwork file not found.");
+  }
+
+  if (file.upload_status !== "complete") {
+    logNotificationEvent("customer_artwork_received_skipped", {
+      fileId: input.fileId,
+      reason: "upload_not_complete",
+      uploadStatus: file.upload_status,
+    });
+    return { ok: false as const, skippedReason: "upload_not_complete" };
+  }
+
   const company = extractSingle(job.companies);
   const contact = extractSingle(job.contacts);
-  const fileSummary = file?.file_name ?? "Artwork uploaded";
+  const displayName = file.original_file_name || file.file_name;
+  const uploadNote = formatArtworkCustomerNote(file.customer_notes);
+  const uploadedAt = formatArtworkUploadedAt(file.uploaded_at ?? file.created_at);
+
+  let customerName = contact?.full_name ?? "Customer";
+  if (file.uploaded_by_profile_id) {
+    const uploader = await loadProfileNotificationContext(
+      adminClient,
+      file.uploaded_by_profile_id
+    );
+    if (uploader?.fullName) {
+      customerName = uploader.fullName;
+    }
+  }
 
   const sharedMetadata = {
     projectName: job.project_name,
     companyName: company?.company_name ?? "Customer",
-    customerName: contact?.full_name ?? "Customer",
+    customerName,
     jobReference: job.job_reference,
     jobId: job.id,
-    fileSummary,
+    fileSummary: displayName,
+    fileNames: displayName,
+    fileCount: "1",
+    uploadNote,
+    uploadedAt,
+    jobFileId: file.id,
   };
 
   await sendNotification(adminClient, {
-    type: "artwork_uploaded_confirmation",
+    type: "customer_artwork_received",
     companyId: input.companyId,
     contactId: job.contact_id as string | null,
+    profileId: file.uploaded_by_profile_id as string | null,
     jobId: job.id as string,
     quoteId: job.quote_id as string | null,
-    idempotencyKey: `artwork_upload:${input.fileId}`,
+    idempotencyKey: `customer_artwork_received:${input.fileId}`,
     metadata: {
       ...sharedMetadata,
       jobUrl: `/jobs/${job.id}`,
@@ -535,28 +580,170 @@ export async function notifyArtworkUploaded(
   });
 
   await sendNotification(adminClient, {
-    type: "artwork_uploaded",
+    type: "internal_artwork_uploaded",
     companyId: input.companyId,
     contactId: job.contact_id as string | null,
+    profileId: file.uploaded_by_profile_id as string | null,
     jobId: job.id as string,
     quoteId: job.quote_id as string | null,
     opportunityId: job.opportunity_id as string | null,
-    idempotencyKey: `artwork_upload_internal:${input.fileId}`,
+    idempotencyKey: `internal_artwork_uploaded:${input.fileId}`,
     metadata: {
       ...sharedMetadata,
+      fileSizes: formatArtworkFileSize(file.file_size_bytes),
+      artworkSourceLabel: describeArtworkSource(
+        (job.artwork_source as JobArtworkSource) ?? "portal_upload"
+      ),
+      dropboxStatus: "Stored in Dropbox",
       jobUrl: `/admin/jobs/${job.id}`,
     },
   });
 }
 
-export async function notifyArtworkUploadedSafe(
+export async function notifyCustomerArtworkReceivedSafe(
   adminClient: SupabaseClient,
   input: { companyId: string; jobId: string; fileId: string }
 ) {
   try {
-    await notifyArtworkUploaded(adminClient, input);
+    return await notifyCustomerArtworkReceived(adminClient, input);
   } catch (error) {
-    logNotificationFailure("artwork_uploaded", error);
+    logNotificationFailure("customer_artwork_received", error);
+    return {
+      ok: false,
+      skippedReason: error instanceof Error ? error.message : "notification_failed",
+    };
+  }
+}
+
+/** @deprecated Use notifyCustomerArtworkReceivedSafe */
+export async function notifyArtworkUploaded(
+  adminClient: SupabaseClient,
+  input: { companyId: string; jobId: string; fileId: string }
+) {
+  return notifyCustomerArtworkReceived(adminClient, input);
+}
+
+/** @deprecated Use notifyCustomerArtworkReceivedSafe */
+export async function notifyArtworkUploadedSafe(
+  adminClient: SupabaseClient,
+  input: { companyId: string; jobId: string; fileId: string }
+) {
+  return notifyCustomerArtworkReceivedSafe(adminClient, input);
+}
+
+async function loadJobNotificationContext(
+  adminClient: SupabaseClient,
+  jobId: string
+) {
+  const { data: job, error } = await adminClient
+    .from("jobs")
+    .select(
+      "id, job_reference, project_name, quote_id, opportunity_id, contact_id, company_id, artwork_source, artwork_required, status, companies(company_name), contacts(full_name, email)"
+    )
+    .eq("id", jobId)
+    .maybeSingle();
+
+  if (error || !job) {
+    throw error ?? new Error("Job not found.");
+  }
+
+  const company = extractSingle(job.companies);
+  const contact = extractSingle(job.contacts);
+
+  return {
+    job,
+    companyName: company?.company_name ?? "Customer",
+    customerName: contact?.full_name ?? "Customer",
+    artworkStatusLabel: getCustomerArtworkStatusLabel({
+      artworkSource: job.artwork_source as JobArtworkSource,
+      jobStatus: job.status,
+    }),
+  };
+}
+
+export async function notifyArtworkReceivedManually(
+  adminClient: SupabaseClient,
+  input: { jobId: string }
+) {
+  const context = await loadJobNotificationContext(adminClient, input.jobId);
+
+  await sendNotification(adminClient, {
+    type: "artwork_received_manually",
+    companyId: context.job.company_id as string,
+    contactId: context.job.contact_id as string | null,
+    jobId: context.job.id as string,
+    quoteId: context.job.quote_id as string | null,
+    opportunityId: context.job.opportunity_id as string | null,
+    idempotencyKey: `artwork_received_manually:${input.jobId}`,
+    metadata: {
+      projectName: context.job.project_name,
+      companyName: context.companyName,
+      customerName: context.customerName,
+      jobReference: context.job.job_reference,
+      jobId: context.job.id,
+      artworkStatusLabel: context.artworkStatusLabel,
+      jobUrl: `/jobs/${context.job.id}`,
+    },
+  });
+}
+
+export async function notifyArtworkReceivedManuallySafe(
+  adminClient: SupabaseClient,
+  input: { jobId: string }
+) {
+  try {
+    await notifyArtworkReceivedManually(adminClient, input);
+    return { ok: true as const };
+  } catch (error) {
+    logNotificationFailure("artwork_received_manually", error);
+    return {
+      ok: false as const,
+      skippedReason: error instanceof Error ? error.message : "notification_failed",
+    };
+  }
+}
+
+export async function notifyCandidCreatingArtwork(
+  adminClient: SupabaseClient,
+  input: { jobId: string }
+) {
+  const context = await loadJobNotificationContext(adminClient, input.jobId);
+  const proofRequired = await loadJobProofRequired(adminClient, input.jobId);
+
+  await sendNotification(adminClient, {
+    type: "candid_creating_artwork",
+    companyId: context.job.company_id as string,
+    contactId: context.job.contact_id as string | null,
+    jobId: context.job.id as string,
+    quoteId: context.job.quote_id as string | null,
+    opportunityId: context.job.opportunity_id as string | null,
+    idempotencyKey: `candid_creating_artwork:${input.jobId}`,
+    metadata: {
+      projectName: context.job.project_name,
+      companyName: context.companyName,
+      customerName: context.customerName,
+      jobReference: context.job.job_reference,
+      jobId: context.job.id,
+      artworkStatusLabel: context.artworkStatusLabel,
+      proofRequired,
+      jobUrl: `/jobs/${context.job.id}`,
+    },
+  });
+}
+
+export async function notifyCandidCreatingArtworkSafe(
+  adminClient: SupabaseClient,
+  input: { jobId: string }
+) {
+  try {
+    await notifyCandidCreatingArtwork(adminClient, input);
+    return { ok: true as const };
+  } catch (error) {
+    logNotificationFailure("candid_creating_artwork", error);
+    return {
+      ok: false as const,
+      skippedReason: error instanceof Error ? error.message : "notification_failed",
+    };
   }
 }
 

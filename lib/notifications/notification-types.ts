@@ -23,7 +23,9 @@ export const CUSTOMER_NOTIFICATION_TYPES = [
   "quote_revised",
   "quote_accepted_customer",
   "quote_accepted_confirmation",
-  "artwork_uploaded_confirmation",
+  "customer_artwork_received",
+  "artwork_received_manually",
+  "candid_creating_artwork",
   "artwork_changes_requested",
   "proof_ready",
   "proof_changes_requested",
@@ -41,7 +43,7 @@ export const INTERNAL_NOTIFICATION_TYPES = [
   "new_quote_request",
   "quote_accepted_internal",
   "quote_accepted",
-  "artwork_uploaded",
+  "internal_artwork_uploaded",
   "proof_approved",
   "production_exception",
   "printfactory_unmatched_file",
@@ -78,7 +80,7 @@ export const DEFAULT_INTERNAL_ROUTING: Record<
   new_quote_request: ["sales"],
   quote_accepted_internal: ["sales", "production"],
   quote_accepted: ["sales", "production"],
-  artwork_uploaded: ["artwork"],
+  internal_artwork_uploaded: ["artwork"],
   proof_approved: ["production"],
   production_exception: ["production"],
   printfactory_unmatched_file: ["production"],
@@ -93,7 +95,9 @@ export const CUSTOMER_TYPE_PREFERENCE_KEY: Partial<
 > = {
   quote_ready: "quote_received",
   quote_revised: "quote_received",
-  artwork_uploaded_confirmation: "job_started",
+  customer_artwork_received: "job_started",
+  artwork_received_manually: "job_started",
+  candid_creating_artwork: "job_started",
   production_started: "job_started",
   ready_for_collection: "job_ready",
   dispatched: "job_dispatched",
@@ -115,13 +119,15 @@ export const TESTABLE_NOTIFICATION_TYPES = [
   "quote_ready",
   "quote_accepted_customer",
   "quote_accepted_confirmation",
-  "artwork_uploaded_confirmation",
+  "customer_artwork_received",
+  "artwork_received_manually",
+  "candid_creating_artwork",
   "new_quote_request",
   "internal_quote_request_received",
   "internal_new_registration",
   "quote_accepted_internal",
   "quote_accepted",
-  "artwork_uploaded",
+  "internal_artwork_uploaded",
   "job_ready_for_invoice",
 ] as const satisfies readonly NotificationType[];
 
@@ -145,6 +151,14 @@ export function normalizeNotificationType(type: string): NotificationType {
 
   if (type === "new_quote_request") {
     return "internal_quote_request_received";
+  }
+
+  if (type === "artwork_uploaded_confirmation") {
+    return "customer_artwork_received";
+  }
+
+  if (type === "artwork_uploaded") {
+    return "internal_artwork_uploaded";
   }
 
   return type as NotificationType;

@@ -78,7 +78,7 @@ const SAMPLE_METADATA: Record<TestableNotificationType, Record<string, unknown>>
     jobUrl: "/jobs/00000000-0000-0000-0000-000000000002",
     nextStep: "Please upload your artwork when you're ready.",
   },
-  artwork_uploaded_confirmation: {
+  customer_artwork_received: {
     projectName: "Sample Exhibition Stand",
     companyName: "Sample Customer Ltd",
     customerName: "Alex Sample",
@@ -86,6 +86,28 @@ const SAMPLE_METADATA: Record<TestableNotificationType, Record<string, unknown>>
     jobId: "00000000-0000-0000-0000-000000000002",
     jobUrl: "/jobs/00000000-0000-0000-0000-000000000002",
     fileSummary: "sample-artwork.pdf",
+    fileCount: "1",
+    uploadNote: "Please use CMYK version.",
+    uploadedAt: "22 Aug 2026, 14:30",
+  },
+  artwork_received_manually: {
+    projectName: "Sample Exhibition Stand",
+    companyName: "Sample Customer Ltd",
+    customerName: "Alex Sample",
+    jobReference: "J-1042",
+    jobId: "00000000-0000-0000-0000-000000000002",
+    jobUrl: "/jobs/00000000-0000-0000-0000-000000000002",
+    artworkStatusLabel: "Artwork received",
+  },
+  candid_creating_artwork: {
+    projectName: "Sample Exhibition Stand",
+    companyName: "Sample Customer Ltd",
+    customerName: "Alex Sample",
+    jobReference: "J-1042",
+    jobId: "00000000-0000-0000-0000-000000000002",
+    jobUrl: "/jobs/00000000-0000-0000-0000-000000000002",
+    artworkStatusLabel: "Artwork in preparation",
+    proofRequired: true,
   },
   new_quote_request: {
     projectName: "Sample Exhibition Stand",
@@ -123,13 +145,18 @@ const SAMPLE_METADATA: Record<TestableNotificationType, Record<string, unknown>>
     jobUrl: "/admin/jobs/00000000-0000-0000-0000-000000000002",
     opportunityUrl: "/admin/opportunities/00000000-0000-0000-0000-000000000004",
   },
-  artwork_uploaded: {
+  internal_artwork_uploaded: {
     projectName: "Sample Exhibition Stand",
     companyName: "Sample Customer Ltd",
     customerName: "Alex Sample",
     jobReference: "J-1042",
     jobId: "00000000-0000-0000-0000-000000000002",
     fileSummary: "sample-artwork.pdf",
+    fileSizes: "2.4 MB",
+    uploadNote: "Please use CMYK version.",
+    artworkSourceLabel: "Portal upload",
+    uploadedAt: "22 Aug 2026, 14:30",
+    dropboxStatus: "Stored in Dropbox",
     jobUrl: "/admin/jobs/00000000-0000-0000-0000-000000000002",
   },
   job_ready_for_invoice: {

@@ -1,4 +1,5 @@
 import type { NotificationType } from "@/lib/notifications/notification-types";
+import { normalizeNotificationType } from "@/lib/notifications/notification-types";
 
 const DEFAULT_SALES_REPLY_TO = "quotes@candidcreative.uk";
 const DEFAULT_ACCOUNTS_REPLY_TO = "accounts@candidcreative.uk";
@@ -8,8 +9,10 @@ function readReplyTo(envKey: string, fallback: string) {
 }
 
 /** Central Reply-To resolution for outbound notification emails. */
-export function resolveNotificationReplyTo(type: NotificationType): string | undefined {
-  switch (type) {
+export function resolveNotificationReplyTo(type: NotificationType | string): string | undefined {
+  const normalizedType = normalizeNotificationType(String(type));
+
+  switch (normalizedType) {
     case "customer_registration_received":
     case "customer_account_approved":
     case "internal_quote_request_received":
@@ -18,7 +21,9 @@ export function resolveNotificationReplyTo(type: NotificationType): string | und
     case "quote_revised":
     case "quote_accepted_customer":
     case "quote_accepted_confirmation":
-    case "artwork_uploaded_confirmation":
+    case "customer_artwork_received":
+    case "artwork_received_manually":
+    case "candid_creating_artwork":
     case "new_quote_request":
     case "internal_new_registration":
     case "quote_accepted_internal":
@@ -31,7 +36,7 @@ export function resolveNotificationReplyTo(type: NotificationType): string | und
     case "invoice_available":
       return readReplyTo("RESEND_REPLY_TO_ACCOUNTS", DEFAULT_ACCOUNTS_REPLY_TO);
 
-    case "artwork_uploaded":
+    case "internal_artwork_uploaded":
     case "artwork_changes_requested":
       return readReplyTo("RESEND_REPLY_TO_ARTWORK", DEFAULT_SALES_REPLY_TO);
 

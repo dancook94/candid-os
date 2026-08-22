@@ -59,6 +59,7 @@ export type JobRecord = {
   required_date: string | null;
   artwork_required: boolean;
   artwork_source: JobArtworkSource;
+  proof_required?: boolean;
   customer_visible: boolean;
   accepted_at: string | null;
   accepted_by: string | null;

@@ -1,5 +1,10 @@
 import { getAppBaseUrl, getResendFromAddress } from "@/lib/notifications/config";
 import {
+  getArtworkReceivedManuallyParagraphs,
+  getCandidCreatingArtworkParagraphs,
+  getCustomerArtworkUploadConfirmationParagraphs,
+} from "@/lib/notifications/artwork-copy";
+import {
   normalizeNotificationType,
   type NotificationType,
 } from "@/lib/notifications/notification-types";
@@ -230,25 +235,120 @@ export function renderNotificationEmail(
     case "quote_accepted_confirmation":
       return renderNotificationEmail("quote_accepted_customer", metadata);
 
-    case "artwork_uploaded_confirmation":
+    case "customer_artwork_received":
       return {
         subject: `Artwork received — ${jobReference || project}`,
         html: renderEmailShell({
-          headline: "Artwork received",
+          headline: "We've received your artwork",
           bodyParagraphs: [
             `Hi ${customerName},`,
-            `We've received your artwork for ${project}.`,
-            "You can still upload additional files in Candid OS if needed.",
+            ...getCustomerArtworkUploadConfirmationParagraphs(),
           ],
           detailRows: [
-            ...(jobReference ? [{ label: "Job", value: jobReference }] : []),
+            ...(jobReference ? [{ label: "Job reference", value: jobReference }] : []),
+            { label: "Project", value: project },
             {
               label: "Files",
-              value: String(metadata.fileSummary ?? "Artwork uploaded"),
+              value: String(metadata.fileSummary ?? metadata.fileNames ?? "Artwork uploaded"),
+            },
+            ...(metadata.fileCount
+              ? [{ label: "Number of files", value: String(metadata.fileCount) }]
+              : []),
+            ...(metadata.uploadNote && metadata.uploadNote !== "No note"
+              ? [{ label: "Upload note", value: String(metadata.uploadNote) }]
+              : []),
+            ...(metadata.uploadedAt
+              ? [{ label: "Uploaded", value: String(metadata.uploadedAt) }]
+              : []),
+          ],
+          ctaLabel: "View job",
+          ctaHref: buildAbsoluteUrl(String(metadata.jobUrl ?? `/jobs/${metadata.jobId ?? ""}`)),
+        }),
+      };
+
+    case "artwork_received_manually":
+      return {
+        subject: `Artwork received — ${jobReference || project}`,
+        html: renderEmailShell({
+          headline: "Your artwork has been received",
+          bodyParagraphs: [
+            `Hi ${customerName},`,
+            ...getArtworkReceivedManuallyParagraphs(),
+          ],
+          detailRows: [
+            ...(jobReference ? [{ label: "Job reference", value: jobReference }] : []),
+            { label: "Project", value: project },
+            {
+              label: "Artwork status",
+              value: String(metadata.artworkStatusLabel ?? "Artwork received"),
             },
           ],
           ctaLabel: "View job",
           ctaHref: buildAbsoluteUrl(String(metadata.jobUrl ?? `/jobs/${metadata.jobId ?? ""}`)),
+        }),
+      };
+
+    case "candid_creating_artwork":
+      return {
+        subject: `Artwork in preparation — ${jobReference || project}`,
+        html: renderEmailShell({
+          headline: "We're preparing your artwork",
+          bodyParagraphs: [
+            `Hi ${customerName},`,
+            ...getCandidCreatingArtworkParagraphs(Boolean(metadata.proofRequired ?? true)),
+          ],
+          detailRows: [
+            ...(jobReference ? [{ label: "Job reference", value: jobReference }] : []),
+            { label: "Project", value: project },
+            {
+              label: "Artwork status",
+              value: String(metadata.artworkStatusLabel ?? "Artwork in preparation"),
+            },
+          ],
+          ctaLabel: "View job",
+          ctaHref: buildAbsoluteUrl(String(metadata.jobUrl ?? `/jobs/${metadata.jobId ?? ""}`)),
+        }),
+      };
+
+    case "internal_artwork_uploaded":
+      return {
+        subject: jobReference
+          ? `Artwork uploaded — ${jobReference} — ${project}`
+          : `Artwork uploaded — ${project}`,
+        html: renderEmailShell({
+          headline: "Customer artwork uploaded",
+          bodyParagraphs: [
+            `${customerName} at ${company} uploaded artwork for ${jobReference || project}.`,
+          ],
+          detailRows: [
+            { label: "Company", value: company },
+            { label: "Customer", value: customerName },
+            ...(jobReference ? [{ label: "Job reference", value: jobReference }] : []),
+            { label: "Project", value: project },
+            {
+              label: "Files",
+              value: String(metadata.fileSummary ?? metadata.fileNames ?? "Artwork uploaded"),
+            },
+            ...(metadata.fileSizes
+              ? [{ label: "File size(s)", value: String(metadata.fileSizes) }]
+              : []),
+            ...(metadata.uploadNote && metadata.uploadNote !== "No note"
+              ? [{ label: "Customer note", value: String(metadata.uploadNote) }]
+              : []),
+            {
+              label: "Artwork source",
+              value: String(metadata.artworkSourceLabel ?? "Portal upload"),
+            },
+            ...(metadata.uploadedAt
+              ? [{ label: "Uploaded", value: String(metadata.uploadedAt) }]
+              : []),
+            {
+              label: "Dropbox status",
+              value: String(metadata.dropboxStatus ?? "Stored in Dropbox"),
+            },
+          ],
+          ctaLabel: "Review artwork",
+          ctaHref: buildAbsoluteUrl(String(metadata.jobUrl ?? `/admin/jobs/${metadata.jobId ?? ""}`)),
         }),
       };
 
@@ -372,27 +472,6 @@ export function renderNotificationEmail(
 
     case "quote_accepted":
       return renderNotificationEmail("quote_accepted_internal", metadata);
-
-    case "artwork_uploaded":
-      return {
-        subject: `Artwork uploaded — ${jobReference || project}`,
-        html: renderEmailShell({
-          headline: "Customer artwork uploaded",
-          bodyParagraphs: [
-            `${company} uploaded artwork for ${jobReference || project}.`,
-          ],
-          detailRows: [
-            { label: "Customer", value: customerName },
-            { label: "Job", value: jobReference || String(metadata.jobId ?? "") },
-            {
-              label: "Files",
-              value: String(metadata.fileSummary ?? "Artwork uploaded"),
-            },
-          ],
-          ctaLabel: "View job",
-          ctaHref: buildAbsoluteUrl(String(metadata.jobUrl ?? `/admin/jobs/${metadata.jobId ?? ""}`)),
-        }),
-      };
 
     case "job_ready_for_invoice":
       return {

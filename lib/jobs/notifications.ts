@@ -1,7 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
-  notifyArtworkUploadedSafe,
+  notifyArtworkReceivedManuallySafe,
+  notifyCandidCreatingArtworkSafe,
+  notifyCustomerArtworkReceivedSafe,
   notifyQuoteAcceptedSafe,
 } from "@/lib/notifications/triggers";
 
@@ -45,9 +47,27 @@ export async function prepareArtworkUploadedNotification(input: {
   jobId: string;
   fileId: string;
 }) {
-  await notifyArtworkUploadedSafe(input.adminClient, {
+  await notifyCustomerArtworkReceivedSafe(input.adminClient, {
     companyId: input.companyId,
     jobId: input.jobId,
     fileId: input.fileId,
+  });
+}
+
+export async function prepareArtworkReceivedManuallyNotification(input: {
+  adminClient: SupabaseClient;
+  jobId: string;
+}) {
+  await notifyArtworkReceivedManuallySafe(input.adminClient, {
+    jobId: input.jobId,
+  });
+}
+
+export async function prepareCandidCreatingArtworkNotification(input: {
+  adminClient: SupabaseClient;
+  jobId: string;
+}) {
+  await notifyCandidCreatingArtworkSafe(input.adminClient, {
+    jobId: input.jobId,
   });
 }

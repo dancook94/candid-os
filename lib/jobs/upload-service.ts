@@ -599,8 +599,8 @@ export async function finishArtworkUpload(
         ? JOB_ACTIVITY_TYPES.customerArtworkReplaced
         : JOB_ACTIVITY_TYPES.customerArtworkUploaded,
       description: file.supersedes_file_id
-        ? `${context.company.company_name} uploaded replacement artwork for ${context.job.job_reference}.`
-        : `${context.company.company_name} uploaded artwork for ${context.job.job_reference}.`,
+        ? `Customer uploaded replacement artwork for ${context.job.job_reference}.`
+        : `Customer uploaded artwork for ${context.job.job_reference}.`,
       companyId,
       quoteId: context.job.quote_id,
       opportunityId: context.job.opportunity_id,

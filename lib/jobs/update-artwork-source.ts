@@ -8,6 +8,10 @@ import {
 } from "@/lib/jobs/artwork-source";
 import { JobError } from "@/lib/jobs/errors";
 import {
+  prepareArtworkReceivedManuallyNotification,
+  prepareCandidCreatingArtworkNotification,
+} from "@/lib/jobs/notifications";
+import {
   resolveJobStatusForArtworkSourceChange,
   resolveJobStatusAfterPortalUpload,
 } from "@/lib/jobs/job-status-workflow";
@@ -46,6 +50,20 @@ function resolveArtworkSourceActivityType(
   }
 
   return JOB_ACTIVITY_TYPES.jobArtworkSourceChanged;
+}
+
+function resolveArtworkSourceActivityDescription(
+  jobReference: string,
+  newSource: JobArtworkSource
+) {
+  switch (newSource) {
+    case "manual_receipt":
+      return `Artwork marked as received manually for ${jobReference}.`;
+    case "candid_creating":
+      return `Candid preparing artwork for ${jobReference}.`;
+    default:
+      return `Artwork source for ${jobReference} changed to ${getAdminArtworkSourceLabel(newSource)}.`;
+  }
 }
 
 async function logJobStatusChangedActivity(
@@ -149,7 +167,10 @@ export async function updateJobArtworkSource(
     if (activityType) {
       await logJobActivity(adminClient, {
         activityType,
-        description: `Artwork source for ${typedJob.job_reference} changed to ${getAdminArtworkSourceLabel(input.artworkSource)}.`,
+        description: resolveArtworkSourceActivityDescription(
+          typedJob.job_reference,
+          input.artworkSource
+        ),
         companyId: typedJob.company_id,
         quoteId: typedJob.quote_id,
         opportunityId: typedJob.opportunity_id,
@@ -175,6 +196,22 @@ export async function updateJobArtworkSource(
     }
   } catch {
     // Activity failure must not revert the artwork source update.
+  }
+
+  try {
+    if (input.artworkSource === "manual_receipt") {
+      await prepareArtworkReceivedManuallyNotification({
+        adminClient,
+        jobId: typedJob.id,
+      });
+    } else if (input.artworkSource === "candid_creating") {
+      await prepareCandidCreatingArtworkNotification({
+        adminClient,
+        jobId: typedJob.id,
+      });
+    }
+  } catch {
+    // Notification failure must not revert the artwork source update.
   }
 
   try {
