@@ -7,10 +7,17 @@ import { sendNotification } from "@/lib/notifications/send-notification";
 import { buildAbsoluteUrl } from "@/lib/notifications/templates";
 
 function logNotificationFailure(event: string, error: unknown) {
+  console.error(`[notifications] ${event}`, {
+    message: error instanceof Error ? error.message : String(error),
+  });
+}
+
+function logNotificationEvent(
+  event: string,
+  details: Record<string, unknown>
+) {
   if (process.env.NODE_ENV === "development") {
-    console.error(`[notifications] ${event}`, {
-      message: error instanceof Error ? error.message : String(error),
-    });
+    console.info(`[notifications] ${event}`, details);
   }
 }
 
@@ -74,7 +81,11 @@ export async function notifyCustomerRegistration(
   const profile = await loadProfileNotificationContext(adminClient, profileId);
 
   if (!profile || profile.userRole !== "customer") {
-    return;
+    logNotificationEvent("registration_skipped", {
+      profileId,
+      reason: "missing_or_non_customer_profile",
+    });
+    return { ok: false as const, skippedReason: "missing_or_non_customer_profile" };
   }
 
   const companyLabel =
@@ -93,21 +104,38 @@ export async function notifyCustomerRegistration(
         : "Candid Creative will review your account before portal access is approved.",
   };
 
-  await sendNotification(adminClient, {
-    type: "customer_registration_received",
-    profileId: profile.id,
-    companyId: profile.companyId,
-    idempotencyKey: `registration_received:${profile.id}`,
-    metadata: registrationMetadata,
+  const [customerResult, internalResult] = await Promise.all([
+    sendNotification(adminClient, {
+      type: "customer_registration_received",
+      profileId: profile.id,
+      companyId: profile.companyId,
+      idempotencyKey: `registration_received:${profile.id}`,
+      metadata: registrationMetadata,
+    }),
+    sendNotification(adminClient, {
+      type: "internal_new_registration",
+      profileId: profile.id,
+      companyId: profile.companyId,
+      idempotencyKey: `internal_registration:${profile.id}`,
+      metadata: registrationMetadata,
+    }),
+  ]);
+
+  logNotificationEvent("registration_sent", {
+    profileId,
+    customerOk: customerResult.ok,
+    internalOk: internalResult.ok,
+    customerNotificationIds: customerResult.notificationIds,
+    internalNotificationIds: internalResult.notificationIds,
+    customerSkippedReason: customerResult.skippedReason ?? null,
+    internalSkippedReason: internalResult.skippedReason ?? null,
   });
 
-  await sendNotification(adminClient, {
-    type: "internal_new_registration",
-    profileId: profile.id,
-    companyId: profile.companyId,
-    idempotencyKey: `internal_registration:${profile.id}`,
-    metadata: registrationMetadata,
-  });
+  return {
+    ok: customerResult.ok || internalResult.ok,
+    customerResult,
+    internalResult,
+  };
 }
 
 export async function notifyCustomerRegistrationSafe(
@@ -115,27 +143,49 @@ export async function notifyCustomerRegistrationSafe(
   profileId: string
 ) {
   try {
-    await notifyCustomerRegistration(adminClient, profileId);
+    return await notifyCustomerRegistration(adminClient, profileId);
   } catch (error) {
     logNotificationFailure("customer_registration", error);
+    return {
+      ok: false,
+      skippedReason: error instanceof Error ? error.message : "notification_failed",
+    };
   }
 }
 
 export async function notifyCustomerAccountApproved(
   adminClient: SupabaseClient,
-  profileId: string
+  profileId: string,
+  options?: { resend?: boolean }
 ) {
   const profile = await loadProfileNotificationContext(adminClient, profileId);
 
   if (!profile || profile.userRole !== "customer") {
-    return;
+    logNotificationEvent("account_approved_skipped", {
+      profileId,
+      reason: "missing_or_non_customer_profile",
+    });
+    return { ok: false as const, skippedReason: "missing_or_non_customer_profile" };
   }
 
-  await sendNotification(adminClient, {
+  if (profile.accountStatus !== "approved") {
+    logNotificationEvent("account_approved_skipped", {
+      profileId,
+      reason: "customer_not_approved",
+      accountStatus: profile.accountStatus,
+    });
+    return { ok: false as const, skippedReason: "customer_not_approved" };
+  }
+
+  const idempotencyKey = options?.resend
+    ? `account_approved_resend:${profile.id}:${Date.now()}`
+    : `account_approved:${profile.id}`;
+
+  const result = await sendNotification(adminClient, {
     type: "customer_account_approved",
     profileId: profile.id,
     companyId: profile.companyId,
-    idempotencyKey: `account_approved:${profile.id}`,
+    idempotencyKey,
     metadata: {
       customerName: profile.fullName ?? profile.firstName ?? "there",
       firstName: profile.firstName ?? "there",
@@ -143,16 +193,33 @@ export async function notifyCustomerAccountApproved(
       email: profile.email,
     },
   });
+
+  logNotificationEvent("account_approved_sent", {
+    profileId,
+    resend: Boolean(options?.resend),
+    ok: result.ok,
+    notificationIds: result.notificationIds,
+    skippedReason: result.skippedReason ?? null,
+  });
+
+  return result;
 }
 
 export async function notifyCustomerAccountApprovedSafe(
   adminClient: SupabaseClient,
-  profileId: string
+  profileId: string,
+  options?: { resend?: boolean }
 ) {
   try {
-    await notifyCustomerAccountApproved(adminClient, profileId);
+    return await notifyCustomerAccountApproved(adminClient, profileId, options);
   } catch (error) {
     logNotificationFailure("customer_account_approved", error);
+    return {
+      ok: false,
+      notificationIds: [],
+      results: [],
+      skippedReason: error instanceof Error ? error.message : "notification_failed",
+    };
   }
 }
 

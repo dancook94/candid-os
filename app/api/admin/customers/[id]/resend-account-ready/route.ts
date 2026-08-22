@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
 
-import { approveCustomerProfile } from "@/lib/admin/approve-customer";
 import { verifyApprovedAdmin } from "@/lib/admin-auth";
 import { notifyCustomerAccountApprovedSafe } from "@/lib/notifications/triggers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export async function POST(
-  request: Request,
+  _request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
   const { id: profileId } = await context.params;
@@ -18,37 +17,37 @@ export async function POST(
     return NextResponse.json({ error: auth.message }, { status: auth.status });
   }
 
-  let body: { companyId?: string };
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("id, user_role, account_status")
+    .eq("id", profileId)
+    .maybeSingle();
 
-  try {
-    body = (await request.json()) as { companyId?: string };
-  } catch {
-    return NextResponse.json({ error: "Invalid request body." }, { status: 400 });
+  if (profileError || !profile) {
+    return NextResponse.json({ error: "Customer profile not found." }, { status: 404 });
   }
 
-  const companyId = body.companyId?.trim();
-
-  if (!companyId) {
-    return NextResponse.json({ error: "Company is required." }, { status: 400 });
-  }
-
-  const approval = await approveCustomerProfile(supabase, {
-    profileId,
-    companyId,
-  });
-
-  if (!approval.ok) {
+  if (profile.user_role !== "customer") {
     return NextResponse.json(
-      { error: approval.message },
-      { status: approval.status }
+      { error: "Only customer profiles can receive account-ready emails." },
+      { status: 400 }
+    );
+  }
+
+  if (profile.account_status !== "approved") {
+    return NextResponse.json(
+      { error: "Customer must be approved before resending the account-ready email." },
+      { status: 400 }
     );
   }
 
   const adminClient = createAdminClient();
-  const notification = await notifyCustomerAccountApprovedSafe(adminClient, profileId);
+  const notification = await notifyCustomerAccountApprovedSafe(adminClient, profileId, {
+    resend: true,
+  });
 
   if (process.env.NODE_ENV === "development") {
-    console.info("[approve-customer] account-ready notification", {
+    console.info("[resend-account-ready] notification", {
       profileId,
       ok: notification.ok,
       skippedReason: "skippedReason" in notification ? notification.skippedReason : null,
@@ -58,7 +57,7 @@ export async function POST(
   }
 
   return NextResponse.json({
-    ok: true,
+    ok: notification.ok,
     profileId,
     notification: {
       ok: notification.ok,

@@ -29,7 +29,17 @@ export async function POST() {
   }
 
   const adminClient = createAdminClient();
-  void notifyCustomerRegistrationSafe(adminClient, profile.id as string);
+  const notification = await notifyCustomerRegistrationSafe(
+    adminClient,
+    profile.id as string
+  );
 
-  return NextResponse.json({ ok: true, profileId: profile.id });
+  return NextResponse.json({
+    ok: true,
+    profileId: profile.id,
+    notification: {
+      ok: notification.ok,
+      skippedReason: "skippedReason" in notification ? notification.skippedReason : null,
+    },
+  });
 }

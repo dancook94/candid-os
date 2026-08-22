@@ -120,10 +120,55 @@ async function insertNotification(
     .single();
 
   if (error) {
+    if (error.code === "42P01") {
+      throw new Error("notifications_schema_missing");
+    }
+
     throw error;
   }
 
   return data.id as string;
+}
+
+async function recordNotificationIssue(
+  adminClient: SupabaseClient,
+  input: SendNotificationInput,
+  issue: {
+    status: "failed" | "suppressed";
+    reason: string;
+    intendedRecipient?: string | null;
+  }
+) {
+  try {
+    const rendered = renderNotificationEmail(input.type, input.metadata ?? {});
+    const audience = audienceForType(input.type);
+    const now = new Date().toISOString();
+    const intendedRecipient = issue.intendedRecipient ?? null;
+
+    const row: NotificationRowInsert = {
+      ...buildBaseRow(input, audience, intendedRecipient ?? "unknown", rendered.subject),
+      intended_recipient_email: intendedRecipient,
+      status: issue.status,
+      error_message: issue.reason,
+      failed_at: issue.status === "failed" ? now : null,
+      metadata: {
+        ...(input.metadata ?? {}),
+        skipReason: issue.reason,
+      },
+    };
+
+    return await insertNotification(adminClient, row);
+  } catch (error) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[notifications] failed to record notification issue", {
+        type: input.type,
+        reason: issue.reason,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    return null;
+  }
 }
 
 async function updateNotification(
@@ -298,9 +343,14 @@ export async function sendNotification(
 
     if (isCustomerType(input.type)) {
       if (!isCustomerNotificationEnabled(settings, input.type)) {
+        const notificationId = await recordNotificationIssue(adminClient, input, {
+          status: "suppressed",
+          reason: "suppressed_by_admin_setting",
+        });
+
         return {
           ok: true,
-          notificationIds: [],
+          notificationIds: notificationId ? [notificationId] : [],
           results: [],
           skippedReason: "suppressed_by_admin_setting",
         };
@@ -312,9 +362,14 @@ export async function sendNotification(
       });
 
       if (!preference.enabled) {
+        const notificationId = await recordNotificationIssue(adminClient, input, {
+          status: "suppressed",
+          reason: preference.reason ?? "suppressed_by_preference",
+        });
+
         return {
           ok: true,
-          notificationIds: [],
+          notificationIds: notificationId ? [notificationId] : [],
           results: [],
           skippedReason: preference.reason,
         };
@@ -327,9 +382,14 @@ export async function sendNotification(
       });
 
       if (!recipient) {
+        const notificationId = await recordNotificationIssue(adminClient, input, {
+          status: "failed",
+          reason: "missing_recipient",
+        });
+
         return {
           ok: false,
-          notificationIds: [],
+          notificationIds: notificationId ? [notificationId] : [],
           results: [],
           skippedReason: "missing_recipient",
         };
@@ -351,9 +411,14 @@ export async function sendNotification(
 
     if (isInternalType(input.type)) {
       if (!isInternalNotificationEnabled(settings, input.type)) {
+        const notificationId = await recordNotificationIssue(adminClient, input, {
+          status: "suppressed",
+          reason: "suppressed_by_admin_setting",
+        });
+
         return {
           ok: true,
-          notificationIds: [],
+          notificationIds: notificationId ? [notificationId] : [],
           results: [],
           skippedReason: "suppressed_by_admin_setting",
         };
@@ -364,9 +429,14 @@ export async function sendNotification(
       );
 
       if (emails.length === 0) {
+        const notificationId = await recordNotificationIssue(adminClient, input, {
+          status: "failed",
+          reason: "missing_internal_recipients",
+        });
+
         return {
           ok: false,
-          notificationIds: [],
+          notificationIds: notificationId ? [notificationId] : [],
           results: [],
           skippedReason: "missing_internal_recipients",
         };

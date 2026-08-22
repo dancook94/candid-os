@@ -235,7 +235,7 @@ export async function GET(request: Request) {
 
   if (flow === "registration_confirm" && profile.user_role === "customer") {
     const adminClient = createAdminClient();
-    void notifyCustomerRegistrationSafe(adminClient, user.id);
+    await notifyCustomerRegistrationSafe(adminClient, user.id);
   }
 
   logAuthCallback("Redirecting after auth callback", {

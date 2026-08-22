@@ -7,6 +7,7 @@ import { NoteComposer } from "@/components/crm/note-composer";
 import { NotesList } from "@/components/crm/notes-list";
 import { ContactPortalStatusBadge } from "@/components/crm/contact-portal-status-badge";
 import { ContactDetailActions } from "@/components/crm/contact-detail-actions";
+import { ResendAccountReadyButton } from "@/components/resend-account-ready-button";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,6 +21,7 @@ import { fetchContactById } from "@/lib/crm/contacts";
 import { getCrmNotes, getCrmTimeline } from "@/lib/crm/get-crm-timeline";
 import { formatCrmDateTime } from "@/lib/crm/format-datetime";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
+import { canApproveCustomers } from "@/lib/admin-auth";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { createClient } from "@/lib/supabase/server";
 
@@ -52,6 +54,7 @@ export default async function ContactDetailPage({
   } = await supabase.auth.getUser();
 
   const isAdmin = ["super_admin", "admin"].includes(profile.user_role);
+  const canResendAccountReady = canApproveCustomers(profile);
   const notesAndActivity =
     contact && user ?
       await Promise.all([
@@ -236,6 +239,17 @@ export default async function ContactDetailPage({
                     </dd>
                   </div>
                 </dl>
+
+                {canResendAccountReady &&
+                contact.profile_account_status === "approved" ? (
+                  <div className="mt-6 border-t border-border pt-6">
+                    <p className="mb-3 text-sm text-muted-foreground">
+                      Send the account-ready email again for testing or if the
+                      customer did not receive it.
+                    </p>
+                    <ResendAccountReadyButton profileId={contact.profile_id} />
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
           ) : null}
