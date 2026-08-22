@@ -9,15 +9,15 @@ import { StatusBadge } from "@/components/status-badge";
 import {
   PROOF_CONFIRMATION_TEXT,
   PROOF_STATUS_LABELS,
-  PROOF_WORKFLOW_STATUS_LABELS,
 } from "@/lib/proofs/constants";
 import { manifestItemsForProofDisplay } from "@/lib/proofs/gates";
+import type { CustomerProofState } from "@/lib/proofs/customer-state";
 import type { JobProofView } from "@/lib/proofs/types";
 
 type CustomerJobProofsSectionProps = {
   jobId: string;
   proofRequired: boolean;
-  workflowStatus: string;
+  proofState: CustomerProofState;
   proofs: JobProofView[];
   schemaMissing?: boolean;
 };
@@ -41,7 +41,7 @@ function mapProofStatusToBadge(status: string) {
 export function CustomerJobProofsSection({
   jobId,
   proofRequired,
-  workflowStatus,
+  proofState,
   proofs,
   schemaMissing,
 }: CustomerJobProofsSectionProps) {
@@ -119,11 +119,7 @@ export function CustomerJobProofsSection({
             Your proof is being prepared.
           </p>
         ) : (
-          <p className="mt-1 text-sm text-muted-foreground">
-            {PROOF_WORKFLOW_STATUS_LABELS[
-              workflowStatus as keyof typeof PROOF_WORKFLOW_STATUS_LABELS
-            ] ?? workflowStatus}
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">{proofState.label}</p>
         )}
       </div>
 
@@ -177,6 +173,12 @@ export function CustomerJobProofsSection({
             {proof.files[0] ? (
               <p className="text-sm text-muted-foreground">
                 Artwork: {proof.files[0].file_name}
+              </p>
+            ) : null}
+
+            {proof.status === "changes_requested" && proof.changes_requested_comment ? (
+              <p className="text-sm text-amber-900">
+                Your comments: {proof.changes_requested_comment}
               </p>
             ) : null}
 

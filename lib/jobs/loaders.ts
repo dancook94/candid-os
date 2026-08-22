@@ -28,13 +28,34 @@ import type {
 } from "@/lib/jobs/types";
 import type { CustomerJobRecord } from "@/lib/customer-jobs";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  CUSTOMER_PROOF_STATUS_LABELS,
+  type CustomerProofState,
+} from "@/lib/proofs/customer-state";
+import { loadCustomerProofStatesByJobId } from "@/lib/proofs/loaders";
 
 function mapJobToCustomerListRecord(
   job: JobRecord,
   quoteNumber: number | null,
-  files: JobFileRecord[]
+  files: JobFileRecord[],
+  proofState?: CustomerProofState
 ): CustomerJobRecord {
   const statusView = resolveCustomerJobStatus(job, files);
+  const resolvedProofState = proofState ?? {
+    status: job.proof_required ? "preparing" : "not_required",
+    label: job.proof_required
+      ? CUSTOMER_PROOF_STATUS_LABELS.preparing
+      : CUSTOMER_PROOF_STATUS_LABELS.not_required,
+    requiresCustomerAction: false,
+    activeProofId: null,
+    version: null,
+    awaitingApprovalCount: 0,
+    changesRequestedCount: 0,
+    changesRequestedComment: null,
+    cardActionLabel: null,
+    cardActionUrl: null,
+    awaitingApprovalProofs: [],
+  };
 
   return {
     id: job.id,
@@ -49,6 +70,12 @@ function mapJobToCustomerListRecord(
     artworkRequired: job.artwork_required,
     needsArtworkUpload: jobNeedsArtworkUpload(job, files),
     updatedAt: job.updated_at,
+    proofStatus: resolvedProofState.status,
+    proofStatusLabel: resolvedProofState.label,
+    proofRequiresAction: resolvedProofState.requiresCustomerAction,
+    proofActionLabel: resolvedProofState.cardActionLabel,
+    proofActionUrl: resolvedProofState.cardActionUrl,
+    proofAwaitingApprovalCount: resolvedProofState.awaitingApprovalCount,
   };
 }
 
@@ -152,12 +179,15 @@ export async function loadCustomerJobs(
     filesByJobId.set(file.job_id, existing);
   }
 
+  const proofStates = await loadCustomerProofStatesByJobId(adminClient, jobs);
+
   return {
     jobs: jobs.map((job) =>
       mapJobToCustomerListRecord(
         job,
         quoteNumberById.get(job.quote_id) ?? null,
-        filesByJobId.get(job.id) ?? []
+        filesByJobId.get(job.id) ?? [],
+        proofStates.get(job.id)
       )
     ),
     jobsDataAvailable: true,

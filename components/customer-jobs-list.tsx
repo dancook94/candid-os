@@ -2,6 +2,10 @@ import Link from "next/link";
 
 import { StatusBadge } from "@/components/status-badge";
 import type { CustomerJobRecord } from "@/lib/customer-jobs";
+import {
+  mapCustomerProofStatusToBadge,
+  type CustomerProofStatus,
+} from "@/lib/proofs/customer-state";
 
 type CustomerJobsListProps = {
   jobs: CustomerJobRecord[];
@@ -68,6 +72,7 @@ export function CustomerJobsList({ jobs }: CustomerJobsListProps) {
             <th>Job</th>
             <th>Project</th>
             <th>Status</th>
+            <th>Proof</th>
             <th>Required date</th>
             <th>Fulfilment</th>
             <th>Related quote</th>
@@ -96,6 +101,24 @@ export function CustomerJobsList({ jobs }: CustomerJobsListProps) {
                   status={mapJobStatusToBadge(job.status)}
                   label={job.statusLabel}
                 />
+              </td>
+              <td className="p-4">
+                <div className="space-y-2">
+                  <StatusBadge
+                    status={mapCustomerProofStatusToBadge(
+                      job.proofStatus as CustomerProofStatus
+                    )}
+                    label={job.proofStatusLabel}
+                  />
+                  {job.proofActionUrl && job.proofActionLabel ? (
+                    <Link
+                      href={job.proofActionUrl}
+                      className="block text-sm font-medium text-foreground underline-offset-4 hover:underline"
+                    >
+                      {job.proofActionLabel}
+                    </Link>
+                  ) : null}
+                </div>
               </td>
               <td className="p-4 text-muted-foreground">
                 {formatDate(job.requiredDate)}

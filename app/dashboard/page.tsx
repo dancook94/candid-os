@@ -3,6 +3,7 @@ import { unstable_noStore as noStore } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
+import { CustomerProofActionsCard } from "@/components/proofs/customer-proof-actions-card";
 import { PageHeader } from "@/components/page-header";
 import { StaffAvatarDisplay } from "@/components/staff-avatar-display";
 import { StatCard } from "@/components/stat-card";
@@ -33,6 +34,7 @@ import {
   getFormalQuoteStatusLabel,
   mapCustomerQuoteStatusToBadge,
 } from "@/lib/customer-quote-request";
+import { loadCustomerPendingProofActions } from "@/lib/proofs/loaders";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +86,7 @@ export default async function DashboardPage() {
     { count: formalQuotesCount, error: quotesError },
     { count: quoteRequestsCount, error: quoteRequestsError },
     { quotes: recentQuotes, loadError: recentQuotesError },
+    pendingProofActions,
   ] = await Promise.all([
     supabase
       .from("quotes")
@@ -93,6 +96,9 @@ export default async function DashboardPage() {
       .from("quote_requests")
       .select("*", { count: "exact", head: true }),
     loadCustomerCompanyQuotes(supabase, { limit: 5 }),
+    profile?.company_id && profile.account_status === "approved"
+      ? loadCustomerPendingProofActions(profile.company_id)
+      : Promise.resolve({ awaitingApprovalCount: 0, actions: [] }),
   ]);
 
   const queryErrors = [
@@ -145,7 +151,7 @@ export default async function DashboardPage() {
           </Card>
         ) : null}
 
-        <div className="grid gap-5 md:grid-cols-3">
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
           <StatCard
             label="Quotes"
             value={quotesValue}
@@ -156,6 +162,12 @@ export default async function DashboardPage() {
             label="Quote requests"
             value={quoteRequestsValue}
             description="Quote requests submitted by your company"
+          />
+
+          <StatCard
+            label="Proofs awaiting approval"
+            value={String(pendingProofActions.awaitingApprovalCount)}
+            description="Current proof versions needing your review"
           />
 
           <StatCard
@@ -177,6 +189,11 @@ export default async function DashboardPage() {
             }
           />
         </div>
+
+        <CustomerProofActionsCard
+          awaitingApprovalCount={pendingProofActions.awaitingApprovalCount}
+          actions={pendingProofActions.actions}
+        />
 
         <Card className="portal-surface mt-8">
           <CardHeader>

@@ -31,6 +31,12 @@ export type CustomerJobRecord = {
   artworkRequired: boolean;
   needsArtworkUpload: boolean;
   updatedAt: string;
+  proofStatus: string;
+  proofStatusLabel: string;
+  proofRequiresAction: boolean;
+  proofActionLabel: string | null;
+  proofActionUrl: string | null;
+  proofAwaitingApprovalCount: number;
 };
 
 export type LoadCustomerJobsResult = {

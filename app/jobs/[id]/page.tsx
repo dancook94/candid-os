@@ -154,10 +154,26 @@ export default async function CustomerJobDetailPage({
           </CardContent>
         </Card>
 
+        {proofing.proofState.status === "changes_requested" &&
+        proofing.proofState.changesRequestedComment ? (
+          <Card className="portal-surface mb-6 overflow-hidden border-amber-200 bg-amber-50">
+            <CardContent className="pt-6">
+              <p className="text-base font-semibold text-amber-950">
+                Proof changes requested
+              </p>
+              <p className="mt-2 text-sm text-amber-900">
+                {proofing.proofState.changesRequestedComment}
+              </p>
+            </CardContent>
+          </Card>
+        ) : null}
+
         {job.changesRequiredComment ? (
           <Card className="portal-surface mb-6 overflow-hidden border-amber-200 bg-amber-50">
             <CardContent className="pt-6">
-              <p className="text-base font-semibold text-amber-950">Changes required</p>
+              <p className="text-base font-semibold text-amber-950">
+                Artwork changes required
+              </p>
               <p className="mt-2 text-sm text-amber-900">{job.changesRequiredComment}</p>
             </CardContent>
           </Card>
@@ -168,7 +184,7 @@ export default async function CustomerJobDetailPage({
             <CustomerJobProofsSection
               jobId={job.id}
               proofRequired={proofing.proofRequired}
-              workflowStatus={proofing.workflowStatus}
+              proofState={proofing.proofState}
               proofs={proofing.proofs}
               schemaMissing={proofing.schemaMissing}
             />

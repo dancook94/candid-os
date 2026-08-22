@@ -166,6 +166,7 @@ export async function syncJobProofWorkflowStatus(
     .select(PROOF_SELECT)
     .eq("job_id", jobId)
     .not("status", "eq", "cancelled")
+    .not("status", "eq", "superseded")
     .order("version_number", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -213,7 +214,7 @@ function mapProofStatusToWorkflow(proof: JobProofRecord): ProofWorkflowStatus {
     case "approved":
       return "approved";
     case "superseded":
-      return "awaiting_customer";
+      return "no_proof";
     default:
       return "no_proof";
   }
