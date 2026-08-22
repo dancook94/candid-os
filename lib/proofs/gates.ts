@@ -1,11 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { isActiveRequiredItem, isRequirementSatisfied } from "@/lib/manifest/readiness";
 import type { ManifestItemRecord } from "@/lib/manifest/types";
 import { loadJobProofRequired } from "@/lib/jobs/proof-required";
+import { isJobProofRequired } from "@/lib/proofs/customer-state";
+import { deriveCustomerProofState } from "@/lib/proofs/customer-state";
+import {
+  buildProofCoverageContext,
+  findUncoveredRequiredItemReferences,
+} from "@/lib/proofs/coverage";
 import {
   PROOF_SELECT,
-  PROOF_WORKFLOW_STATUS_LABELS,
   type ProofWorkflowStatus,
 } from "@/lib/proofs/constants";
 import { isMissingProofSchemaError } from "@/lib/proofs/errors";
@@ -21,17 +25,60 @@ export type ProofGateEvaluation = {
   uncoveredItemReferences: string[];
 };
 
+async function loadJobProofRecords(adminClient: SupabaseClient, jobId: string) {
+  const { data, error } = await adminClient
+    .from("job_proofs")
+    .select(
+      "id, job_id, proof_reference, version_number, status, title, sent_at, changes_requested_comment, approved_at, customer_message, created_at"
+    )
+    .eq("job_id", jobId)
+    .order("version_number", { ascending: false });
+
+  if (error) {
+    return [];
+  }
+
+  return data ?? [];
+}
+
+async function loadApprovedProofManifestLinks(
+  adminClient: SupabaseClient,
+  approvedProofIds: string[]
+) {
+  if (approvedProofIds.length === 0) {
+    return [];
+  }
+
+  const { data, error } = await adminClient
+    .from("job_proof_manifest_items")
+    .select("proof_id, production_item_id")
+    .in("proof_id", approvedProofIds);
+
+  if (error) {
+    return [];
+  }
+
+  return (data ?? []) as Array<{ proof_id: string; production_item_id: string }>;
+}
+
 export async function evaluateJobProofGate(
   adminClient: SupabaseClient,
   jobId: string,
-  manifestItems: ManifestItemRecord[] = []
+  manifestItems: ManifestItemRecord[] = [],
+  jobMeta?: {
+    job_reference?: string;
+    project_name?: string;
+    proof_required?: boolean | null;
+  }
 ): Promise<ProofGateEvaluation> {
-  const proofRequired = await loadJobProofRequired(adminClient, jobId);
+  const proofRequired = jobMeta
+    ? isJobProofRequired(jobMeta)
+    : await loadJobProofRequired(adminClient, jobId);
 
   const { data: job, error } = await adminClient
     .from("jobs")
     .select(
-      "proof_required, proof_workflow_status, proof_approved_at, proof_bypass_reason"
+      "proof_required, proof_workflow_status, proof_approved_at, proof_bypass_reason, job_reference, project_name"
     )
     .eq("id", jobId)
     .maybeSingle();
@@ -43,7 +90,7 @@ export async function evaluateJobProofGate(
       workflowStatus: "no_proof",
       proofApproved: !proofRequired,
       proofBlocked: false,
-      proofStatusLabel: proofRequired ? "Awaiting proof workflow" : "Proof not required",
+      proofStatusLabel: proofRequired ? "Proof being prepared" : "Proof not required",
       uncoveredItemReferences: [],
     };
   }
@@ -63,6 +110,15 @@ export async function evaluateJobProofGate(
   const workflowStatus = (job.proof_workflow_status ??
     (proofRequired ? "no_proof" : "not_required")) as ProofWorkflowStatus;
 
+  const proofs = await loadJobProofRecords(adminClient, jobId);
+  const proofState = deriveCustomerProofState({
+    proofRequired,
+    proofs,
+    jobId,
+    jobReference: (job.job_reference as string) ?? jobMeta?.job_reference ?? "",
+    projectName: (job.project_name as string) ?? jobMeta?.project_name ?? "",
+  });
+
   if (!proofRequired || workflowStatus === "not_required") {
     return {
       schemaAvailable: true,
@@ -70,33 +126,38 @@ export async function evaluateJobProofGate(
       workflowStatus: "not_required",
       proofApproved: true,
       proofBlocked: false,
-      proofStatusLabel: "Proof not required",
+      proofStatusLabel: proofState.label,
       uncoveredItemReferences: [],
     };
   }
 
-  if (workflowStatus === "approved" || job.proof_approved_at) {
-    const uncovered = await findUncoveredRequiredItems(adminClient, jobId, manifestItems);
+  const approvedProofIds = proofs
+    .filter((proof) => proof.status === "approved")
+    .map((proof) => proof.id as string);
+  const links = await loadApprovedProofManifestLinks(adminClient, approvedProofIds);
+  const coverage = buildProofCoverageContext(proofRequired, approvedProofIds, links);
+  const uncovered = findUncoveredRequiredItemReferences(manifestItems, coverage);
 
-    if (uncovered.length === 0) {
-      return {
-        schemaAvailable: true,
-        proofRequired: true,
-        workflowStatus: "approved",
-        proofApproved: true,
-        proofBlocked: false,
-        proofStatusLabel: "Proof approved",
-        uncoveredItemReferences: [],
-      };
-    }
+  if (proofState.status === "approved" && uncovered.length === 0) {
+    return {
+      schemaAvailable: true,
+      proofRequired: true,
+      workflowStatus: "approved",
+      proofApproved: true,
+      proofBlocked: false,
+      proofStatusLabel: proofState.label,
+      uncoveredItemReferences: [],
+    };
+  }
 
+  if (proofState.status === "approved" && uncovered.length > 0) {
     return {
       schemaAvailable: true,
       proofRequired: true,
       workflowStatus,
       proofApproved: false,
       proofBlocked: true,
-      proofStatusLabel: `Proof approved · ${uncovered.length} item(s) still uncovered`,
+      proofStatusLabel: `${proofState.label} · ${uncovered.length} item(s) still uncovered`,
       uncoveredItemReferences: uncovered,
     };
   }
@@ -107,54 +168,9 @@ export async function evaluateJobProofGate(
     workflowStatus,
     proofApproved: false,
     proofBlocked: true,
-    proofStatusLabel:
-      PROOF_WORKFLOW_STATUS_LABELS[workflowStatus] ?? "Proof approval required",
-    uncoveredItemReferences: [],
+    proofStatusLabel: proofState.label,
+    uncoveredItemReferences: uncovered,
   };
-}
-
-async function findUncoveredRequiredItems(
-  adminClient: SupabaseClient,
-  jobId: string,
-  manifestItems: ManifestItemRecord[]
-) {
-  const activeRequired = manifestItems.filter(isActiveRequiredItem);
-
-  if (activeRequired.length === 0) {
-    return [];
-  }
-
-  const { data: approvedProofs, error: proofsError } = await adminClient
-    .from("job_proofs")
-    .select("id")
-    .eq("job_id", jobId)
-    .eq("status", "approved");
-
-  if (proofsError || !approvedProofs?.length) {
-    return activeRequired.map((item) => item.item_reference ?? item.item_name);
-  }
-
-  const proofIds = approvedProofs.map((proof) => proof.id);
-
-  const { data: links, error: linksError } = await adminClient
-    .from("job_proof_manifest_items")
-    .select("production_item_id")
-    .in("proof_id", proofIds);
-
-  if (linksError) {
-    return activeRequired.map((item) => item.item_reference ?? item.item_name);
-  }
-
-  const coveredIds = new Set((links ?? []).map((link) => link.production_item_id));
-
-  if (coveredIds.size === 0) {
-    // Whole-job proof with no explicit item links covers all items once approved.
-    return [];
-  }
-
-  return activeRequired
-    .filter((item) => !coveredIds.has(item.id))
-    .map((item) => item.item_reference ?? item.item_name);
 }
 
 export async function syncJobProofWorkflowStatus(
@@ -251,4 +267,5 @@ export function manifestItemsForProofDisplay(
   });
 }
 
-export { isRequirementSatisfied, isActiveRequiredItem };
+export { isActiveRequiredItem } from "@/lib/manifest/readiness";
+export { isRequirementSatisfied } from "@/lib/manifest/readiness";

@@ -1,8 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { calculateProductionReadiness } from "@/lib/manifest/readiness";
-import { loadProductionProofGate } from "@/lib/manifest/production-gates";
 import { loadManifestItemsForJob } from "@/lib/manifest/service";
+import { loadJobProofCoverageContext } from "@/lib/proofs/loaders";
 import { isPrintFactoryJobRipped } from "@/lib/printfactory/ripped";
 import {
   PRINTFACTORY_ACTIVITY_TYPES,
@@ -174,12 +174,20 @@ export async function refreshJobProductionReadiness(
 ) {
   const job = await loadJob(adminClient, jobId);
   const { items } = await loadManifestItemsForJob(adminClient, jobId);
-  const proofGate = await loadProductionProofGate(adminClient, jobId);
+  const { proofState, coverage } = await loadJobProofCoverageContext(adminClient, jobId);
+
+  const proofGate = {
+    proofRequired: coverage.proofRequired,
+    proofApproved: proofState.status === "approved",
+    proofBlocked: proofState.status !== "approved" && coverage.proofRequired,
+    proofStatusLabel: proofState.label,
+  };
 
   const readiness = calculateProductionReadiness(items, {
     hasOverride: Boolean(job.ready_to_print_override_at),
-    proofGateSatisfied: !proofGate.proofBlocked,
-    proofStatusLabel: proofGate.proofStatusLabel,
+    proofCoverage: coverage,
+    proofStatus: proofState.status,
+    proofStatusLabel: proofState.label,
   });
 
   if (!readiness.isReady) {

@@ -3,6 +3,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { getAdminArtworkSourceLabel } from "@/lib/jobs/artwork-source";
 import { calculateProductionReadiness } from "@/lib/manifest/readiness";
 import { MANIFEST_ITEM_SELECT } from "@/lib/manifest/constants";
+import { mapCustomerProofStatusToBadge } from "@/lib/proofs/customer-state";
+import type { CustomerProofStatus } from "@/lib/proofs/customer-state";
+import { loadProductionBoardProofContextsByJobId } from "@/lib/proofs/loaders";
 import {
   JOB_BOARD_SELECT,
   JOB_PRODUCTION_BOARD_COLUMNS,
@@ -36,6 +39,9 @@ export type JobProductionBoardCard = {
   priority_label: string | null;
   assigned_staff_name: string | null;
   proof_status_label: string;
+  proof_status: CustomerProofStatus;
+  proof_status_badge: ReturnType<typeof mapCustomerProofStatusToBadge>;
+  readiness_unresolved_details: string[];
   synology_path_hint: string | null;
   dropbox_folder_path: string | null;
   dropbox_setup_status: string;
@@ -183,27 +189,44 @@ export async function fetchJobProductionBoard(
     }
   }
 
-  const { data: proofRows } = await adminClient
-    .from("jobs")
-    .select("id, proof_required")
-    .in("id", jobIds.length ? jobIds : ["00000000-0000-0000-0000-000000000000"]);
-
-  const proofRequiredByJob = new Map<string, boolean>();
-
-  for (const row of proofRows ?? []) {
-    proofRequiredByJob.set(row.id as string, row.proof_required !== false);
-  }
+  const proofContexts = await loadProductionBoardProofContextsByJobId(
+    adminClient,
+    jobRows.map((job) => ({
+      id: job.id as string,
+      job_reference: job.job_reference as string,
+      project_name: job.project_name as string,
+      proof_required: job.proof_required as boolean | null | undefined,
+    }))
+  );
 
   const cards: JobProductionBoardCard[] = jobRows
     .map((job) => {
       const items = itemsByJob.get(job.id as string) ?? [];
-      const proofRequired = proofRequiredByJob.get(job.id as string) ?? true;
-      const proofStatusLabel = proofRequired ? "Awaiting proof workflow" : "Proof not required";
+      const proofContext = proofContexts.get(job.id as string);
+      const proofState = proofContext?.proofState ?? {
+        status: "preparing" as const,
+        label: "Proof being prepared",
+        requiresCustomerAction: false,
+        activeProofId: null,
+        version: null,
+        awaitingApprovalCount: 0,
+        changesRequestedCount: 0,
+        changesRequestedComment: null,
+        cardActionLabel: null,
+        cardActionUrl: null,
+        awaitingApprovalProofs: [],
+      };
+      const coverage = proofContext?.coverage ?? {
+        proofRequired: true,
+        coveredItemIds: new Set<string>(),
+        hasWholeJobApprovedCoverage: false,
+      };
 
       const readiness = calculateProductionReadiness(items as never[], {
         hasOverride: Boolean(job.ready_to_print_override_at),
-        proofGateSatisfied: !proofRequired,
-        proofStatusLabel,
+        proofCoverage: coverage,
+        proofStatus: proofState.status,
+        proofStatusLabel: proofState.label,
       });
 
       const rippedCount = items.filter(
@@ -259,7 +282,10 @@ export async function fetchJobProductionBoard(
         assigned_staff_name: assignedItem?.assigned_to_profile_id
           ? profileNameById.get(assignedItem.assigned_to_profile_id as string) ?? null
           : null,
-        proof_status_label: proofStatusLabel,
+        proof_status_label: proofState.label,
+        proof_status: proofState.status,
+        proof_status_badge: mapCustomerProofStatusToBadge(proofState.status),
+        readiness_unresolved_details: readiness.unresolvedDetails ?? [],
         synology_path_hint: (synologyItem?.synology_source_path as string | null) ?? null,
         dropbox_folder_path: job.dropbox_folder_path as string | null,
         dropbox_setup_status: job.dropbox_setup_status as string,

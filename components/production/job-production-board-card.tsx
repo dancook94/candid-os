@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { formatCrmDateTime } from "@/lib/crm/format-datetime";
+import { StatusBadge } from "@/components/status-badge";
 import type { JobProductionBoardCard } from "@/lib/production/job-board-service";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Clock, ExternalLink } from "lucide-react";
@@ -83,8 +84,20 @@ export function JobProductionBoardCardView({
         {card.priority_label ? <p>Priority: {card.priority_label}</p> : null}
         {card.assigned_staff_name ? <p>Assigned: {card.assigned_staff_name}</p> : null}
         <p>Artwork: {card.artwork_status_label}</p>
-        <p>Proof: {card.proof_status_label}</p>
+        <div className="flex items-center gap-2">
+          <span>Proof:</span>
+          <StatusBadge status={card.proof_status_badge} label={card.proof_status_label} />
+        </div>
         <p>Production readiness: {card.readiness_label}</p>
+        {card.readiness_unresolved_details.length > 0 ? (
+          <div className="space-y-0.5">
+            {card.readiness_unresolved_details.map((detail) => (
+              <p key={detail} className="text-amber-900/90">
+                Unresolved: {detail}
+              </p>
+            ))}
+          </div>
+        ) : null}
         <p>
           Ripped: {card.ripped_requirements_count} of {card.readiness_active || "0"}
         </p>

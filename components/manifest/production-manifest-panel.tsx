@@ -238,7 +238,14 @@ export function ProductionManifestPanel({
               Ready to Print blocked: {readiness.proofStatusLabel ?? "Proof approval required"}
             </p>
           ) : null}
-          {readiness.unresolvedRequirements && readiness.unresolvedRequirements.length > 0 ? (
+          {readiness.unresolvedDetails && readiness.unresolvedDetails.length > 0 ? (
+            <ul className="mt-2 list-inside list-disc text-xs text-muted-foreground">
+              {readiness.unresolvedDetails.map((item) => (
+                <li key={item}>Unresolved: {item}</li>
+              ))}
+            </ul>
+          ) : readiness.unresolvedRequirements &&
+            readiness.unresolvedRequirements.length > 0 ? (
             <ul className="mt-2 list-inside list-disc text-xs text-muted-foreground">
               {readiness.unresolvedRequirements.map((item) => (
                 <li key={item}>Unresolved: {item}</li>
