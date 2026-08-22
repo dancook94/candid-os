@@ -22,6 +22,7 @@ import { fetchAdminQuoteMetrics } from "@/lib/admin-quote-metrics";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { fetchAdminDashboardCrm } from "@/lib/crm/admin-dashboard";
+import { canApproveCustomers } from "@/lib/admin-auth";
 import { isCrmRole } from "@/lib/staff-roles";
 import { createClient } from "@/lib/supabase/server";
 
@@ -62,6 +63,7 @@ export default async function AdminPage() {
     ]);
 
   const shellProps = await buildAdminAppShellProps(supabase, profile);
+  const canApprovePendingCustomers = canApproveCustomers(profile);
   const dashboardErrors = [
     ...quoteMetrics.errors,
     ...jobMetrics.errors,
@@ -171,10 +173,16 @@ export default async function AdminPage() {
                       </p>
                     </div>
 
-                    <ApproveCustomer
-                      profileId={pendingUser.id}
-                      companies={companies ?? []}
-                    />
+                    {canApprovePendingCustomers ? (
+                      <ApproveCustomer
+                        profileId={pendingUser.id}
+                        companies={companies ?? []}
+                      />
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        Only approved administrators can approve customers.
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
-import { verifyApprovedCrmAdmin } from "@/lib/crm-auth";
+import { approveCustomerProfile } from "@/lib/admin/approve-customer";
+import { verifyApprovedAdmin } from "@/lib/admin-auth";
 import { notifyCustomerAccountApprovedSafe } from "@/lib/notifications/triggers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -11,7 +12,7 @@ export async function POST(
 ) {
   const { id: profileId } = await context.params;
   const supabase = await createClient();
-  const auth = await verifyApprovedCrmAdmin(supabase);
+  const auth = await verifyApprovedAdmin(supabase);
 
   if (!auth.ok) {
     return NextResponse.json({ error: auth.message }, { status: auth.status });
@@ -31,35 +32,19 @@ export async function POST(
     return NextResponse.json({ error: "Company is required." }, { status: 400 });
   }
 
-  const adminClient = createAdminClient();
-
-  const { data: existingProfile, error: profileError } = await adminClient
-    .from("profiles")
-    .select("id, user_role, account_status")
-    .eq("id", profileId)
-    .maybeSingle();
-
-  if (profileError || !existingProfile) {
-    return NextResponse.json({ error: "Customer profile not found." }, { status: 404 });
-  }
-
-  if (existingProfile.user_role !== "customer") {
-    return NextResponse.json({ error: "Only customer profiles can be approved." }, { status: 400 });
-  }
-
-  if (existingProfile.account_status === "approved") {
-    return NextResponse.json({ error: "Customer is already approved." }, { status: 400 });
-  }
-
-  const { error: approvalError } = await adminClient.rpc("approve_customer", {
-    profile_id: profileId,
-    selected_company_id: companyId,
+  const approval = await approveCustomerProfile(supabase, {
+    profileId,
+    companyId,
   });
 
-  if (approvalError) {
-    return NextResponse.json({ error: approvalError.message }, { status: 400 });
+  if (!approval.ok) {
+    return NextResponse.json(
+      { error: approval.message },
+      { status: approval.status }
+    );
   }
 
+  const adminClient = createAdminClient();
   void notifyCustomerAccountApprovedSafe(adminClient, profileId);
 
   return NextResponse.json({ ok: true, profileId });

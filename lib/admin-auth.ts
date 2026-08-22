@@ -6,6 +6,16 @@ type AuthResult =
   | { ok: true; userId: string }
   | { ok: false; status: number; message: string };
 
+export function canApproveCustomers(profile: {
+  user_role: string;
+  account_status: string;
+}) {
+  return (
+    isCandidAdminRole(profile.user_role) &&
+    profile.account_status === "approved"
+  );
+}
+
 export async function verifyApprovedAdmin(
   supabase: SupabaseClient
 ): Promise<AuthResult> {
