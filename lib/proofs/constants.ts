@@ -127,6 +127,7 @@ export const PROOF_CONFIRMATION_TEXT =
 
 export const PROOF_ACTIVITY_TYPES = {
   proofCreated: "proof_created",
+  proofBrandedPdfGenerated: "proof_branded_pdf_generated",
   proofReadyToSend: "proof_ready_to_send",
   proofSent: "proof_sent",
   proofViewed: "proof_viewed",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -27,6 +27,8 @@ type ProofFileAttachmentPanelProps = {
   onPendingChange: (pending: boolean) => void;
   onError: (message: string | null) => void;
   onRefresh: () => Promise<void>;
+  forceShowAttach?: boolean;
+  onAttachFormOpened?: () => void;
 };
 
 type AttachSource =
@@ -61,6 +63,8 @@ export function ProofFileAttachmentPanel({
   onPendingChange,
   onError,
   onRefresh,
+  forceShowAttach = false,
+  onAttachFormOpened,
 }: ProofFileAttachmentPanelProps) {
   const [showAttach, setShowAttach] = useState(false);
   const [attachSource, setAttachSource] = useState<AttachSource>("customer_artwork");
@@ -68,6 +72,16 @@ export function ProofFileAttachmentPanel({
   const [dropboxSourcePath, setDropboxSourcePath] = useState("");
   const [dropboxFiles, setDropboxFiles] = useState<DropboxListFile[]>([]);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    if (!forceShowAttach) {
+      return;
+    }
+
+    setShowAttach(true);
+    setAttachSource("customer_artwork");
+    onAttachFormOpened?.();
+  }, [forceShowAttach, onAttachFormOpened]);
 
   const proofFile = proof.files[0] as JobProofFileView | undefined;
   const completeJobFiles = jobFiles.filter((file) => file.upload_status === "complete");
@@ -197,7 +211,7 @@ export function ProofFileAttachmentPanel({
               setAttachSource(proofFile ? "upload" : "customer_artwork");
             }}
           >
-            {proofFile ? "Replace attachment" : "Attach proof file"}
+            {proofFile ? "Replace attachment" : "Attach proof artwork"}
           </Button>
         ) : null}
       </div>

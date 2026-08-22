@@ -20,8 +20,8 @@ import {
 } from "@/lib/proofs/constants";
 import type { JobProofView } from "@/lib/proofs/types";
 import type { ProofSelectableManifestItem } from "@/lib/proofs/manifest-items";
+import { ProofBrandedPdfPanel } from "@/components/proofs/proof-branded-pdf-panel";
 import { ProofFileAttachmentPanel } from "@/components/proofs/proof-file-attachment-panel";
-import { ProofGeneratorWizard } from "@/components/proofs/proof-generator-wizard";
 
 type AdminJobProofsPanelProps = {
   jobId: string;
@@ -76,7 +76,7 @@ export function AdminJobProofsPanel({
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [showGenerator, setShowGenerator] = useState(false);
+  const [attachPromptProofId, setAttachPromptProofId] = useState<string | null>(null);
   const [bypassReason, setBypassReason] = useState<ProofBypassReason>("repeat_job_previously_approved");
 
   const [title, setTitle] = useState("");
@@ -274,25 +274,9 @@ export function AdminJobProofsPanel({
           </p>
         </div>
         {proofRequired ? (
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => {
-                setShowGenerator(true);
-                setShowCreate(false);
-              }}
-              disabled={pending}
-            >
-              Generate proof
-            </Button>
-            <Button type="button" onClick={() => {
-              setShowCreate(true);
-              setShowGenerator(false);
-            }} disabled={pending}>
-              + Create proof
-            </Button>
-          </div>
+          <Button type="button" onClick={() => setShowCreate(true)} disabled={pending}>
+            + Create proof
+          </Button>
         ) : null}
       </div>
 
@@ -379,20 +363,6 @@ export function AdminJobProofsPanel({
       </div>
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
-
-      {showGenerator ? (
-        <ProofGeneratorWizard
-          jobId={jobId}
-          selectableItems={selectableItems}
-          dropboxLinked={dropboxLinked}
-          jobFiles={jobFiles}
-          onClose={() => setShowGenerator(false)}
-          onComplete={async () => {
-            setShowGenerator(false);
-            await refreshAfterProofAction();
-          }}
-        />
-      ) : null}
 
       {showCreate ? (
         <div className="rounded-lg border border-border p-4 space-y-5">
@@ -677,6 +647,18 @@ export function AdminJobProofsPanel({
                 onPendingChange={setPending}
                 onError={setError}
                 onRefresh={refreshProofs}
+                forceShowAttach={attachPromptProofId === proof.id}
+                onAttachFormOpened={() => setAttachPromptProofId(null)}
+              />
+
+              <ProofBrandedPdfPanel
+                jobId={jobId}
+                proof={proof}
+                pending={pending}
+                onPendingChange={setPending}
+                onError={setError}
+                onRefresh={refreshProofs}
+                onRequestAttach={() => setAttachPromptProofId(proof.id)}
               />
 
               {proof.status === "draft" ? (

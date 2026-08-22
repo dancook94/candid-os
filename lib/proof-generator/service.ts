@@ -9,27 +9,19 @@ import {
   PROOF_GENERATOR_OVERSIZE_MESSAGE,
   PROOF_GENERATOR_UNSUPPORTED_MESSAGE,
 } from "@/lib/proof-generator/constants";
-import {
-  buildGeneratedProofFileName,
-  generateCustomerProofPdf,
-} from "@/lib/proof-generator/generate-proof-pdf";
+import { generateCustomerProofPdf } from "@/lib/proof-generator/generate-proof-pdf";
 import type {
-  ArtworkSourceInput,
-  GenerateProofInput,
   PreflightManualOverrides,
   PreflightResult,
   QuotedSpecificationItem,
 } from "@/lib/proof-generator/types";
 import { buildPreflightResult } from "@/lib/proof-generator/warnings";
+import { PROOF_ACTIVITY_TYPES, PROOF_SELECT } from "@/lib/proofs/constants";
 import { ProofError } from "@/lib/proofs/errors";
-import { getFileExtension, isProductionArtworkExtension } from "@/lib/proofs/file-validation";
-import {
-  createJobProof,
-  uploadProofFileToProofsFolder,
-} from "@/lib/proofs/service";
-import { PROOF_ACTIVITY_TYPES } from "@/lib/proofs/constants";
+import { getFileExtension } from "@/lib/proofs/file-validation";
 import { logProofActivity } from "@/lib/proofs/activity";
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
+import { uploadProofFileToProofsFolder } from "@/lib/proofs/service";
 
 function assertAnalysisSize(buffer: Buffer) {
   const maxBytes = getProofGeneratorMaxAnalysisBytes();
@@ -45,7 +37,7 @@ function assertAnalysisSize(buffer: Buffer) {
 function assertSupportedExtension(fileName: string) {
   const extension = getFileExtension(fileName);
 
-  if (extension === "ai" || isProductionArtworkExtension(fileName)) {
+  if (extension === "ai") {
     throw new ProofError(PROOF_GENERATOR_UNSUPPORTED_MESSAGE, 400);
   }
 
@@ -55,6 +47,57 @@ function assertSupportedExtension(fileName: string) {
       400
     );
   }
+}
+
+async function loadMutableProofRecord(
+  adminClient: SupabaseClient,
+  jobId: string,
+  proofId: string
+) {
+  const { data, error } = await adminClient
+    .from("job_proofs")
+    .select(PROOF_SELECT)
+    .eq("id", proofId)
+    .eq("job_id", jobId)
+    .maybeSingle();
+
+  if (error || !data) {
+    throw new ProofError("Proof not found.", 404);
+  }
+
+  if (
+    ["sent", "viewed", "approved", "changes_requested", "superseded", "cancelled"].includes(
+      data.status as string
+    )
+  ) {
+    throw new ProofError("This proof version can no longer be edited.", 409);
+  }
+
+  return data;
+}
+
+async function loadProofProductionItemIds(
+  adminClient: SupabaseClient,
+  proofId: string
+) {
+  const { data, error } = await adminClient
+    .from("job_proof_manifest_items")
+    .select("production_item_id")
+    .eq("proof_id", proofId);
+
+  if (error) {
+    throw new ProofError(error.message, 500);
+  }
+
+  const productionItemIds = (data ?? []).map(
+    (row) => row.production_item_id as string
+  );
+
+  if (!productionItemIds.length) {
+    throw new ProofError("This proof has no linked manifest items.", 400);
+  }
+
+  return productionItemIds;
 }
 
 async function loadQuotedSpecificationItems(
@@ -97,94 +140,52 @@ async function loadQuotedSpecificationItems(
   }));
 }
 
-async function resolveArtworkBuffer(
+async function loadProofAttachedArtwork(
   adminClient: SupabaseClient,
   jobId: string,
-  source: ArtworkSourceInput,
-  uploadBuffer?: Buffer
+  proofId: string
 ) {
-  if (source.type === "upload") {
-    if (!uploadBuffer) {
-      throw new ProofError("Uploaded file data is missing.", 400);
-    }
+  await loadMutableProofRecord(adminClient, jobId, proofId);
 
-    assertSupportedExtension(source.fileName);
-    assertAnalysisSize(uploadBuffer);
-
-    return {
-      buffer: uploadBuffer,
-      fileName: source.fileName,
-      mimeType: source.mimeType,
-      dropboxPath: null as string | null,
-      jobFileId: null as string | null,
-    };
-  }
-
-  if (source.type === "dropbox_path") {
-    assertSupportedExtension(source.fileName);
-    const downloaded = await downloadDropboxFile(source.dropboxPath);
-    assertAnalysisSize(downloaded.buffer);
-
-    return {
-      buffer: downloaded.buffer,
-      fileName: source.fileName || downloaded.fileName,
-      mimeType: downloaded.contentType,
-      dropboxPath: source.dropboxPath,
-      jobFileId: null as string | null,
-    };
-  }
-
-  const { data: jobFile, error } = await adminClient
-    .from("job_files")
-    .select("id, file_name, mime_type, dropbox_path")
-    .eq("job_id", jobId)
-    .eq("id", source.jobFileId)
+  const { data: proofFile, error } = await adminClient
+    .from("job_proof_files")
+    .select("job_file_id, dropbox_path, file_name, mime_type")
+    .eq("proof_id", proofId)
+    .limit(1)
     .maybeSingle();
 
-  if (error || !jobFile) {
-    throw new ProofError("Source artwork file was not found.", 404);
+  if (error) {
+    throw new ProofError(error.message, 500);
   }
 
-  const dropboxPath = jobFile.dropbox_path as string | null;
-  if (!dropboxPath) {
-    throw new ProofError("Source artwork is not available in Dropbox.", 409);
+  if (!proofFile?.dropbox_path) {
+    throw new ProofError("Attach proof artwork before generating a branded PDF.", 409);
   }
 
-  const fileName = jobFile.file_name as string;
+  const fileName = proofFile.file_name as string;
   assertSupportedExtension(fileName);
-  const downloaded = await downloadDropboxFile(dropboxPath);
+
+  const downloaded = await downloadDropboxFile(proofFile.dropbox_path as string);
   assertAnalysisSize(downloaded.buffer);
 
   return {
     buffer: downloaded.buffer,
     fileName,
-    mimeType: (jobFile.mime_type as string | null) ?? downloaded.contentType,
-    dropboxPath,
-    jobFileId: jobFile.id as string,
+    mimeType: (proofFile.mime_type as string | null) ?? downloaded.contentType,
+    dropboxPath: proofFile.dropbox_path as string,
+    jobFileId: (proofFile.job_file_id as string | null) ?? null,
   };
 }
 
-export async function analyseProofGeneratorArtwork(
+export async function analyseExistingProofArtwork(
   adminClient: SupabaseClient,
-  {
-    jobId,
-    productionItemIds,
-    source,
-    uploadBuffer,
-  }: {
-    jobId: string;
-    productionItemIds: string[];
-    source: ArtworkSourceInput;
-    uploadBuffer?: Buffer;
-  }
+  jobId: string,
+  proofId: string
 ): Promise<PreflightResult> {
-  if (!productionItemIds.length) {
-    throw new ProofError("Select at least one production item.", 400);
-  }
-
+  const productionItemIds = await loadProofProductionItemIds(adminClient, proofId);
   const [quotedItems, artwork] = await Promise.all([
     loadQuotedSpecificationItems(adminClient, jobId, productionItemIds),
-    resolveArtworkBuffer(adminClient, jobId, source, uploadBuffer),
+    loadProofAttachedArtwork(adminClient, jobId, proofId),
   ]);
 
   const extension = getFileExtension(artwork.fileName);
@@ -212,12 +213,14 @@ export async function saveProofPreflightRecord(
     preflight,
     manualOverrides,
     sourceDropboxPath,
+    sourceJobFileId,
     reviewedByProfileId,
   }: {
     proofId: string;
     preflight: PreflightResult;
     manualOverrides?: PreflightManualOverrides;
     sourceDropboxPath?: string | null;
+    sourceJobFileId?: string | null;
     reviewedByProfileId?: string | null;
   }
 ) {
@@ -235,6 +238,7 @@ export async function saveProofPreflightRecord(
       sizeComparison: preflight.sizeComparison,
       quotedItems: preflight.quotedItems,
       sourceReference: preflight.sourceReference,
+      sourceJobFileId: sourceJobFileId ?? null,
     },
     updated_at: new Date().toISOString(),
   };
@@ -254,71 +258,56 @@ export async function saveProofPreflightRecord(
   return { saved: true, schemaMissing: false as const };
 }
 
-export async function generateProofFromPreflight(
+export async function generateBrandedPdfForExistingProof(
   adminClient: SupabaseClient,
-  input: GenerateProofInput & {
-    actorProfileId: string;
-    sourceBuffer: Buffer;
-    sourceDropboxPath?: string | null;
-    sourceJobFileId?: string | null;
-  }
-) {
-  const {
+  {
     jobId,
+    proofId,
     actorProfileId,
-    productionItemIds,
-    title,
-    customerMessage,
-    internalNote,
-    artworkOrigin,
     preflightResult,
     manualOverrides,
-    sourceBuffer,
-    sourceDropboxPath,
-    sourceJobFileId,
-  } = input;
+  }: {
+    jobId: string;
+    proofId: string;
+    actorProfileId: string;
+    preflightResult: PreflightResult;
+    manualOverrides?: PreflightManualOverrides;
+  }
+) {
+  const proof = await loadMutableProofRecord(adminClient, jobId, proofId);
 
-  const { data: job } = await adminClient
+  const { data: job, error: jobError } = await adminClient
     .from("jobs")
     .select("company_id, quote_id, opportunity_id, job_reference, project_name")
     .eq("id", jobId)
     .maybeSingle();
 
+  if (jobError) {
+    throw new ProofError(jobError.message, 500);
+  }
+
   if (!job) {
     throw new ProofError("Job not found.", 404);
   }
 
-  const proof = await createJobProof(adminClient, {
-    jobId,
-    actorProfileId,
-    input: {
-      title,
-      artworkOrigin,
-      customerMessage,
-      internalNote,
-      productionItemIds,
-    },
-  });
+  const artwork = await loadProofAttachedArtwork(adminClient, jobId, proofId);
+  const sourceDropboxPath = artwork.dropboxPath;
+  const sourceJobFileId = artwork.jobFileId;
 
   const generatedPdf = await generateCustomerProofPdf({
     jobReference: job.job_reference as string,
     projectName: job.project_name as string,
-    proofReference: proof.proof_reference,
-    versionNumber: proof.version_number,
-    customerMessage,
+    proofReference: proof.proof_reference as string,
+    versionNumber: proof.version_number as number,
+    customerMessage: (proof.customer_message as string | null) ?? null,
     preflight: preflightResult,
-    sourceBuffer,
+    sourceBuffer: artwork.buffer,
   });
-
-  const generatedFileName = buildGeneratedProofFileName(
-    proof.proof_reference,
-    proof.version_number
-  );
 
   await uploadProofFileToProofsFolder(adminClient, {
     jobId,
-    proofId: proof.id,
-    fileName: generatedFileName,
+    proofId,
+    fileName: `${proof.proof_reference as string}-v${proof.version_number as number}.pdf`,
     mimeType: "application/pdf",
     fileBuffer: generatedPdf.buffer.slice(
       generatedPdf.byteOffset,
@@ -328,37 +317,34 @@ export async function generateProofFromPreflight(
   });
 
   await saveProofPreflightRecord(adminClient, {
-    proofId: proof.id,
+    proofId,
     preflight: preflightResult,
     manualOverrides,
     sourceDropboxPath,
+    sourceJobFileId,
     reviewedByProfileId: actorProfileId,
   });
 
-  if (job) {
-    await logProofActivity(adminClient, {
-      activityType: PROOF_ACTIVITY_TYPES.proofCreated,
-      description: `Generated proof ${proof.proof_reference} with automated preflight.`,
-      companyId: job.company_id as string,
-      quoteId: job.quote_id as string,
-      opportunityId: job.opportunity_id as string | null,
-      actorProfileId,
-      metadata: {
-        job_id: jobId,
-        proof_id: proof.id,
-        generator: true,
-        overall_status: preflightResult.overallStatus,
-      },
-    });
+  await logProofActivity(adminClient, {
+    activityType: PROOF_ACTIVITY_TYPES.proofBrandedPdfGenerated,
+    description: `Generated branded customer PDF for ${proof.proof_reference as string}.`,
+    companyId: job.company_id as string,
+    quoteId: job.quote_id as string,
+    opportunityId: job.opportunity_id as string | null,
+    actorProfileId,
+    metadata: {
+      job_id: jobId,
+      proof_id: proofId,
+      overall_status: preflightResult.overallStatus,
+      source_dropbox_path: sourceDropboxPath,
+    },
+  });
 
-    revalidateJobPages({
-      jobId,
-      quoteId: job.quote_id as string,
-      opportunityId: job.opportunity_id as string | null,
-    });
-  }
+  revalidateJobPages({
+    jobId,
+    quoteId: job.quote_id as string,
+    opportunityId: job.opportunity_id as string | null,
+  });
 
-  return proof;
+  return { proofId, proofReference: proof.proof_reference as string };
 }
-
-export { loadQuotedSpecificationItems, resolveArtworkBuffer as resolveArtworkBufferForGenerator };

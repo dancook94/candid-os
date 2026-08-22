@@ -1583,7 +1583,16 @@ async function loadMutableProof(
     throw new ProofError("Proof not found.", 404);
   }
 
-  if (["sent", "viewed", "approved", "superseded", "cancelled"].includes(data.status)) {
+  if (
+    [
+      "sent",
+      "viewed",
+      "approved",
+      "changes_requested",
+      "superseded",
+      "cancelled",
+    ].includes(data.status)
+  ) {
     throw new ProofError("This proof version can no longer be edited.", 409);
   }
 
