@@ -1,25 +1,69 @@
 -- Job proofing Phase 1: proofs, file links, manifest links, approval audit.
 -- Apply manually in Supabase (staging first). DO NOT run automatically.
 --
+-- Safe to re-run after a partial failure (uses IF NOT EXISTS / DROP IF EXISTS).
+-- Does NOT require 20260822110000_jobs_proof_required.sql — proof_required is
+-- created here if missing.
+--
 -- Prerequisites:
 --   supabase/migrations/20260802190000_jobs_foundation.sql
 --   supabase/migrations/20260803200000_production_manifest_invoice_foundation.sql
---   supabase/migrations/20260822110000_jobs_proof_required.sql
 
 BEGIN;
 
 -- ---------------------------------------------------------------------------
--- 1. Job-level proof workflow + bypass audit
+-- 1. Job-level proof requirement + workflow + bypass audit
 -- ---------------------------------------------------------------------------
 
+-- proof_required normally lives in 20260822110000; inline here so production
+-- schemas that skipped that migration still succeed.
 ALTER TABLE public.jobs
-  ADD COLUMN IF NOT EXISTS proof_workflow_status text NOT NULL DEFAULT 'no_proof',
+  ADD COLUMN IF NOT EXISTS proof_required boolean NOT NULL DEFAULT true;
+
+ALTER TABLE public.jobs
+  ADD COLUMN IF NOT EXISTS proof_workflow_status text,
   ADD COLUMN IF NOT EXISTS proof_approved_at timestamptz,
-  ADD COLUMN IF NOT EXISTS proof_approved_by_profile_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS proof_approved_by_profile_id uuid,
   ADD COLUMN IF NOT EXISTS proof_bypass_reason text,
-  ADD COLUMN IF NOT EXISTS proof_bypassed_by_profile_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS proof_bypassed_by_profile_id uuid,
   ADD COLUMN IF NOT EXISTS proof_bypassed_at timestamptz,
   ADD COLUMN IF NOT EXISTS current_proof_id uuid;
+
+-- Backfill defaults for columns added without NOT NULL (safe on re-run).
+UPDATE public.jobs
+SET proof_workflow_status = 'no_proof'
+WHERE proof_workflow_status IS NULL;
+
+ALTER TABLE public.jobs
+  ALTER COLUMN proof_workflow_status SET DEFAULT 'no_proof',
+  ALTER COLUMN proof_workflow_status SET NOT NULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'jobs_proof_approved_by_profile_id_fkey'
+      AND conrelid = 'public.jobs'::regclass
+  ) THEN
+    ALTER TABLE public.jobs
+      ADD CONSTRAINT jobs_proof_approved_by_profile_id_fkey
+      FOREIGN KEY (proof_approved_by_profile_id)
+      REFERENCES public.profiles(id) ON DELETE SET NULL;
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conname = 'jobs_proof_bypassed_by_profile_id_fkey'
+      AND conrelid = 'public.jobs'::regclass
+  ) THEN
+    ALTER TABLE public.jobs
+      ADD CONSTRAINT jobs_proof_bypassed_by_profile_id_fkey
+      FOREIGN KEY (proof_bypassed_by_profile_id)
+      REFERENCES public.profiles(id) ON DELETE SET NULL;
+  END IF;
+END $$;
 
 ALTER TABLE public.jobs DROP CONSTRAINT IF EXISTS jobs_proof_workflow_status_check;
 ALTER TABLE public.jobs ADD CONSTRAINT jobs_proof_workflow_status_check CHECK (
@@ -35,6 +79,8 @@ ALTER TABLE public.jobs ADD CONSTRAINT jobs_proof_workflow_status_check CHECK (
   )
 );
 
+COMMENT ON COLUMN public.jobs.proof_required IS
+  'When true, customer proof approval gates Ready-to-Print.';
 COMMENT ON COLUMN public.jobs.proof_workflow_status IS
   'Customer-facing proof workflow state for Ready-to-Print gating.';
 
@@ -77,7 +123,7 @@ CREATE TABLE IF NOT EXISTS public.job_proofs (
   viewed_at               timestamptz,
   approved_at             timestamptz,
   approved_by_profile_id  uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
-  changes_requested_at  timestamptz,
+  changes_requested_at    timestamptz,
   changes_requested_comment text,
   changes_requested_by_profile_id uuid REFERENCES public.profiles(id) ON DELETE SET NULL,
   superseded_at           timestamptz,
@@ -208,7 +254,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS job_proof_preflight_proof_idx
   ON public.job_proof_preflight (proof_id);
 
 -- ---------------------------------------------------------------------------
--- 9. FK from jobs.current_proof_id
+-- 9. FK from jobs.current_proof_id (after job_proofs exists)
 -- ---------------------------------------------------------------------------
 
 ALTER TABLE public.jobs DROP CONSTRAINT IF EXISTS jobs_current_proof_fk;
@@ -216,11 +262,18 @@ ALTER TABLE public.jobs
   ADD CONSTRAINT jobs_current_proof_fk
   FOREIGN KEY (current_proof_id) REFERENCES public.job_proofs(id) ON DELETE SET NULL;
 
--- Sync proof_not_required jobs
+-- ---------------------------------------------------------------------------
+-- 10. Data backfill (only after proof_required + proof_workflow_status exist)
+-- ---------------------------------------------------------------------------
+
 UPDATE public.jobs
 SET proof_workflow_status = 'not_required'
 WHERE proof_required = false
   AND proof_workflow_status = 'no_proof';
+
+-- ---------------------------------------------------------------------------
+-- 11. RLS (tables must exist first; enable is safe to re-run)
+-- ---------------------------------------------------------------------------
 
 ALTER TABLE public.job_proofs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.job_proof_files ENABLE ROW LEVEL SECURITY;
