@@ -12,7 +12,10 @@ import {
 import { createCompanyLogoSignedUrl } from "@/lib/company-logos";
 import { fetchCompany360 } from "@/lib/crm/company-360";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
+import { canApproveCustomers } from "@/lib/admin-auth";
+import { fetchCompanyApprovedPortalUsers } from "@/lib/admin/customer-portal-profile";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -103,7 +106,7 @@ export default async function CompanyDetailPage({
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [logoPreviewUrl, crmData] = await Promise.all([
+  const [logoPreviewUrl, crmData, portalUsersResult] = await Promise.all([
     companyRecord.logo_storage_path
       ? createCompanyLogoSignedUrl(
           supabase,
@@ -114,6 +117,9 @@ export default async function CompanyDetailPage({
       currentUserId: user?.id,
       isAdmin: ["super_admin", "admin"].includes(profile.user_role),
     }),
+    canApproveCustomers(profile)
+      ? fetchCompanyApprovedPortalUsers(createAdminClient(), companyRecord.id)
+      : Promise.resolve({ users: [], queryError: null }),
   ]);
 
   return (
@@ -139,6 +145,9 @@ export default async function CompanyDetailPage({
             },
           }}
           data={crmData}
+          portalUsers={portalUsersResult.users}
+          portalUsersQueryError={portalUsersResult.queryError}
+          canResendAccountReadyEmail={canApproveCustomers(profile)}
         />
       </div>
     </AppShell>

@@ -6,6 +6,7 @@ import { useState } from "react";
 import { CompanyLogoDisplay } from "@/components/company-logo-display";
 import { CompanyLogoForm } from "@/components/company-logo-form";
 import { CompanyPaymentTermsForm } from "@/components/company-payment-terms-form";
+import { CompanyPortalUsersSection } from "@/components/crm/company-portal-users-section";
 import { EmptyState } from "@/components/empty-state";
 import { ContactsTable } from "@/components/crm/contacts-table";
 import { NewContactButton } from "@/components/crm/contact-form-dialog";
@@ -32,6 +33,7 @@ import { formatCrmDate, formatCrmDateTime } from "@/lib/crm/format-datetime";
 import type { OpportunityListRow } from "@/lib/crm/opportunities-list";
 import { formatGbp } from "@/lib/format-currency";
 import { formatPaymentTermsLabel } from "@/lib/payment-terms";
+import type { CompanyPortalUser } from "@/lib/admin/customer-portal-profile";
 import { cn } from "@/lib/utils";
 
 type Company360Tab =
@@ -64,6 +66,9 @@ type Company360Company = {
 type Company360ViewProps = {
   company: Company360Company;
   data: Company360Data;
+  portalUsers?: CompanyPortalUser[];
+  portalUsersQueryError?: string | null;
+  canResendAccountReadyEmail?: boolean;
 };
 
 const tabs: { id: Company360Tab; label: string }[] = [
@@ -644,7 +649,13 @@ function CompanyDetailsSection({ company }: { company: Company360Company }) {
   );
 }
 
-export function Company360View({ company, data }: Company360ViewProps) {
+export function Company360View({
+  company,
+  data,
+  portalUsers = [],
+  portalUsersQueryError = null,
+  canResendAccountReadyEmail = false,
+}: Company360ViewProps) {
   const [activeTab, setActiveTab] = useState<Company360Tab>("overview");
 
   return (
@@ -751,6 +762,27 @@ export function Company360View({ company, data }: Company360ViewProps) {
             companyId={company.id}
             summary={data.summary}
           />
+
+          {canResendAccountReadyEmail ? (
+            portalUsersQueryError ? (
+              <Card className="portal-surface border-red-200 bg-red-50">
+                <CardContent className="pt-6">
+                  <p className="text-sm font-medium text-red-800">
+                    Portal users could not be loaded
+                  </p>
+                  <p className="mt-2 text-sm text-red-700">
+                    {portalUsersQueryError}
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <CompanyPortalUsersSection
+                users={portalUsers}
+                canResendAccountReadyEmail={canResendAccountReadyEmail}
+              />
+            )
+          ) : null}
+
           <OpportunitiesTable
             companyId={company.id}
             opportunities={data.opportunities.slice(0, 5)}
@@ -800,11 +832,20 @@ export function Company360View({ company, data }: Company360ViewProps) {
       ) : null}
 
       {activeTab === "contacts" ? (
-        <CompanyContactsSection
-          contacts={data.contacts}
-          companyId={company.id}
-          companyName={company.company_name}
-        />
+        <div className="space-y-6">
+          {canResendAccountReadyEmail && !portalUsersQueryError ? (
+            <CompanyPortalUsersSection
+              users={portalUsers}
+              canResendAccountReadyEmail={canResendAccountReadyEmail}
+            />
+          ) : null}
+
+          <CompanyContactsSection
+            contacts={data.contacts}
+            companyId={company.id}
+            companyName={company.company_name}
+          />
+        </div>
       ) : null}
 
       {activeTab === "activity" ? (
