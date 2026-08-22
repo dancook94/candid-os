@@ -1,6 +1,6 @@
 import { Resend } from "resend";
 
-import { getResendConfigStatus, getResendFromAddress } from "@/lib/notifications/config";
+import { getResendConfigStatus } from "@/lib/notifications/config";
 import { applyEmailModeRedirect } from "@/lib/notifications/email-mode";
 import { getFromHeader, getPlainTextFromHtml } from "@/lib/notifications/templates";
 
@@ -137,8 +137,6 @@ export async function sendEmailThroughResend(
     };
   }
 
-  const { fromEmail } = getResendFromAddress();
-
   try {
     const response = await client.emails.send({
       from: getFromHeader(),
@@ -146,7 +144,6 @@ export async function sendEmailThroughResend(
       subject: redirect.subject,
       html: input.html,
       text: getPlainTextFromHtml(input.html),
-      replyTo: fromEmail,
     });
 
     if (response.error) {

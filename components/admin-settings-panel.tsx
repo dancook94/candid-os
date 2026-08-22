@@ -44,7 +44,7 @@ const tabs: { id: SettingsTab; label: string }[] = [
   { id: "company", label: "Company" },
   { id: "quotes", label: "Quote defaults" },
   { id: "branding", label: "Branding" },
-  { id: "email", label: "Email" },
+  { id: "email", label: "Email & notifications" },
   { id: "customers", label: "Customer defaults" },
   { id: "security", label: "Security" },
 ];
@@ -126,6 +126,12 @@ export function AdminSettingsPanel({
   const [companyState, setCompanyState] = useState({ loading: false, error: "", success: "" });
   const [quoteState, setQuoteState] = useState({ loading: false, error: "", success: "" });
   const [customerState, setCustomerState] = useState({ loading: false, error: "", success: "" });
+  const [emailTestState, setEmailTestState] = useState({
+    loading: false,
+    error: "",
+    success: "",
+    recipientEmail: "",
+  });
 
   async function saveSection(
     endpoint: string,
@@ -200,6 +206,55 @@ export function AdminSettingsPanel({
       },
       setQuoteState
     );
+  }
+
+  async function handleEmailTestSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setEmailTestState((current) => ({
+      ...current,
+      loading: true,
+      error: "",
+      success: "",
+    }));
+
+    try {
+      const response = await fetch("/api/admin/settings/email/test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ recipientEmail: emailTestState.recipientEmail }),
+      });
+      const payload = (await response.json()) as {
+        error?: string;
+        message?: string;
+        providerMessageId?: string | null;
+        ok?: boolean;
+      };
+
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Unable to send test email.");
+      }
+
+      const message = [
+        payload.message ?? "Test email sent successfully.",
+        payload.providerMessageId ? `Resend ID: ${payload.providerMessageId}` : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
+
+      setEmailTestState((current) => ({
+        ...current,
+        loading: false,
+        success: message,
+        error: "",
+      }));
+    } catch (error) {
+      setEmailTestState((current) => ({
+        ...current,
+        loading: false,
+        error: error instanceof Error ? error.message : "Unable to send test email.",
+        success: "",
+      }));
+    }
   }
 
   async function handleCustomerSubmit(event: FormEvent<HTMLFormElement>) {
@@ -675,9 +730,9 @@ export function AdminSettingsPanel({
         <div className="space-y-6">
           <Card className="portal-surface overflow-hidden rounded-2xl shadow-sm ring-0">
             <CardHeader className="border-b border-border">
-              <CardTitle className="text-lg font-semibold">Email settings</CardTitle>
+              <CardTitle className="text-lg font-semibold">Email &amp; notifications</CardTitle>
               <CardDescription>
-                Environment configuration for quotation email delivery. Secret values are never shown.
+                Configure and test email notifications sent by Candid OS. Secret values are never shown.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 pt-6">
@@ -697,18 +752,55 @@ export function AdminSettingsPanel({
               </div>
 
               <div className="rounded-xl border border-border p-4">
-                <p className="text-sm font-medium text-foreground">Quotation sender address</p>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {emailConfig.senderAddress}
-                </p>
+                <p className="text-sm font-medium text-foreground">System sender</p>
+                <p className="mt-2 text-sm text-muted-foreground">{emailConfig.systemSender}</p>
               </div>
 
               <div className="rounded-xl border border-border p-4">
-                <p className="text-sm font-medium text-foreground">Reply-to address</p>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  {emailConfig.replyToAddress}
+                <p className="text-sm font-medium text-foreground">Email mode</p>
+                <p className="mt-2 text-sm capitalize text-muted-foreground">
+                  {emailConfig.emailMode}
+                  {emailConfig.developmentSafetyActive
+                    ? " — development safety active"
+                    : ""}
                 </p>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card className="portal-surface overflow-hidden rounded-2xl shadow-sm ring-0">
+            <CardHeader className="border-b border-border">
+              <CardTitle className="text-lg font-semibold">Send test email</CardTitle>
+              <CardDescription>
+                Send a branded connectivity test through the configured Resend integration.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 pt-6">
+              <SectionMessage
+                error={emailTestState.error}
+                success={emailTestState.success}
+              />
+              <form className="space-y-4" onSubmit={handleEmailTestSubmit}>
+                <div className="space-y-2 max-w-md">
+                  <Label htmlFor="email-test-recipient">Recipient email address</Label>
+                  <Input
+                    id="email-test-recipient"
+                    type="email"
+                    value={emailTestState.recipientEmail}
+                    onChange={(event) =>
+                      setEmailTestState((current) => ({
+                        ...current,
+                        recipientEmail: event.target.value,
+                      }))
+                    }
+                    placeholder="you@example.com"
+                    disabled={!canEdit || emailTestState.loading}
+                  />
+                </div>
+                <Button type="submit" disabled={!canEdit || emailTestState.loading}>
+                  {emailTestState.loading ? "Sending…" : "Send test email"}
+                </Button>
+              </form>
             </CardContent>
           </Card>
 

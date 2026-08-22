@@ -303,6 +303,19 @@ export function renderNotificationEmail(
   }
 }
 
+export function renderSystemTestEmailHtml() {
+  return renderEmailShell({
+    preheader: "Your Candid OS email notifications are configured correctly.",
+    headline: "Candid OS email test",
+    bodyParagraphs: [
+      "Your Candid OS email notifications are configured correctly.",
+      "This test confirms that Candid OS can successfully send email notifications through Resend.",
+    ],
+  });
+}
+
+export const SYSTEM_TEST_EMAIL_SUBJECT = "Candid OS email test";
+
 export function getPlainTextFromHtml(html: string) {
   return html
     .replace(/<style[\s\S]*?<\/style>/gi, "")

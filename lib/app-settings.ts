@@ -57,20 +57,37 @@ export const FALLBACK_APP_SETTINGS: AppSettings = {
 export type EmailConfigStatus = {
   resendConfigured: boolean;
   appUrlConfigured: boolean;
-  senderAddress: string;
-  replyToAddress: string;
+  systemSender: string;
+  emailMode: string;
+  developmentSafetyActive: boolean;
 };
 
-export function getEmailConfigStatus(settings: AppSettings): EmailConfigStatus {
-  const senderAddress =
-    settings.quote_email_sender_address ??
-    FALLBACK_APP_SETTINGS.quote_email_sender_address!;
+function getSystemSenderAddress() {
+  const fromEmail =
+    process.env.RESEND_FROM_EMAIL?.trim() ||
+    process.env.RESEND_FROM?.trim() ||
+    "notifications@candidcreative.uk";
+  const fromName = process.env.RESEND_FROM_NAME?.trim() || "Candid Creative";
+  return `${fromName} <${fromEmail}>`;
+}
+
+function resolveEmailModeLabel() {
+  const explicit = process.env.EMAIL_MODE?.trim().toLowerCase();
+  if (explicit === "disabled" || explicit === "test" || explicit === "live") {
+    return explicit;
+  }
+  return process.env.NODE_ENV === "production" ? "live" : "test";
+}
+
+export function getEmailConfigStatus(_settings?: AppSettings): EmailConfigStatus {
+  const emailMode = resolveEmailModeLabel();
 
   return {
-    resendConfigured: Boolean(process.env.RESEND_API_KEY),
-    appUrlConfigured: Boolean(process.env.NEXT_PUBLIC_APP_URL),
-    senderAddress,
-    replyToAddress: settings.accounts_email ?? FALLBACK_APP_SETTINGS.accounts_email!,
+    resendConfigured: Boolean(process.env.RESEND_API_KEY?.trim()),
+    appUrlConfigured: Boolean(process.env.NEXT_PUBLIC_APP_URL?.trim()),
+    systemSender: getSystemSenderAddress(),
+    emailMode,
+    developmentSafetyActive: emailMode !== "live",
   };
 }
 
