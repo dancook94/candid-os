@@ -6,6 +6,7 @@ const PUBLIC_AUTH_PATHS = [
   "/register",
   "/forgot-password",
   "/auth/callback",
+  "/auth/error",
   "/set-password",
 ];
 

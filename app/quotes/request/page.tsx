@@ -19,6 +19,7 @@ import {
   buildCustomerAppShellProps,
   loadCustomerPortalProfile,
 } from "@/lib/customer-shell-props";
+import { CUSTOMER_AWAITING_APPROVAL_PATH, isPendingCustomer } from "@/lib/customer-portal-access";
 import { loadAppSettings } from "@/lib/app-settings-server";
 
 export default async function QuoteRequestPage() {
@@ -36,6 +37,10 @@ export default async function QuoteRequestPage() {
     loadCustomerPortalProfile(supabase, user.id),
     loadAppSettings(supabase),
   ]);
+
+  if (isPendingCustomer(profile)) {
+    redirect(CUSTOMER_AWAITING_APPROVAL_PATH);
+  }
 
   const shellProps = await buildCustomerAppShellProps(supabase, user, profile);
 

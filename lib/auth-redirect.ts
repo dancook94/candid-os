@@ -3,7 +3,8 @@ import {
   isLimitedStaffRole,
 } from "@/lib/staff-roles";
 import type { PortalProfile } from "@/lib/portal-access";
-import { resolveApprovedRoleHomePath } from "@/lib/portal-access";
+import { isCustomerRole, resolveApprovedRoleHomePath } from "@/lib/portal-access";
+import { CUSTOMER_AWAITING_APPROVAL_PATH } from "@/lib/customer-portal-access";
 
 export type ProfileRedirectInfo = PortalProfile;
 
@@ -63,6 +64,19 @@ export function resolvePostLoginPath(
       }
 
       return "/staff";
+    }
+  }
+
+  if (
+    isCustomerRole(profile.user_role) &&
+    profile.account_status === "pending"
+  ) {
+    if (
+      safeNext === CUSTOMER_AWAITING_APPROVAL_PATH ||
+      !safeNext ||
+      safeNext === "/dashboard"
+    ) {
+      return CUSTOMER_AWAITING_APPROVAL_PATH;
     }
   }
 

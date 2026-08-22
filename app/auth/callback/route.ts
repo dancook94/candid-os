@@ -2,15 +2,19 @@ import { NextResponse } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 
 import {
+  inferAuthCallbackFlowFromProfile,
+  resolveAuthCallbackDestination,
+  resolveAuthCallbackFlow,
+  resolveAuthCallbackFlowLabel,
+  sanitizeCallbackNext,
+} from "@/lib/auth-callback-flow";
+import {
   AUTH_CALLBACK_ERRORS,
+  buildAuthErrorPagePath,
   mapAuthCallbackFailure,
   parseCallbackEmailOtpType,
+  type AuthCallbackErrorFlow,
 } from "@/lib/auth-invite-redirect";
-import {
-  resolveInviteCallbackNextPath,
-  resolvePostLoginPath,
-  sanitizeNextPath,
-} from "@/lib/auth-redirect";
 import { notifyCustomerRegistrationSafe } from "@/lib/notifications/triggers";
 import { createRouteHandlerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -37,17 +41,15 @@ function redirectWithCookies(url: URL, cookieSource: NextResponse) {
   return response;
 }
 
-function loginErrorRedirect(
+function authErrorRedirect(
   origin: string,
   errorCode: string,
-  message?: string | null
+  flow: AuthCallbackErrorFlow = "general"
 ) {
-  const url = new URL("/login", origin);
-  url.searchParams.set("error", errorCode);
-
-  if (message) {
-    url.searchParams.set("message", message);
-  }
+  const url = new URL(
+    buildAuthErrorPagePath(errorCode as (typeof AUTH_CALLBACK_ERRORS)[keyof typeof AUTH_CALLBACK_ERRORS], flow),
+    origin
+  );
 
   return NextResponse.redirect(url);
 }
@@ -60,14 +62,17 @@ export async function GET(request: Request) {
   const next = requestUrl.searchParams.get("next");
   const authError = requestUrl.searchParams.get("error");
   const authErrorDescription = requestUrl.searchParams.get("error_description");
-  const safeNext = resolveInviteCallbackNextPath(next);
+  const safeNext = sanitizeCallbackNext(next);
   const otpType = parseCallbackEmailOtpType(typeParam);
+  let flow = resolveAuthCallbackFlow({ safeNext, otpType });
+  const flowLabel = resolveAuthCallbackFlowLabel(flow) as AuthCallbackErrorFlow;
 
   logAuthCallback("Auth callback received", {
     hasCode: Boolean(code),
     hasTokenHash: Boolean(tokenHash),
     type: typeParam,
     safeNext,
+    flow,
     hasAuthError: Boolean(authError),
     authError,
     authErrorDescription,
@@ -81,48 +86,43 @@ export async function GET(request: Request) {
 
     const description = authErrorDescription?.toLowerCase() ?? "";
     const errorCode = description.includes("expired")
-      ? AUTH_CALLBACK_ERRORS.invitationExpired
-      : AUTH_CALLBACK_ERRORS.inviteAuthError;
+      ? AUTH_CALLBACK_ERRORS.confirmationExpired
+      : AUTH_CALLBACK_ERRORS.callbackFailed;
 
-    return loginErrorRedirect(
-      requestUrl.origin,
-      errorCode,
-      authErrorDescription
-    );
+    return authErrorRedirect(requestUrl.origin, errorCode, flowLabel);
   }
 
   if (!code && !tokenHash) {
-    logAuthCallback("No auth code or token hash present; redirecting to login");
+    logAuthCallback("No auth code or token hash present; redirecting to auth error");
 
-    return loginErrorRedirect(
+    return authErrorRedirect(
       requestUrl.origin,
-      AUTH_CALLBACK_ERRORS.missingInvitationCode
+      AUTH_CALLBACK_ERRORS.missingAuthCode,
+      flowLabel
     );
   }
 
   if (tokenHash && typeParam && !otpType) {
     logAuthCallback("Unsupported OTP type", { type: typeParam });
 
-    return loginErrorRedirect(
+    return authErrorRedirect(
       requestUrl.origin,
-      AUTH_CALLBACK_ERRORS.invitationExchangeFailed,
-      "This sign-in link uses an unsupported verification type."
+      AUTH_CALLBACK_ERRORS.confirmationInvalid,
+      flowLabel
     );
   }
 
   if (tokenHash && !otpType) {
     logAuthCallback("Token hash present without a supported type");
 
-    return loginErrorRedirect(
+    return authErrorRedirect(
       requestUrl.origin,
-      AUTH_CALLBACK_ERRORS.missingInvitationCode,
-      "This sign-in link is missing a verification type."
+      AUTH_CALLBACK_ERRORS.missingAuthCode,
+      flowLabel
     );
   }
 
-  const cookieResponse = NextResponse.redirect(
-    new URL(safeNext, requestUrl.origin)
-  );
+  const cookieResponse = NextResponse.redirect(new URL("/", requestUrl.origin));
   const supabase = await createRouteHandlerClient(cookieResponse);
 
   let verificationError: { message?: string; code?: string } | null = null;
@@ -138,9 +138,10 @@ export async function GET(request: Request) {
         status: error.status,
         name: error.name,
         safeNext,
+        flow,
       });
     } else {
-      logAuthCallback("exchangeCodeForSession succeeded", { safeNext });
+      logAuthCallback("exchangeCodeForSession succeeded", { safeNext, flow });
     }
   } else if (tokenHash && otpType) {
     const { error } = await supabase.auth.verifyOtp({
@@ -157,20 +158,22 @@ export async function GET(request: Request) {
         name: error.name,
         type: otpType,
         safeNext,
+        flow,
       });
     } else {
       logAuthCallback("verifyOtp succeeded", {
         type: otpType,
         safeNext,
+        flow,
       });
     }
   }
 
   if (verificationError) {
-    return loginErrorRedirect(
+    return authErrorRedirect(
       requestUrl.origin,
       mapAuthCallbackFailure(verificationError),
-      verificationError.message
+      flowLabel
     );
   }
 
@@ -180,46 +183,67 @@ export async function GET(request: Request) {
 
   logAuthCallback("Session established", {
     safeNext,
+    flow,
     hasAuthenticatedUser: Boolean(user),
     usedCode: Boolean(code),
     usedTokenHash: Boolean(tokenHash),
     type: otpType,
   });
 
-  let destination = safeNext;
-
-  if (user && safeNext !== "/set-password") {
-    const { data: profile, error: profileError } = await supabase
-      .from("profiles")
-      .select("account_status, user_role")
-      .eq("id", user.id)
-      .single();
-
-    if (profileError) {
-      logAuthCallback("Profile lookup failed after auth callback", {
-        message: profileError.message,
-        code: profileError.code,
-      });
-
-      return loginErrorRedirect(
-        requestUrl.origin,
-        AUTH_CALLBACK_ERRORS.invitationExchangeFailed,
-        profileError.message
-      );
-    }
-
-    destination = resolvePostLoginPath(profile, sanitizeNextPath(next));
-
-    const isRegistrationVerification = otpType === "signup" || otpType === "email";
-
-    if (
-      profile.user_role === "customer" &&
-      isRegistrationVerification
-    ) {
-      const adminClient = createAdminClient();
-      void notifyCustomerRegistrationSafe(adminClient, user.id);
-    }
+  if (!user) {
+    return authErrorRedirect(
+      requestUrl.origin,
+      AUTH_CALLBACK_ERRORS.callbackFailed,
+      flowLabel
+    );
   }
+
+  const { data: profile, error: profileError } = await supabase
+    .from("profiles")
+    .select("account_status, user_role")
+    .eq("id", user.id)
+    .single();
+
+  if (profileError) {
+    logAuthCallback("Profile lookup failed after auth callback", {
+      message: profileError.message,
+      code: profileError.code,
+    });
+
+    return authErrorRedirect(
+      requestUrl.origin,
+      AUTH_CALLBACK_ERRORS.callbackFailed,
+      flowLabel
+    );
+  }
+
+  if (flow === "unknown") {
+    flow = inferAuthCallbackFlowFromProfile({
+      profile,
+      otpType,
+      usedCodeExchange: Boolean(code),
+      safeNext,
+    });
+  }
+
+  const resolvedFlowLabel = resolveAuthCallbackFlowLabel(flow) as AuthCallbackErrorFlow;
+  const destination = resolveAuthCallbackDestination({
+    flow,
+    profile,
+    safeNext,
+  });
+
+  if (flow === "registration_confirm" && profile.user_role === "customer") {
+    const adminClient = createAdminClient();
+    void notifyCustomerRegistrationSafe(adminClient, user.id);
+  }
+
+  logAuthCallback("Redirecting after auth callback", {
+    flow,
+    destination,
+    accountStatus: profile.account_status,
+    userRole: profile.user_role,
+  });
 
   return redirectWithCookies(new URL(destination, requestUrl.origin), cookieResponse);
 }

@@ -19,7 +19,6 @@ export default function LoginForm() {
 
   const next = searchParams.get("next");
   const callbackErrorCode = searchParams.get("error");
-  const callbackErrorMessage = searchParams.get("message");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -27,15 +26,12 @@ export default function LoginForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    const knownError =
-      getAuthCallbackErrorMessage(callbackErrorCode) ??
-      callbackErrorMessage?.trim() ??
-      "";
+    const knownError = getAuthCallbackErrorMessage(callbackErrorCode) ?? "";
 
     if (knownError) {
       setError(knownError);
     }
-  }, [callbackErrorCode, callbackErrorMessage]);
+  }, [callbackErrorCode]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

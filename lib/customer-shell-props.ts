@@ -1,6 +1,7 @@
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 
 import { getDashboardRoleRedirect } from "@/lib/auth-redirect";
+import { CUSTOMER_AWAITING_APPROVAL_PATH, isPendingCustomer } from "@/lib/customer-portal-access";
 import { loadCustomerCompanyBranding } from "@/lib/customer-company-branding";
 import { loadCustomerSettingsProfile } from "@/lib/customer-settings/queries";
 import { getCustomerPortalStatusSubtitle } from "@/lib/customer-portal-status";
@@ -53,6 +54,10 @@ export async function requireCustomerPortalUser(
 
   if (profile.user_role !== "customer") {
     redirectFn("/login");
+  }
+
+  if (isPendingCustomer(profile)) {
+    redirectFn(CUSTOMER_AWAITING_APPROVAL_PATH);
   }
 
   return profile;

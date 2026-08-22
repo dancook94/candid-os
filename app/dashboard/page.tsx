@@ -21,6 +21,7 @@ import {
   loadCustomerPortalProfile,
   resolveCustomerDisplayName,
 } from "@/lib/customer-shell-props";
+import { CUSTOMER_AWAITING_APPROVAL_PATH, isPendingCustomer } from "@/lib/customer-portal-access";
 import {
   getCustomerAccountStatusBadge,
   getCustomerAccountStatusDescription,
@@ -58,6 +59,10 @@ export default async function DashboardPage() {
   }
 
   const profile = await loadCustomerPortalProfile(supabase, user.id);
+
+  if (isPendingCustomer(profile)) {
+    redirect(CUSTOMER_AWAITING_APPROVAL_PATH);
+  }
 
   if (profile) {
     const roleRedirect = getDashboardRoleRedirect(profile);

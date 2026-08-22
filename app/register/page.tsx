@@ -8,6 +8,7 @@ import { AuthPageLayout } from "@/components/auth-page-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { buildRegistrationConfirmRedirect } from "@/lib/auth-invite-redirect";
 import { createClient } from "@/lib/supabase/client";
 
 export default function RegisterPage() {
@@ -38,7 +39,7 @@ export default function RegisterPage() {
           full_name: fullName,
           company_name: companyName,
         },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: buildRegistrationConfirmRedirect(window.location.origin),
       },
     });
 
@@ -53,7 +54,7 @@ export default function RegisterPage() {
       await fetch("/api/notifications/customer-registered", {
         method: "POST",
       });
-      router.push("/dashboard");
+      router.push("/register/confirmed");
       router.refresh();
       return;
     }

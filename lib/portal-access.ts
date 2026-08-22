@@ -1,5 +1,6 @@
 import type { PostgrestError } from "@supabase/supabase-js";
 
+import { CUSTOMER_AWAITING_APPROVAL_PATH } from "@/lib/customer-portal-access";
 import {
   ADMIN_ROLES,
   isAdminRole,
@@ -30,6 +31,10 @@ export function isCustomerRole(role: string) {
 
 export function resolveApprovedRoleHomePath(profile: PortalProfile) {
   if (profile.account_status !== "approved") {
+    if (isCustomerRole(profile.user_role)) {
+      return CUSTOMER_AWAITING_APPROVAL_PATH;
+    }
+
     return "/dashboard";
   }
 

@@ -62,7 +62,7 @@ export default async function CustomerSettingsPage() {
     );
   } catch (error) {
     if (error instanceof CustomerSettingsError && error.status === 403) {
-      redirect("/dashboard");
+      redirect("/register/confirmed");
     }
 
     const profile = await loadCustomerPortalProfile(supabase, user.id);
