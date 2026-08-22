@@ -22,7 +22,9 @@ import { getCrmNotes, getCrmTimeline } from "@/lib/crm/get-crm-timeline";
 import { formatCrmDateTime } from "@/lib/crm/format-datetime";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { canApproveCustomers } from "@/lib/admin-auth";
+import { fetchCustomerPortalProfileById } from "@/lib/admin/customer-portal-profile";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -55,6 +57,21 @@ export default async function ContactDetailPage({
 
   const isAdmin = ["super_admin", "admin"].includes(profile.user_role);
   const canResendAccountReady = canApproveCustomers(profile);
+
+  const portalProfile =
+    contact?.profile_id && canResendAccountReady
+      ? await fetchCustomerPortalProfileById(createAdminClient(), contact.profile_id)
+      : null;
+
+  const showResendAccountReadyEmail =
+    canResendAccountReady &&
+    Boolean(contact?.profile_id) &&
+    (portalProfile?.account_status === "approved" ||
+      contact?.profile_account_status === "approved");
+
+  const resendAccountReadyProfileId =
+    showResendAccountReadyEmail && contact?.profile_id ? contact.profile_id : null;
+
   const notesAndActivity =
     contact && user ?
       await Promise.all([
@@ -131,8 +148,12 @@ export default async function ContactDetailPage({
           }
         />
 
-        <div className="mb-6 flex flex-wrap gap-2">
-          <ContactDetailActions contact={contact} />
+        <div className="mb-6 flex flex-wrap items-start gap-2">
+          <ContactDetailActions
+            contact={contact}
+            showResendAccountReadyEmail={showResendAccountReadyEmail}
+            resendAccountReadyProfileId={resendAccountReadyProfileId}
+          />
         </div>
 
         <div className="grid gap-6">
@@ -235,19 +256,22 @@ export default async function ContactDetailPage({
                   <div>
                     <dt className="portal-field-label">Account status</dt>
                     <dd className="portal-detail-value">
-                      {contact.profile_account_status || "—"}
+                      {portalProfile?.account_status ||
+                        contact.profile_account_status ||
+                        "—"}
                     </dd>
                   </div>
                 </dl>
 
-                {canResendAccountReady &&
-                contact.profile_account_status === "approved" ? (
+                {showResendAccountReadyEmail && resendAccountReadyProfileId ? (
                   <div className="mt-6 border-t border-border pt-6">
                     <p className="mb-3 text-sm text-muted-foreground">
                       Send the account-ready email again for testing or if the
                       customer did not receive it.
                     </p>
-                    <ResendAccountReadyButton profileId={contact.profile_id} />
+                    <ResendAccountReadyButton
+                      profileId={resendAccountReadyProfileId}
+                    />
                   </div>
                 ) : null}
               </CardContent>

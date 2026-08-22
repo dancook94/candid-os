@@ -10,6 +10,7 @@ import { AppShell } from "@/components/app-shell";
 import { ApproveCustomer } from "@/components/approve-customer";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { ResendAccountReadyButton } from "@/components/resend-account-ready-button";
 import { StatCard } from "@/components/stat-card";
 import {
   Card,
@@ -23,7 +24,9 @@ import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { fetchAdminDashboardCrm } from "@/lib/crm/admin-dashboard";
 import { canApproveCustomers } from "@/lib/admin-auth";
+import { fetchApprovedCustomerPortalProfiles } from "@/lib/admin/customer-portal-profile";
 import { isCrmRole } from "@/lib/staff-roles";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -64,6 +67,12 @@ export default async function AdminPage() {
 
   const shellProps = await buildAdminAppShellProps(supabase, profile);
   const canApprovePendingCustomers = canApproveCustomers(profile);
+
+  const approvedPortalCustomers =
+    canApprovePendingCustomers
+      ? await fetchApprovedCustomerPortalProfiles(createAdminClient())
+      : { profiles: [], queryError: null };
+
   const dashboardErrors = [
     ...quoteMetrics.errors,
     ...jobMetrics.errors,
@@ -189,6 +198,56 @@ export default async function AdminPage() {
             )}
           </CardContent>
         </Card>
+
+        {canApprovePendingCustomers ? (
+          <Card className="portal-surface mt-6 overflow-hidden">
+            <CardHeader className="border-b border-border">
+              <CardTitle className="text-lg font-semibold">
+                Approved portal customers
+              </CardTitle>
+            </CardHeader>
+
+            <CardContent className="p-0">
+              {approvedPortalCustomers.queryError ? (
+                <div className="px-6 py-5">
+                  <p className="text-sm text-red-600">
+                    {approvedPortalCustomers.queryError}
+                  </p>
+                </div>
+              ) : approvedPortalCustomers.profiles.length === 0 ? (
+                <EmptyState
+                  title="No approved portal customers"
+                  description="Approved self-registered customers will appear here."
+                />
+              ) : (
+                <div className="divide-y divide-border">
+                  {approvedPortalCustomers.profiles.map((customer) => (
+                    <div
+                      key={customer.id}
+                      className="flex flex-col gap-4 px-6 py-5 lg:flex-row lg:items-center lg:justify-between"
+                    >
+                      <div>
+                        <p className="font-medium text-foreground">
+                          {customer.full_name || "Unnamed customer"}
+                        </p>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          {customer.company_name ||
+                            customer.requested_company_name ||
+                            "No company assigned"}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Account status: {customer.account_status}
+                        </p>
+                      </div>
+
+                      <ResendAccountReadyButton profileId={customer.id} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
     </AppShell>
   );

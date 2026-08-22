@@ -5,14 +5,21 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { ContactFormDialog } from "@/components/crm/contact-form-dialog";
+import { ResendAccountReadyButton } from "@/components/resend-account-ready-button";
 import { Button } from "@/components/ui/button";
 import type { ContactListRow } from "@/lib/crm/contacts";
 
 type ContactDetailActionsProps = {
   contact: ContactListRow;
+  resendAccountReadyProfileId?: string | null;
+  showResendAccountReadyEmail?: boolean;
 };
 
-export function ContactDetailActions({ contact }: ContactDetailActionsProps) {
+export function ContactDetailActions({
+  contact,
+  resendAccountReadyProfileId,
+  showResendAccountReadyEmail = false,
+}: ContactDetailActionsProps) {
   const router = useRouter();
   const [editOpen, setEditOpen] = useState(false);
   const [isInviting, setIsInviting] = useState(false);
@@ -75,6 +82,10 @@ export function ContactDetailActions({ contact }: ContactDetailActionsProps) {
             View portal user
           </Button>
         </Link>
+      ) : null}
+
+      {showResendAccountReadyEmail && resendAccountReadyProfileId ? (
+        <ResendAccountReadyButton profileId={resendAccountReadyProfileId} />
       ) : null}
 
       <Button
