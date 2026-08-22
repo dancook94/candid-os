@@ -7,6 +7,7 @@ import {
   PROOF_PDF_PAGE_HEIGHT,
   PROOF_PDF_PAGE_WIDTH,
 } from "@/lib/proof-generator/pdf-brand";
+import { buildCustomerProofPdfFileName } from "@/lib/proofs/dropbox";
 import {
   drawApprovalDisclaimer,
   drawApprovalFooterBar,
@@ -16,6 +17,7 @@ import {
   drawPreflightSectionCard,
   drawProofHeroTitle,
   drawProofPageHeader,
+  drawProofVersionSubtitle,
   drawSpecificationSectionCard,
   embedCandidLogo,
   estimateWrappedLineCount,
@@ -79,13 +81,17 @@ export async function generateCustomerProofPdf(input: {
     const bleedCheck = input.preflight.checks.find((check) => check.key === "bleed_box");
 
     const page1 = doc.addPage([PROOF_PDF_PAGE_WIDTH, PROOF_PDF_PAGE_HEIGHT]);
-    let y = drawProofPageHeader(page1, fonts, logo, 1, TOTAL_PAGES);
-    y = drawProofHeroTitle(page1, fonts, y);
+    const page1Header = drawProofPageHeader(page1, fonts, logo, 1, TOTAL_PAGES);
+    let y = drawProofHeroTitle(page1, fonts, page1Header.dividerY);
+    y = drawProofVersionSubtitle(page1, fonts, y, input.versionNumber);
 
     y = drawMetaGrid(page1, fonts, y, [
       { label: "Job", value: input.jobReference },
       { label: "Project", value: input.projectName },
-      { label: "Proof", value: `Version ${input.versionNumber}` },
+      {
+        label: "Proof version",
+        value: String(input.versionNumber),
+      },
       {
         label: "Related item",
         value: primaryItem
@@ -160,7 +166,8 @@ export async function generateCustomerProofPdf(input: {
     const rightWidth = rightColumnWidth();
 
     const page2 = doc.addPage([PROOF_PDF_PAGE_WIDTH, PROOF_PDF_PAGE_HEIGHT]);
-    const contentStartY = drawProofPageHeader(page2, fonts, logo, 2, TOTAL_PAGES);
+    const page2Header = drawProofPageHeader(page2, fonts, logo, 2, TOTAL_PAGES);
+    const contentStartY = page2Header.contentStartY;
 
     const quotedRows = [
       {
@@ -261,13 +268,12 @@ export async function generateCustomerProofPdf(input: {
 export function buildGeneratedProofFileName(
   proofReference: string,
   versionNumber: number,
-  itemReference?: string | null
+  itemReference?: string | null,
+  jobReference?: string | null
 ) {
-  if (itemReference?.trim()) {
-    const safeItem = itemReference.trim().replace(/[^\w.-]+/g, "-");
-    return `${safeItem}-Proof-v${versionNumber}.pdf`;
-  }
-
-  const safeReference = proofReference.trim().replace(/[^\w .-]+/g, "");
-  return `${safeReference}.pdf`;
+  return buildCustomerProofPdfFileName({
+    versionNumber,
+    itemReference,
+    jobReference: jobReference ?? proofReference.split(" Proof ")[0] ?? proofReference,
+  });
 }

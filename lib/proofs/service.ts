@@ -27,6 +27,11 @@ import {
   resolveProofsFolderPathOrThrow,
 } from "@/lib/proofs/dropbox";
 import {
+  buildProofReference,
+  getInProgressProof,
+  isRevisableProofStatus,
+} from "@/lib/proofs/versioning";
+import {
   assertProofUploadFile,
   getFileExtension,
   isCustomerFacingProofAsset,
@@ -117,14 +122,18 @@ async function loadJobContext(
   return data as JobContext;
 }
 
-async function nextProofVersion(adminClient: SupabaseClient, jobId: string) {
-  const { data } = await adminClient
+export async function nextProofVersion(adminClient: SupabaseClient, jobId: string) {
+  const { data, error } = await adminClient
     .from("job_proofs")
     .select("version_number")
     .eq("job_id", jobId)
     .order("version_number", { ascending: false })
     .limit(1)
     .maybeSingle();
+
+  if (error) {
+    throw new ProofError(error.message, 500);
+  }
 
   return (data?.version_number ?? 0) + 1;
 }
@@ -462,7 +471,7 @@ export async function createJobProof(
   );
   const sourceFile = await resolveSourceFileMetadata(adminClient, job, input);
   const versionNumber = await nextProofVersion(adminClient, jobId);
-  const proofReference = `${job.job_reference} Proof v${versionNumber}`;
+  const proofReference = buildProofReference(job.job_reference, versionNumber);
   const now = new Date().toISOString();
 
   const { data: proof, error } = await adminClient
@@ -531,6 +540,154 @@ export async function createJobProof(
       proof_id: proof.id,
       version_number: versionNumber,
       production_item_ids: input.productionItemIds,
+    },
+  });
+
+  revalidateJobPages({
+    jobId,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
+  });
+
+  return proof;
+}
+
+export async function createRevisedJobProof(
+  adminClient: SupabaseClient,
+  {
+    jobId,
+    sourceProofId,
+    actorProfileId,
+    customerMessage,
+    internalNote,
+  }: {
+    jobId: string;
+    sourceProofId: string;
+    actorProfileId: string;
+    customerMessage?: string | null;
+    internalNote?: string | null;
+  }
+) {
+  const job = await loadJobContext(adminClient, jobId);
+
+  if (!job.proof_required) {
+    throw new ProofError("Proof is not required for this job.", 409);
+  }
+
+  const { data: sourceProof, error: sourceError } = await adminClient
+    .from("job_proofs")
+    .select(PROOF_SELECT)
+    .eq("id", sourceProofId)
+    .eq("job_id", jobId)
+    .maybeSingle();
+
+  if (sourceError) {
+    throw new ProofError(sourceError.message, 500);
+  }
+
+  if (!sourceProof) {
+    throw new ProofError("Source proof not found.", 404);
+  }
+
+  if (!isRevisableProofStatus(sourceProof.status as string)) {
+    throw new ProofError(
+      "Only proofs with changes requested or approved can be revised.",
+      409
+    );
+  }
+
+  const { data: existingProofs, error: existingError } = await adminClient
+    .from("job_proofs")
+    .select("id, status, version_number")
+    .eq("job_id", jobId);
+
+  if (existingError) {
+    throw new ProofError(existingError.message, 500);
+  }
+
+  const inProgress = getInProgressProof(existingProofs ?? []);
+  if (inProgress) {
+    throw new ProofError(
+      `Proof v${inProgress.version_number} is already in progress. Finish that version before creating a revision.`,
+      409
+    );
+  }
+
+  const { data: manifestLinks, error: linkLoadError } = await adminClient
+    .from("job_proof_manifest_items")
+    .select("production_item_id")
+    .eq("proof_id", sourceProofId);
+
+  if (linkLoadError) {
+    throw new ProofError(linkLoadError.message, 500);
+  }
+
+  const productionItemIds = (manifestLinks ?? []).map(
+    (link) => link.production_item_id as string
+  );
+
+  if (!productionItemIds.length) {
+    throw new ProofError("The source proof has no linked manifest items.", 409);
+  }
+
+  await loadManifestItemsByIds(adminClient, jobId, productionItemIds);
+
+  const versionNumber = await nextProofVersion(adminClient, jobId);
+  const proofReference = buildProofReference(job.job_reference, versionNumber);
+  const now = new Date().toISOString();
+
+  const { data: proof, error } = await adminClient
+    .from("job_proofs")
+    .insert({
+      job_id: jobId,
+      company_id: job.company_id,
+      proof_reference: proofReference,
+      version_number: versionNumber,
+      status: "draft",
+      title: sourceProof.title,
+      artwork_origin: sourceProof.artwork_origin,
+      customer_message:
+        customerMessage !== undefined
+          ? customerMessage?.trim() || null
+          : (sourceProof.customer_message as string | null),
+      internal_note: internalNote?.trim() || null,
+      created_by_profile_id: actorProfileId,
+      updated_at: now,
+    })
+    .select(PROOF_SELECT)
+    .single();
+
+  if (error || !proof) {
+    throw new ProofError(error?.message ?? "Unable to create revised proof.", 500);
+  }
+
+  const { error: linkError } = await adminClient.from("job_proof_manifest_items").insert(
+    productionItemIds.map((productionItemId) => ({
+      proof_id: proof.id,
+      production_item_id: productionItemId,
+    }))
+  );
+
+  if (linkError) {
+    throw new ProofError(linkError.message, 500);
+  }
+
+  await syncJobProofWorkflowStatus(adminClient, jobId);
+
+  await logProofActivity(adminClient, {
+    activityType: PROOF_ACTIVITY_TYPES.proofCreated,
+    description: `${proofReference} created as a revision of ${sourceProof.proof_reference}.`,
+    companyId: job.company_id,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
+    actorProfileId,
+    metadata: {
+      job_id: jobId,
+      proof_id: proof.id,
+      version_number: versionNumber,
+      revised_from_proof_id: sourceProofId,
+      revised_from_version_number: sourceProof.version_number,
+      production_item_ids: productionItemIds,
     },
   });
 
@@ -995,7 +1152,7 @@ export async function uploadProofFileToProofsFolder(
   const extension = getFileExtension(fileName);
   const targetFileName = buildProofUploadTargetFileName({
     itemReference,
-    proofReference: proof.proof_reference,
+    jobReference: job.job_reference,
     versionNumber: proof.version_number,
     extension,
   });
@@ -1287,12 +1444,17 @@ export async function sendJobProof(
   const { data: itemLinks } = await adminClient
     .from("job_proof_manifest_items")
     .select("production_item_id, production_items(item_reference)")
-    .eq("proof_id", proofId)
-    .limit(1);
+    .eq("proof_id", proofId);
 
-  const itemReference =
-    (itemLinks?.[0]?.production_items as { item_reference?: string | null } | null)
-      ?.item_reference ?? null;
+  const itemReferences = (itemLinks ?? [])
+    .map(
+      (link) =>
+        (link.production_items as { item_reference?: string | null } | null)
+          ?.item_reference ?? null
+    )
+    .filter(Boolean) as string[];
+
+  const itemReference = itemReferences.length === 1 ? itemReferences[0] : null;
 
   let finalMetadata: {
     dropboxFileId: string | null;
@@ -1344,8 +1506,7 @@ export async function sendJobProof(
         proofsFolderPath,
         versionNumber: proof.version_number,
         itemReference,
-        proofReference: proof.proof_reference,
-        fileName: proofFile.file_name as string,
+        jobReference: job.job_reference,
       });
 
       finalMetadata = {

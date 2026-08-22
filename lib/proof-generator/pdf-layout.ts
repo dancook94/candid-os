@@ -63,6 +63,36 @@ function statusColors(status: PreflightCheck["status"]) {
   }
 }
 
+const HEADER_DOC_LABEL_SIZE = 8;
+const HEADER_PAGE_INDICATOR_SIZE = 9;
+const HEADER_DIVIDER_GAP = 10;
+const HEADER_CONTENT_GAP = 16;
+const HERO_DIVIDER_CLEAR_GAP = 14;
+const HERO_META_GAP = 20;
+const HERO_TITLE_MIN_SIZE = 34;
+const HERO_TITLE_MAX_SIZE = 40;
+const HERO_TITLE_WORD_GAP = 10;
+const HERO_CAP_ASCENDER_RATIO = 0.72;
+const HERO_CAP_DESCENDER_RATIO = 0.22;
+
+function resolveHeroTitleFontSize(fonts: ProofPdfFonts, maxWidth: number) {
+  const proofForText = sanitizePdfText("PROOF FOR");
+  const approvalText = sanitizePdfText("APPROVAL");
+
+  for (let size = HERO_TITLE_MAX_SIZE; size >= HERO_TITLE_MIN_SIZE; size -= 1) {
+    const totalWidth =
+      fonts.bold.widthOfTextAtSize(proofForText, size) +
+      HERO_TITLE_WORD_GAP +
+      fonts.bold.widthOfTextAtSize(approvalText, size);
+
+    if (totalWidth <= maxWidth) {
+      return size;
+    }
+  }
+
+  return HERO_TITLE_MIN_SIZE;
+}
+
 export async function embedCandidLogo(
   doc: PDFDocument,
   displayWidth = PROOF_PDF_LOGO_DISPLAY_WIDTH
@@ -84,6 +114,7 @@ export function drawProofPageHeader(
   totalPages: number
 ) {
   const top = PROOF_PDF_PAGE_HEIGHT - PROOF_PDF_MARGIN;
+  const rightEdge = PROOF_PDF_PAGE_WIDTH - PROOF_PDF_MARGIN;
 
   page.drawImage(logo.image, {
     x: PROOF_PDF_MARGIN,
@@ -92,24 +123,31 @@ export function drawProofPageHeader(
     height: logo.height,
   });
 
-  drawText(page, "PROOF FOR APPROVAL", {
-    x: PROOF_PDF_PAGE_WIDTH - PROOF_PDF_MARGIN - 108,
+  const docLabel = sanitizePdfText("PROOF FOR APPROVAL");
+  const docLabelWidth = fonts.bold.widthOfTextAtSize(docLabel, HEADER_DOC_LABEL_SIZE);
+  drawText(page, docLabel, {
+    x: rightEdge - docLabelWidth,
     y: top - 14,
-    size: 8,
+    size: HEADER_DOC_LABEL_SIZE,
     font: fonts.bold,
     color: PROOF_PDF_THEME.text,
   });
 
   const indicator = `${String(pageNumber).padStart(2, "0")} / ${String(totalPages).padStart(2, "0")}`;
+  const indicatorWidth = fonts.bold.widthOfTextAtSize(indicator, HEADER_PAGE_INDICATOR_SIZE);
   drawText(page, indicator, {
-    x: PROOF_PDF_PAGE_WIDTH - PROOF_PDF_MARGIN - 34,
+    x: rightEdge - indicatorWidth,
     y: top - 28,
-    size: 9,
+    size: HEADER_PAGE_INDICATOR_SIZE,
     font: fonts.bold,
     color: PROOF_PDF_THEME.yellow,
   });
 
-  const dividerY = top - logo.height - 8;
+  const logoBottom = top - logo.height;
+  const rightBlockBottom = top - 28 - HEADER_PAGE_INDICATOR_SIZE;
+  const headerBottom = Math.min(logoBottom, rightBlockBottom);
+  const dividerY = headerBottom - HEADER_DIVIDER_GAP;
+
   page.drawLine({
     start: { x: PROOF_PDF_MARGIN, y: dividerY },
     end: { x: PROOF_PDF_PAGE_WIDTH - PROOF_PDF_MARGIN, y: dividerY },
@@ -117,31 +155,66 @@ export function drawProofPageHeader(
     color: PROOF_PDF_THEME.border,
   });
 
-  return dividerY - 14;
+  return {
+    dividerY,
+    contentStartY: dividerY - HEADER_CONTENT_GAP,
+  };
 }
 
-export function drawProofHeroTitle(page: PDFPage, fonts: ProofPdfFonts, y: number) {
+export function drawProofHeroTitle(
+  page: PDFPage,
+  fonts: ProofPdfFonts,
+  dividerY: number
+) {
+  const fontSize = resolveHeroTitleFontSize(fonts, contentWidth());
   const proofForText = sanitizePdfText("PROOF FOR");
   const approvalText = sanitizePdfText("APPROVAL");
-  const proofForWidth = fonts.bold.widthOfTextAtSize(proofForText, 26);
+  const proofForWidth = fonts.bold.widthOfTextAtSize(proofForText, fontSize);
+  const baselineY =
+    dividerY - HERO_DIVIDER_CLEAR_GAP - fontSize * HERO_CAP_ASCENDER_RATIO;
 
   drawText(page, proofForText, {
     x: PROOF_PDF_MARGIN,
-    y,
-    size: 26,
+    y: baselineY,
+    size: fontSize,
     font: fonts.bold,
     color: PROOF_PDF_THEME.text,
   });
 
   drawText(page, approvalText, {
-    x: PROOF_PDF_MARGIN + proofForWidth + 8,
-    y,
-    size: 26,
+    x: PROOF_PDF_MARGIN + proofForWidth + HERO_TITLE_WORD_GAP,
+    y: baselineY,
+    size: fontSize,
     font: fonts.bold,
     color: PROOF_PDF_THEME.yellow,
   });
 
-  return y - 28;
+  return baselineY - fontSize * HERO_CAP_DESCENDER_RATIO - HERO_META_GAP;
+}
+
+export function drawProofVersionSubtitle(
+  page: PDFPage,
+  fonts: ProofPdfFonts,
+  y: number,
+  versionNumber: number
+) {
+  drawText(page, "PROOF", {
+    x: PROOF_PDF_MARGIN,
+    y,
+    size: 10,
+    font: fonts.bold,
+    color: PROOF_PDF_THEME.muted,
+  });
+
+  drawText(page, `Version ${versionNumber}`, {
+    x: PROOF_PDF_MARGIN + 42,
+    y,
+    size: 14,
+    font: fonts.bold,
+    color: PROOF_PDF_THEME.text,
+  });
+
+  return y - 22;
 }
 
 export function drawMetaField(

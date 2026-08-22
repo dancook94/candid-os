@@ -26,6 +26,7 @@ import { getFileExtension } from "@/lib/proofs/file-validation";
 import { logProofActivity } from "@/lib/proofs/activity";
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
 import { isPathInProofsFolder } from "@/lib/proofs/dropbox";
+import { buildCustomerProofPdfFileName } from "@/lib/proofs/dropbox";
 import { uploadProofFileToProofsFolder } from "@/lib/proofs/service";
 
 function assertAnalysisSize(buffer: Buffer) {
@@ -408,10 +409,31 @@ export async function generateBrandedPdfForExistingProof(
     throw new ProofError("Branded proof PDF generation produced an empty file.", 500);
   }
 
+  const productionItemIds = await loadProofProductionItemIds(adminClient, proofId);
+  const { data: itemLinks } = await adminClient
+    .from("job_proof_manifest_items")
+    .select("production_item_id, production_items(item_reference)")
+    .eq("proof_id", proofId);
+
+  const itemReferences = (itemLinks ?? [])
+    .map(
+      (link) =>
+        (link.production_items as { item_reference?: string | null } | null)
+          ?.item_reference ?? null
+    )
+    .filter(Boolean) as string[];
+
+  const itemReference = itemReferences.length === 1 ? itemReferences[0] : null;
+  const generatedFileName = buildCustomerProofPdfFileName({
+    versionNumber: proof.version_number as number,
+    itemReference,
+    jobReference: job.job_reference as string,
+  });
+
   const uploadResult = await uploadProofFileToProofsFolder(adminClient, {
     jobId,
     proofId,
-    fileName: `${proof.proof_reference as string}.pdf`,
+    fileName: generatedFileName,
     mimeType: "application/pdf",
     fileBuffer: pdfBuffer.buffer,
     actorProfileId,
@@ -442,7 +464,7 @@ export async function generateBrandedPdfForExistingProof(
     metadata: {
       job_id: jobId,
       proof_id: proofId,
-      production_item_ids: (await loadProofProductionItemIds(adminClient, proofId)),
+      production_item_ids: productionItemIds,
       overall_status: preflightResult.overallStatus,
       source_dropbox_path: sourceDropboxPath,
       generated_dropbox_path: uploadResult.dropboxPath,

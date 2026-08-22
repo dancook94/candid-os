@@ -182,30 +182,50 @@ export function buildProofDropboxFileName(
   extension = "pdf"
 ) {
   const base = itemReference
-    ? sanitizeDropboxPathSegment(itemReference)
+    ? sanitizeDropboxPathSegment(itemReference).replace(/\s+/g, "-")
     : "Proof";
   return `${base}-Proof-v${versionNumber}.${extension.replace(/^\./, "")}`;
 }
 
+/**
+ * Deterministic branded customer proof PDF filename.
+ * Single manifest item: {itemRef}-Proof-v{N}.pdf
+ * Multiple items: {jobRef}-Proof-v{N}.pdf
+ */
+export function buildCustomerProofPdfFileName(input: {
+  versionNumber: number;
+  itemReference?: string | null;
+  jobReference?: string | null;
+  extension?: string;
+}) {
+  const extension = (input.extension ?? "pdf").replace(/^\./, "");
+
+  if (input.itemReference?.trim()) {
+    return buildProofDropboxFileName(input.itemReference, input.versionNumber, extension);
+  }
+
+  const safeJob = sanitizeDropboxPathSegment(input.jobReference ?? "Proof").replace(/\s+/g, "-");
+  return `${safeJob}-Proof-v${input.versionNumber}.${extension}`;
+}
+
 export function buildProofUploadTargetFileName({
   itemReference,
-  proofReference,
+  jobReference,
   versionNumber,
   extension,
 }: {
   itemReference: string | null;
-  proofReference: string;
+  jobReference?: string | null;
+  proofReference?: string;
   versionNumber: number;
   extension: string;
 }) {
-  const safeExtension = extension.replace(/^\./, "");
-
-  if (itemReference) {
-    return buildProofDropboxFileName(itemReference, versionNumber, safeExtension);
-  }
-
-  const safeReference = sanitizeDropboxPathSegment(proofReference);
-  return `${safeReference}.${safeExtension}`;
+  return buildCustomerProofPdfFileName({
+    versionNumber,
+    itemReference,
+    jobReference,
+    extension,
+  });
 }
 
 export async function copyProofFileToProofsFolder({
@@ -213,14 +233,15 @@ export async function copyProofFileToProofsFolder({
   proofsFolderPath,
   versionNumber,
   itemReference,
-  proofReference,
+  jobReference,
   fileName,
 }: {
   sourcePath: string;
   proofsFolderPath: string;
   versionNumber: number;
   itemReference: string | null;
-  proofReference: string;
+  jobReference?: string | null;
+  proofReference?: string;
   fileName?: string | null;
 }) {
   if (!isDropboxConfigured()) {
@@ -232,7 +253,7 @@ export async function copyProofFileToProofsFolder({
     fileName?.trim() ||
     buildProofUploadTargetFileName({
       itemReference,
-      proofReference,
+      jobReference,
       versionNumber,
       extension,
     });

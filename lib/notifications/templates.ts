@@ -473,9 +473,16 @@ export function renderNotificationEmail(
     case "quote_accepted":
       return renderNotificationEmail("quote_accepted_internal", metadata);
 
-    case "proof_ready":
+    case "proof_ready": {
+      const proofVersionNumber =
+        metadata.versionNumber != null ? Number(metadata.versionNumber) : null;
+      const versionSubject =
+        proofVersionNumber != null
+          ? `Proof v${proofVersionNumber} ready for approval — ${jobReference} — ${project}`
+          : `Proof ready for approval — ${jobReference} — ${project}`;
+
       return {
-        subject: `Proof ready for approval — ${jobReference} — ${project}`,
+        subject: versionSubject,
         html: renderEmailShell({
           preheader: `Your proof for ${project} is ready to review.`,
           headline: "Your proof is ready to review",
@@ -490,7 +497,12 @@ export function renderNotificationEmail(
             { label: "Job", value: jobReference || "—" },
             { label: "Project", value: project },
             { label: "Proof", value: String(metadata.proofTitle ?? "—") },
-            { label: "Version", value: String(metadata.proofVersion ?? "—") },
+            {
+              label: "Proof version",
+              value: metadata.versionNumber != null
+                ? String(metadata.versionNumber)
+                : String(metadata.proofVersion ?? "—"),
+            },
             ...(metadata.relatedItems
               ? [{ label: "Items", value: String(metadata.relatedItems) }]
               : []),
@@ -501,6 +513,7 @@ export function renderNotificationEmail(
           ),
         }),
       };
+    }
 
     case "proof_approved_customer":
       return {

@@ -17,6 +17,7 @@ import {
 } from "@/lib/proofs/customer-state";
 import type { JobProofView } from "@/lib/proofs/types";
 import { getCustomerProofFile } from "@/lib/proofs/proof-files";
+import { getCurrentProofRecord } from "@/lib/proofs/versioning";
 
 type CustomerJobProofsSectionProps = {
   jobId: string;
@@ -57,6 +58,7 @@ export function CustomerJobProofsSection({
   const latestActionable = proofs.find((proof) =>
     ["sent", "viewed"].includes(proof.status)
   );
+  const currentProof = getCurrentProofRecord(proofs);
 
   async function markViewed(proofId: string) {
     await fetch(`/api/customer/jobs/${jobId}/proofs/${proofId}/download`, {
@@ -114,11 +116,16 @@ export function CustomerJobProofsSection({
     <div className="space-y-4">
       <div>
         <h2 className="text-lg font-semibold">Proofs</h2>
-        <div className="mt-2">
+        <div className="mt-2 flex flex-wrap items-center gap-3">
           <StatusBadge
             status={mapCustomerProofStatusToBadge(proofState.status)}
             label={proofState.label}
           />
+          {currentProof ? (
+            <p className="text-sm text-muted-foreground">
+              Current proof: Version {currentProof.version_number}
+            </p>
+          ) : null}
         </div>
       </div>
 
@@ -126,8 +133,10 @@ export function CustomerJobProofsSection({
 
       {proofs.map((proof) => {
         const items = manifestItemsForProofDisplay(proof.manifestItems);
-        const isArchived = ["superseded", "changes_requested", "approved"].includes(proof.status);
         const canAction = latestActionable?.id === proof.id;
+        const isReadOnly =
+          proof.status === "superseded" ||
+          (["changes_requested", "approved"].includes(proof.status) && !canAction);
 
         return (
           <div
@@ -187,7 +196,7 @@ export function CustomerJobProofsSection({
               </p>
             ) : null}
 
-            {!isArchived || proof.status === "approved" ? (
+            {getCustomerProofFile(proof.files) ? (
               <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
@@ -256,8 +265,10 @@ export function CustomerJobProofsSection({
               </div>
             ) : null}
 
-            {proof.status === "superseded" ? (
-              <p className="text-xs text-muted-foreground">Archived version — read only.</p>
+            {isReadOnly ? (
+              <p className="text-xs text-muted-foreground">
+                Version {proof.version_number} — {PROOF_STATUS_LABELS[proof.status]} (read only)
+              </p>
             ) : null}
           </div>
         );

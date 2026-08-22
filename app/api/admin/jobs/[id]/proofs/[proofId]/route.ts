@@ -6,6 +6,7 @@ import { requireAdminJobAccess } from "@/lib/jobs/auth";
 import type { ProofInternalChecklistKey } from "@/lib/proofs/constants";
 import { ProofError } from "@/lib/proofs/errors";
 import {
+  createRevisedJobProof,
   markProofReadyToSend,
   resendProofReadyNotification,
   sendJobProof,
@@ -39,6 +40,8 @@ export async function POST(request: Request, context: RouteContext) {
     const body = (await request.json()) as {
       action?: string;
       checklist?: Partial<Record<ProofInternalChecklistKey, boolean>>;
+      customerMessage?: string | null;
+      internalNote?: string | null;
     };
 
     const adminClient = createAdminClient();
@@ -72,6 +75,15 @@ export async function POST(request: Request, context: RouteContext) {
           jobId,
           proofId,
           actorProfileId: authResult.userId,
+        });
+        break;
+      case "create_revised_proof":
+        await createRevisedJobProof(adminClient, {
+          jobId,
+          sourceProofId: proofId,
+          actorProfileId: authResult.userId,
+          customerMessage: body.customerMessage,
+          internalNote: body.internalNote,
         });
         break;
       default:

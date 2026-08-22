@@ -18,6 +18,11 @@ import {
   type ProofArtworkOrigin,
   type ProofBypassReason,
 } from "@/lib/proofs/constants";
+import {
+  canCreateRevisedProof,
+  formatProofHistoryEntry,
+  getCurrentProofRecord,
+} from "@/lib/proofs/versioning";
 import type { JobProofView } from "@/lib/proofs/types";
 import type { ProofSelectableManifestItem } from "@/lib/proofs/manifest-items";
 import {
@@ -200,6 +205,30 @@ export function AdminJobProofsPanel({
     setDropboxFiles(payload.files ?? []);
   }
 
+  async function createRevisedProof(sourceProofId: string) {
+    setError(null);
+    setPending(true);
+
+    const response = await fetch(`/api/admin/jobs/${jobId}/proofs/${sourceProofId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "create_revised_proof" }),
+    });
+
+    const payload = (await response.json()) as { error?: string };
+    setPending(false);
+
+    if (!response.ok) {
+      setError(payload.error ?? "Unable to create revised proof.");
+      return;
+    }
+
+    await refreshAfterProofAction();
+  }
+
+  const currentProof = getCurrentProofRecord(proofs);
+  const proofHistory = [...proofs].sort((left, right) => right.version_number - left.version_number);
+
   async function createProof() {
     if (!canSaveDraft) {
       setError("Enter a proof title and select at least one quoted item.");
@@ -379,6 +408,33 @@ export function AdminJobProofsPanel({
       </div>
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
+
+      {proofHistory.length > 0 ? (
+        <div className="rounded-lg border border-border bg-muted/10 p-4 space-y-3">
+          <div>
+            <p className="text-sm font-semibold">Proof history</p>
+            {currentProof ? (
+              <p className="mt-1 text-sm text-muted-foreground">
+                Current proof — v{currentProof.version_number}
+                {["draft", "internal_review", "ready_to_send"].includes(currentProof.status)
+                  ? ` (${PROOF_STATUS_LABELS[currentProof.status as keyof typeof PROOF_STATUS_LABELS]})`
+                  : ""}
+              </p>
+            ) : null}
+          </div>
+          <ul className="space-y-1 text-sm">
+            {proofHistory.map((proof) => (
+              <li key={proof.id} className="text-muted-foreground">
+                {formatProofHistoryEntry(
+                  proof,
+                  PROOF_STATUS_LABELS[proof.status as keyof typeof PROOF_STATUS_LABELS] ??
+                    proof.status
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {showCreate ? (
         <div className="rounded-lg border border-border p-4 space-y-5">
@@ -755,6 +811,16 @@ export function AdminJobProofsPanel({
 
               {["changes_requested", "superseded"].includes(proof.status) ? (
                 <p className="text-xs text-muted-foreground">Archived version — read only.</p>
+              ) : null}
+
+              {canCreateRevisedProof(proof, proofs) ? (
+                <Button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => createRevisedProof(proof.id)}
+                >
+                  Create revised proof
+                </Button>
               ) : null}
             </div>
           ))
