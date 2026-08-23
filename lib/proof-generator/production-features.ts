@@ -2,6 +2,7 @@ import type { QuotedSpecificationItem } from "@/lib/proof-generator/types";
 import {
   extractCutPathGeometry,
   cutPathGeometryHasContent,
+  formatCutPathExtractionFailureReason,
 } from "@/lib/proof-generator/extract-cut-path-geometry";
 import {
   buildFeatureCandidates,
@@ -244,12 +245,15 @@ export async function enrichProductionFeaturesWithCutPathOverlay(
     };
   }
 
-  const extraction = await extractCutPathGeometry(sourceBuffer, separationName, 0);
+  const extraction = await extractCutPathGeometry(sourceBuffer, separationName, 0, {
+    debugLabel: "preflight_overlay_availability",
+  });
   if (!extraction.ok || !cutPathGeometryHasContent(extraction.geometry)) {
     return {
       ...features,
       cutPathOverlayAvailable: false,
       cutPathOverlayReason:
+        formatCutPathExtractionFailureReason(extraction.diagnostic) ??
         "Visual overlay unavailable — vector geometry could not be extracted from this artwork.",
     };
   }

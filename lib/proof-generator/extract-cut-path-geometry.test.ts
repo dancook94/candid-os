@@ -6,7 +6,15 @@ import {
   mapPdfPointToPreview,
 } from "@/lib/proof-generator/cut-path-overlay";
 import { buildCutPathTestPdfBuffer } from "@/lib/proof-generator/cut-path-test-pdfs";
-import { extractCutPathGeometry } from "@/lib/proof-generator/extract-cut-path-geometry";
+import {
+  buildIllustratorFormXObjectCutPathPdfBuffer,
+  buildIllustratorInlineSeparationCutPathPdfBuffer,
+  buildIllustratorNestedFormCutPathPdfBuffer,
+} from "@/lib/proof-generator/cut-path-test-pdfs";
+import {
+  extractCutPathGeometry,
+  formatCutPathExtractionFailureReason,
+} from "@/lib/proof-generator/extract-cut-path-geometry";
 
 describe("extractCutPathGeometry", () => {
   it("extracts rectangular CutContour geometry", async () => {
@@ -66,6 +74,43 @@ describe("extractCutPathGeometry", () => {
     const result = await extractCutPathGeometry(buffer, "CutContour", 0);
 
     assert.equal(result.ok, true);
+  });
+
+  it("extracts geometry from Illustrator Form XObject with indirect resources", async () => {
+    const buffer = buildIllustratorFormXObjectCutPathPdfBuffer({ shape: "rectangle" });
+    const result = await extractCutPathGeometry(buffer, "CutContour", 0);
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.ok(result.geometry.subpaths.length >= 1);
+    }
+  });
+
+  it("extracts geometry from inline Separation color space arrays", async () => {
+    const buffer = buildIllustratorInlineSeparationCutPathPdfBuffer({ shape: "circle" });
+    const result = await extractCutPathGeometry(buffer, "CutContour", 0);
+
+    assert.equal(result.ok, true);
+  });
+
+  it("extracts geometry from nested Form XObjects", async () => {
+    const buffer = buildIllustratorNestedFormCutPathPdfBuffer();
+    const result = await extractCutPathGeometry(buffer, "CutContour", 0);
+
+    assert.equal(result.ok, true);
+  });
+
+  it("returns actionable internal diagnostics when geometry is missing", async () => {
+    const buffer = buildCutPathTestPdfBuffer({ shape: "rectangle", includeCutPath: false });
+    const result = await extractCutPathGeometry(buffer, "CutContour", 0);
+
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.match(
+        formatCutPathExtractionFailureReason(result.diagnostic) ?? "",
+        /CutContour separation detected/i
+      );
+    }
   });
 });
 
