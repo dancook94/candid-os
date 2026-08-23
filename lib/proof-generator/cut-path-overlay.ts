@@ -7,9 +7,10 @@ import type {
 } from "@/lib/proof-generator/extract-cut-path-geometry";
 import { sanitizePdfText } from "@/lib/proof-generator/pdf-text";
 
-export const CUT_PATH_OVERLAY_COLOR = rgb(0.92, 0.2, 0.62);
-export const CUT_PATH_OVERLAY_WIDTH = 1.25;
-export const CUT_PATH_OVERLAY_DASH = [4, 3] as const;
+/** Proof-only cut path magenta (#EC008C). */
+export const CUT_PATH_OVERLAY_COLOR = rgb(236 / 255, 0, 140 / 255);
+export const CUT_PATH_OVERLAY_WIDTH = 1.75;
+export const CUT_PATH_OVERLAY_DASH = [5, 4] as const;
 
 export type ArtworkPreviewPlacement = {
   frameX: number;
@@ -94,26 +95,135 @@ export function mapPdfPointToPreview(
   };
 }
 
-function mapCommandToPreview(
-  command: CutPathPathCommand,
+function flattenCubicBezier(
+  p0: { x: number; y: number },
+  p1: { x: number; y: number },
+  p2: { x: number; y: number },
+  p3: { x: number; y: number },
+  segments = 16
+) {
+  const points: Array<{ x: number; y: number }> = [];
+
+  for (let index = 0; index <= segments; index += 1) {
+    const t = index / segments;
+    const mt = 1 - t;
+    points.push({
+      x:
+        mt * mt * mt * p0.x +
+        3 * mt * mt * t * p1.x +
+        3 * mt * t * t * p2.x +
+        t * t * t * p3.x,
+      y:
+        mt * mt * mt * p0.y +
+        3 * mt * mt * t * p1.y +
+        3 * mt * t * t * p2.y +
+        t * t * t * p3.y,
+    });
+  }
+
+  return points;
+}
+
+function subpathToPreviewPoints(
+  subpath: CutPathPathCommand[],
   geometry: CutPathGeometry,
   placement: ArtworkPreviewPlacement
-): CutPathPathCommand {
-  if (command.op === "M" || command.op === "L") {
-    const mapped = mapPdfPointToPreview(command, geometry, placement);
-    return command.op === "M"
-      ? { op: "M", x: mapped.x, y: mapped.y }
-      : { op: "L", x: mapped.x, y: mapped.y };
+) {
+  const segments: Array<{ start: { x: number; y: number }; end: { x: number; y: number } }> = [];
+  let current: { x: number; y: number } | null = null;
+  let subpathStart: { x: number; y: number } | null = null;
+
+  for (const command of subpath) {
+    if (command.op === "M") {
+      current = mapPdfPointToPreview(command, geometry, placement);
+      subpathStart = current;
+      continue;
+    }
+
+    if (!current) {
+      continue;
+    }
+
+    if (command.op === "L") {
+      const end = mapPdfPointToPreview(command, geometry, placement);
+      segments.push({ start: current, end });
+      current = end;
+      continue;
+    }
+
+    if (command.op === "C") {
+      const control1 = mapPdfPointToPreview(
+        { x: command.x1, y: command.y1 },
+        geometry,
+        placement
+      );
+      const control2 = mapPdfPointToPreview(
+        { x: command.x2, y: command.y2 },
+        geometry,
+        placement
+      );
+      const end = mapPdfPointToPreview({ x: command.x, y: command.y }, geometry, placement);
+      const flattened = flattenCubicBezier(current, control1, control2, end);
+
+      for (let index = 1; index < flattened.length; index += 1) {
+        segments.push({
+          start: flattened[index - 1],
+          end: flattened[index],
+        });
+      }
+
+      current = end;
+      continue;
+    }
+
+    if (command.op === "Z" && subpathStart) {
+      segments.push({ start: current, end: subpathStart });
+      current = subpathStart;
+    }
   }
 
-  if (command.op === "C") {
-    const p1 = mapPdfPointToPreview({ x: command.x1, y: command.y1 }, geometry, placement);
-    const p2 = mapPdfPointToPreview({ x: command.x2, y: command.y2 }, geometry, placement);
-    const p3 = mapPdfPointToPreview({ x: command.x, y: command.y }, geometry, placement);
-    return { op: "C", x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, x: p3.x, y: p3.y };
+  return segments;
+}
+
+function drawDashedLine(
+  page: PDFPage,
+  start: { x: number; y: number },
+  end: { x: number; y: number }
+) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy);
+
+  if (length < 0.01) {
+    return;
   }
 
-  return command;
+  const [dash, gap] = CUT_PATH_OVERLAY_DASH;
+  const patternLength = dash + gap;
+  let travelled = 0;
+
+  while (travelled < length) {
+    const dashStart = travelled / length;
+    const dashEnd = Math.min((travelled + dash) / length, 1);
+
+    if (dashEnd > dashStart) {
+      page.drawLine({
+        start: {
+          x: start.x + dx * dashStart,
+          y: start.y + dy * dashStart,
+        },
+        end: {
+          x: start.x + dx * dashEnd,
+          y: start.y + dy * dashEnd,
+        },
+        thickness: CUT_PATH_OVERLAY_WIDTH,
+        color: CUT_PATH_OVERLAY_COLOR,
+        lineCap: 1,
+      });
+    }
+
+    travelled += patternLength;
+  }
 }
 
 export function buildSvgPathFromGeometry(
@@ -124,17 +234,21 @@ export function buildSvgPathFromGeometry(
 
   for (const subpath of geometry.subpaths) {
     for (const command of subpath) {
-      const mapped = mapCommandToPreview(command, geometry, placement);
+      if (command.op === "M" || command.op === "L") {
+        const mapped = mapPdfPointToPreview(command, geometry, placement);
+        parts.push(`${command.op} ${mapped.x} ${mapped.y}`);
+        continue;
+      }
 
-      if (mapped.op === "M") {
-        parts.push(`M ${mapped.x} ${mapped.y}`);
-      } else if (mapped.op === "L") {
-        parts.push(`L ${mapped.x} ${mapped.y}`);
-      } else if (mapped.op === "C") {
-        parts.push(
-          `C ${mapped.x1} ${mapped.y1} ${mapped.x2} ${mapped.y2} ${mapped.x} ${mapped.y}`
-        );
-      } else if (mapped.op === "Z") {
+      if (command.op === "C") {
+        const p1 = mapPdfPointToPreview({ x: command.x1, y: command.y1 }, geometry, placement);
+        const p2 = mapPdfPointToPreview({ x: command.x2, y: command.y2 }, geometry, placement);
+        const p3 = mapPdfPointToPreview({ x: command.x, y: command.y }, geometry, placement);
+        parts.push(`C ${p1.x} ${p1.y} ${p2.x} ${p2.y} ${p3.x} ${p3.y}`);
+        continue;
+      }
+
+      if (command.op === "Z") {
         parts.push("Z");
       }
     }
@@ -148,21 +262,21 @@ export function drawCutPathOverlay(
   geometry: CutPathGeometry,
   placement: ArtworkPreviewPlacement
 ) {
-  const path = buildSvgPathFromGeometry(geometry, placement);
-  if (!path.trim()) {
-    return false;
+  let segmentsDrawn = 0;
+
+  for (const subpath of geometry.subpaths) {
+    if (subpath.length === 0) {
+      continue;
+    }
+
+    const segments = subpathToPreviewPoints(subpath, geometry, placement);
+    for (const segment of segments) {
+      drawDashedLine(page, segment.start, segment.end);
+      segmentsDrawn += 1;
+    }
   }
 
-  page.drawSvgPath(path, {
-    x: 0,
-    y: 0,
-    borderColor: CUT_PATH_OVERLAY_COLOR,
-    borderWidth: CUT_PATH_OVERLAY_WIDTH,
-    borderDashArray: [...CUT_PATH_OVERLAY_DASH],
-    borderLineCap: 1,
-  });
-
-  return true;
+  return segmentsDrawn > 0;
 }
 
 export function drawCutPathOverlayLegend(
@@ -171,20 +285,21 @@ export function drawCutPathOverlayLegend(
   x: number,
   y: number
 ) {
-  const label = sanitizePdfText("Cut path shown for reference only");
+  const label = sanitizePdfText("Cut path — does not print");
   page.drawLine({
-    start: { x, y: y + 3 },
-    end: { x: x + 18, y: y + 3 },
+    start: { x, y: y + 4 },
+    end: { x: x + 22, y: y + 4 },
     thickness: CUT_PATH_OVERLAY_WIDTH,
     color: CUT_PATH_OVERLAY_COLOR,
     dashArray: [...CUT_PATH_OVERLAY_DASH],
+    lineCap: 1,
   });
 
   page.drawText(label, {
-    x: x + 24,
+    x: x + 28,
     y: y,
     size: 7.5,
     font: fonts.regular,
-    color: rgb(0.45, 0.45, 0.45),
+    color: rgb(0.35, 0.35, 0.35),
   });
 }

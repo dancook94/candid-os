@@ -509,6 +509,83 @@ function buildProductionFeatureChecks(input: {
   return checks;
 }
 
+export function resolvePreflightChecksAfterProductionConfirmation(
+  checks: PreflightCheck[],
+  productionFeatures: ProductionFeaturesResult
+): PreflightCheck[] {
+  const resolved = checks.filter((check) => {
+    if (check.key === "cut_path_candidates" || check.key === "cut_path_expected") {
+      return (
+        !productionFeatures.confirmedCutPath &&
+        !productionFeatures.noCutLineRequired &&
+        !productionFeatures.cutPathRequiredNotDetected
+      );
+    }
+
+    if (check.key === "white_ink_candidates") {
+      return !productionFeatures.confirmedWhiteInk && !productionFeatures.noWhiteInkRequired;
+    }
+
+    return true;
+  });
+
+  if (productionFeatures.confirmedCutPath) {
+    resolved.push({
+      key: "cut_path_confirmed",
+      label: "Cut path",
+      status: "pass",
+      detectedValue: productionFeatures.confirmedCutPath.name,
+      expectedValue: null,
+      message: `${productionFeatures.confirmedCutPath.name} confirmed by Candid`,
+      confidence: "high",
+    });
+  } else if (productionFeatures.noCutLineRequired) {
+    resolved.push({
+      key: "cut_path_not_required",
+      label: "Cut path",
+      status: "pass",
+      detectedValue: "No cut line required",
+      expectedValue: null,
+      message: "No cut line required",
+      confidence: "high",
+    });
+  } else if (productionFeatures.cutPathRequiredNotDetected) {
+    resolved.push({
+      key: "cut_path_required_missing",
+      label: "Cut path",
+      status: "warning",
+      detectedValue: "None detected",
+      expectedValue: "Cut path for contour/kiss-cut item",
+      message: "Required cut path not detected",
+      confidence: "medium",
+    });
+  }
+
+  if (productionFeatures.confirmedWhiteInk) {
+    resolved.push({
+      key: "white_ink_confirmed",
+      label: "White ink",
+      status: "pass",
+      detectedValue: productionFeatures.confirmedWhiteInk.name,
+      expectedValue: null,
+      message: `${productionFeatures.confirmedWhiteInk.name} confirmed by Candid`,
+      confidence: "high",
+    });
+  } else if (productionFeatures.noWhiteInkRequired) {
+    resolved.push({
+      key: "white_ink_not_required",
+      label: "White ink",
+      status: "pass",
+      detectedValue: "Not required",
+      expectedValue: null,
+      message: "White ink not required",
+      confidence: "high",
+    });
+  }
+
+  return resolved;
+}
+
 export function buildPreflightChecks(input: {
   metadata: DetectedArtworkMetadata;
   quotedItems: QuotedSpecificationItem[];

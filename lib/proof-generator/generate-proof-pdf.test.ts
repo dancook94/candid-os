@@ -287,6 +287,64 @@ describe("generateCustomerProofPdf", () => {
     assert.equal(document.getPageCount(), 2);
   });
 
+  it("renders OCG CutContour overlay with resolved preview flags", async () => {
+    const sourceBuffer = (
+      await import("@/lib/proof-generator/cut-path-test-pdfs")
+    ).buildOcgCutPathPdfBuffer({ shape: "circle" });
+
+    const preflight = buildPreflight({
+      metadata: {
+        ...buildPreflight().metadata,
+        fileName: "artwork.pdf",
+        mimeType: "application/pdf",
+        inputType: "pdf",
+        pageCount: 1,
+        pageSize: {
+          value: { widthPt: 200, heightPt: 200, widthMm: 70.56, heightMm: 70.56 },
+          confidence: "high",
+          source: "test",
+        },
+      },
+      productionFeatures: {
+        cutPathCandidates: [
+          {
+            name: "CutContour",
+            sourceType: "optional_content_group",
+            confidence: "high",
+            reason: "Optional Content Group",
+          },
+        ],
+        whiteInkCandidates: [],
+        layers: [],
+        spotColourGroups: { productionSeparations: [], otherSpotColours: [] },
+        expectsCutPath: true,
+        cutPathOverlayAvailable: true,
+        cutPathOverlayReason: null,
+        confirmedCutPath: {
+          name: "CutContour",
+          sourceType: "optional_content_group",
+          confirmedAt: "2026-01-01T00:00:00.000Z",
+          confirmedByProfileId: "user-1",
+        },
+        showCutPathOnProof: true,
+      },
+    });
+
+    const pdf = await generateCustomerProofPdf({
+      jobReference: "J-4",
+      projectName: "OCG Cut Path Overlay Job",
+      proofReference: "J-4 Proof v6",
+      versionNumber: 6,
+      preflight,
+      sourceBuffer,
+      sourceFileName: "artwork.pdf",
+    });
+
+    assert.ok(pdf.byteLength > 1000);
+    assert.equal(preflight.productionFeatures.cutPathOverlayRendered, true);
+    assert.equal(preflight.productionFeatures.cutPathOverlayGeometryAvailable, true);
+  });
+
   it("does not render cut path overlay when show cut path is disabled", async () => {
     const sourceBuffer = (
       await import("@/lib/proof-generator/cut-path-test-pdfs")

@@ -6,7 +6,7 @@ import {
   drawCutPathOverlay,
   drawCutPathOverlayLegend,
 } from "@/lib/proof-generator/cut-path-overlay";
-import { extractCutPathGeometry } from "@/lib/proof-generator/extract-cut-path-geometry";
+import { extractCutPathGeometry, cutPathGeometryHasContent } from "@/lib/proof-generator/extract-cut-path-geometry";
 import {
   PROOF_PDF_MARGIN,
   PROOF_PDF_PAGE_HEIGHT,
@@ -111,6 +111,7 @@ export async function generateCustomerProofPdf(input: {
     const preflight = { ...input.preflight };
     const features = { ...preflight.productionFeatures };
     let cutPathOverlayRendered = false;
+    let cutPathOverlayGeometryAvailable = false;
 
     const placement = drawArtworkPreviewFrame(page1, {
       x: PROOF_PDF_MARGIN,
@@ -133,20 +134,25 @@ export async function generateCustomerProofPdf(input: {
             },
     });
 
-    const shouldRenderCutPath =
-      features.showCutPathOnProof &&
-      features.confirmedCutPath &&
-      preview.kind === "page";
+    const overlayRequested = Boolean(
+      features.showCutPathOnProof && features.confirmedCutPath && preview.kind === "page"
+    );
+    features.cutPathOverlayRequested = overlayRequested;
 
-    if (shouldRenderCutPath && features.confirmedCutPath) {
+    if (overlayRequested && features.confirmedCutPath) {
       const confirmedCutPath = features.confirmedCutPath;
       const extraction = await extractCutPathGeometry(
         input.sourceBuffer,
         confirmedCutPath.name,
-        0
+        0,
+        { debugLabel: "customer_proof_pdf_overlay" }
       );
 
-      if (extraction.ok) {
+      cutPathOverlayGeometryAvailable =
+        extraction.ok && cutPathGeometryHasContent(extraction.geometry);
+      features.cutPathOverlayGeometryAvailable = cutPathOverlayGeometryAvailable;
+
+      if (cutPathOverlayGeometryAvailable && extraction.ok) {
         cutPathOverlayRendered = drawCutPathOverlay(page1, extraction.geometry, placement);
         if (cutPathOverlayRendered) {
           drawCutPathOverlayLegend(
@@ -159,14 +165,16 @@ export async function generateCustomerProofPdf(input: {
       }
 
       logProofGeneratorDebug("cut_path_overlay_render", {
-        requested: true,
+        requested: overlayRequested,
         separationName: confirmedCutPath.name,
         extracted: extraction.ok,
+        geometryAvailable: cutPathOverlayGeometryAvailable,
         rendered: cutPathOverlayRendered,
       });
     }
 
-    features.cutPathOverlayRendered = cutPathOverlayRendered;
+    features.cutPathOverlayRendered =
+      overlayRequested && cutPathOverlayGeometryAvailable && cutPathOverlayRendered;
     preflight.productionFeatures = features;
 
     if (customerMessage) {
@@ -188,6 +196,8 @@ export async function generateCustomerProofPdf(input: {
     renderSpecificationPages(doc, fonts, logo, preflight);
 
     updateProofPageIndicators(doc.getPages(), fonts, 1);
+
+    input.preflight.productionFeatures = features;
 
     const bytes = await doc.save();
     return Buffer.from(bytes);

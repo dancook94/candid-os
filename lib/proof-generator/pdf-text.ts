@@ -236,7 +236,7 @@ export function formatProductionFeaturesForCustomerProof(preflight: PreflightRes
         label: "Cut path preview",
         value: features.cutPathOverlayRendered
           ? "Shown on artwork"
-          : "Unable to render — Candid review required",
+          : "Not shown — Candid review required",
       });
     }
   } else if (features.noCutLineRequired) {

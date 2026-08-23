@@ -214,7 +214,7 @@ describe("customer-facing preflight labels", () => {
 
     assert.equal(
       failed.find((row) => row.label === "Cut path preview")?.value,
-      "Unable to render — Candid review required"
+      "Not shown — Candid review required"
     );
   });
 });

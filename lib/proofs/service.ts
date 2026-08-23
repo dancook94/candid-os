@@ -37,13 +37,13 @@ import { resolveCustomerProofDownloadFile } from "@/lib/proofs/download-file";
 import {
   buildProofReference,
   buildProofRevisionContext,
-  canCreateRevisedProof,
   getCurrentProofInLineage,
   getInProgressProof,
   hasBlockingInProgressRevision,
   isRevisableProofStatus,
   manifestItemSetsMatch,
   proofSupportsRevision,
+  shouldOfferCreateRevisedProof,
 } from "@/lib/proofs/versioning";
 import {
   assertProofUploadFile,
@@ -856,7 +856,18 @@ export async function createRevisedJobProof(
     sourceProofId
   );
 
-  if (!canCreateRevisedProof(revisionContext, allProofs)) {
+  const revisionProofView = {
+    id: sourceProofId,
+    status: sourceProof.status as JobProofView["status"],
+    proof_lineage_id: proofLineageId,
+    version_number: sourceProof.version_number as number,
+    brandedPdfGeneratedAt: (preflight?.generated_at as string | null) ?? null,
+    files: revisionContext.hasGeneratedCustomerProof
+      ? [{ file_role: "customer_proof", dropbox_path: "/generated" } as JobProofView["files"][number]]
+      : [],
+  };
+
+  if (!shouldOfferCreateRevisedProof(revisionProofView, allProofs)) {
     const latest = getCurrentProofInLineage(lineageProofs);
     if (latest && latest.id !== sourceProofId) {
       throw new ProofError(

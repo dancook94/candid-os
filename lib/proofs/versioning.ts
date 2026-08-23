@@ -276,7 +276,43 @@ export function canReviseCurrentProofInLineage<
     | "files"
   >,
 >(currentProof: T, proofs: T[]) {
-  return canCreateRevisedProof(buildProofRevisionContext(currentProof), proofs);
+  return shouldOfferCreateRevisedProof(currentProof, proofs);
+}
+
+/** Whether the current proof card should expose Create revised proof. */
+export function shouldOfferCreateRevisedProof<
+  T extends Pick<
+    JobProofView,
+    "id" | "status" | "proof_lineage_id" | "version_number" | "brandedPdfGeneratedAt" | "files"
+  >,
+  U extends Pick<JobProofView, "id" | "status" | "version_number" | "proof_lineage_id">,
+>(proof: T, proofs: U[]) {
+  if (["superseded", "cancelled"].includes(proof.status)) {
+    return false;
+  }
+
+  const lineageProofs = proofs.filter(
+    (candidate) => candidate.proof_lineage_id === proof.proof_lineage_id
+  );
+  const currentInLineage = getCurrentProofInLineage(lineageProofs);
+
+  if (currentInLineage?.id !== proof.id) {
+    return false;
+  }
+
+  if (hasBlockingInProgressRevision(lineageProofs, proof)) {
+    return false;
+  }
+
+  if (revisionCreatesNewImmutableVersion(proof.status)) {
+    return true;
+  }
+
+  if (proofHasGeneratedCustomerArtifactView(proof)) {
+    return true;
+  }
+
+  return canCreateRevisedProof(buildProofRevisionContext(proof), proofs);
 }
 
 export function formatProofHistoryEntry(

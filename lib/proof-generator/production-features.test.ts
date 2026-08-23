@@ -13,6 +13,7 @@ import {
   scanPdfContent,
 } from "@/lib/proof-generator/scan-pdf-content";
 import { buildPreflightResult } from "@/lib/proof-generator/warnings";
+import { resolvePreflightAfterOperatorConfirmation } from "@/lib/proof-generator/operator-confirmation";
 import type { DetectedArtworkMetadata, QuotedSpecificationItem } from "@/lib/proof-generator/types";
 
 function makeQuotedItem(overrides: Partial<QuotedSpecificationItem> = {}): QuotedSpecificationItem {
@@ -136,6 +137,44 @@ describe("advanced artwork preflight", () => {
       quotedItemsExpectCutPath([
         makeQuotedItem({ finishing: "Kiss cut vinyl contour" }),
       ]),
+      true
+    );
+  });
+
+  it("replaces cut path candidate review after operator confirmation", () => {
+    const buffer = makePdfBuffer("/Separation /CutContour");
+    const preflight = buildPreflightResult({
+      metadata: baseMetadata(),
+      quotedItems: [makeQuotedItem({ finishing: "Contour cut" })],
+      sourceReference: {
+        dropboxPath: "/Artwork/test.pdf",
+        fileName: "test.pdf",
+        fileSizeBytes: buffer.length,
+        mimeType: "application/pdf",
+      },
+      sourceBuffer: buffer,
+    });
+
+    const resolved = resolvePreflightAfterOperatorConfirmation(
+      preflight,
+      {
+        cutPath: {
+          decision: "confirmed",
+          confirmedCandidateName: "CutContour",
+          showOnCustomerProof: true,
+        },
+      },
+      "staff-1"
+    );
+
+    assert.equal(
+      resolved.checks.some((check) => check.key === "cut_path_candidates"),
+      false
+    );
+    assert.equal(
+      resolved.checks.some(
+        (check) => check.key === "cut_path_confirmed" && check.status === "pass"
+      ),
       true
     );
   });

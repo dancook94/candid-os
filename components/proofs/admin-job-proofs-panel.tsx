@@ -20,7 +20,6 @@ import {
 } from "@/lib/proofs/constants";
 import { deriveAggregateJobProofWorkflow } from "@/lib/proofs/gates";
 import {
-  canReviseCurrentProofInLineage,
   formatLineageManifestSummary,
   formatProofHistoryEntry,
   getCurrentProofInLineage,
@@ -28,6 +27,7 @@ import {
   proofAttachmentIsEditable,
   proofReferenceMatchesVersion,
   revisionCreatesNewImmutableVersion,
+  shouldOfferCreateRevisedProof,
 } from "@/lib/proofs/versioning";
 import type { JobProofView } from "@/lib/proofs/types";
 import type { ProofSelectableManifestItem } from "@/lib/proofs/manifest-items";
@@ -576,7 +576,7 @@ export function AdminJobProofsPanel({
             const currentProof = getCurrentProofInLineage(lineageProofs);
             const previousProofs = lineageProofs.filter((proof) => proof.id !== currentProof?.id);
             const canReviseCurrentProof = currentProof
-              ? canReviseCurrentProofInLineage(currentProof, proofs)
+              ? shouldOfferCreateRevisedProof(currentProof, proofs)
               : false;
             const lineageSummary = formatLineageManifestSummary(
               lineageProofs[0]?.manifestItems ?? []

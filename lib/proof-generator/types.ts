@@ -109,6 +109,8 @@ export type ProductionFeaturesResult = {
   expectsCutPath: boolean;
   cutPathOverlayAvailable: boolean;
   cutPathOverlayReason?: string | null;
+  cutPathOverlayRequested?: boolean;
+  cutPathOverlayGeometryAvailable?: boolean;
   cutPathOverlayRendered?: boolean;
   confirmedCutPath?: ConfirmedProductionFeature | null;
   noCutLineRequired?: boolean;

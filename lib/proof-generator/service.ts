@@ -5,7 +5,7 @@ import { resolveAiPreflightAvailability, isAiFileName } from "@/lib/proof-genera
 import { analyseImageBuffer } from "@/lib/proof-generator/analyse-image";
 import { analysePdfBuffer } from "@/lib/proof-generator/analyse-pdf";
 import {
-  applyOperatorConfirmationToPreflight,
+  resolvePreflightAfterOperatorConfirmation,
   validateOperatorConfirmation,
 } from "@/lib/proof-generator/operator-confirmation";
 import {
@@ -544,7 +544,7 @@ export async function generateBrandedPdfForExistingProof(
     throw new ProofError(confirmationErrors.join(" "), 400);
   }
 
-  preflightResult = applyOperatorConfirmationToPreflight(
+  preflightResult = resolvePreflightAfterOperatorConfirmation(
     preflightResult,
     operatorConfirmation,
     actorProfileId

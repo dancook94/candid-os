@@ -4,6 +4,37 @@ import type {
   ProductionFeatureCandidate,
   ProductionFeaturesResult,
 } from "@/lib/proof-generator/types";
+import {
+  resolvePreflightChecksAfterProductionConfirmation,
+} from "@/lib/proof-generator/warnings";
+
+function resolveOverallStatus(
+  checks: PreflightResult["checks"]
+): PreflightResult["overallStatus"] {
+  const rank: Record<PreflightResult["overallStatus"], number> = {
+    pass: 0,
+    warning: 1,
+    manual_review: 2,
+    fail: 3,
+  };
+
+  return checks.reduce<PreflightResult["overallStatus"]>((worst, check) => {
+    if (check.status === "info") {
+      return worst;
+    }
+
+    const mapped =
+      check.status === "pass"
+        ? "pass"
+        : check.status === "warning"
+          ? "warning"
+          : check.status === "fail"
+            ? "fail"
+            : "manual_review";
+
+    return rank[mapped] > rank[worst] ? mapped : worst;
+  }, "pass");
+}
 
 function findCandidate(
   candidates: ProductionFeatureCandidate[],
@@ -87,6 +118,28 @@ export function applyOperatorConfirmationToPreflight(
   return {
     ...preflight,
     productionFeatures,
+  };
+}
+
+export function resolvePreflightAfterOperatorConfirmation(
+  preflight: PreflightResult,
+  confirmation: PreflightOperatorConfirmation | undefined,
+  actorProfileId: string
+): PreflightResult {
+  const withConfirmation = applyOperatorConfirmationToPreflight(
+    preflight,
+    confirmation,
+    actorProfileId
+  );
+  const checks = resolvePreflightChecksAfterProductionConfirmation(
+    withConfirmation.checks,
+    withConfirmation.productionFeatures
+  );
+
+  return {
+    ...withConfirmation,
+    checks,
+    overallStatus: resolveOverallStatus(checks),
   };
 }
 

@@ -6,6 +6,7 @@ import {
   buildProofReference,
   canCreateRevisedProof,
   canReviseCurrentProofInLineage,
+  shouldOfferCreateRevisedProof,
   formatProofHistoryEntry,
   getCurrentProofInLineage,
   getCurrentProofRecord,
@@ -301,6 +302,31 @@ describe("proofAttachmentIsEditable", () => {
         ],
       }),
       false
+    );
+  });
+});
+
+describe("shouldOfferCreateRevisedProof", () => {
+  it("offers revision for ready_to_send even without generated PDF flags loaded", () => {
+    const proof = {
+      id: "1",
+      status: "ready_to_send",
+      proof_lineage_id: "lineage-a",
+      version_number: 6,
+      brandedPdfGeneratedAt: null,
+      files: [],
+    };
+
+    assert.equal(
+      shouldOfferCreateRevisedProof(proof, [
+        {
+          id: "1",
+          status: "ready_to_send",
+          proof_lineage_id: "lineage-a",
+          version_number: 6,
+        },
+      ]),
+      true
     );
   });
 });
