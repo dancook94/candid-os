@@ -124,10 +124,10 @@ export function updateProofPageIndicators(
     const top = PROOF_PDF_PAGE_HEIGHT - PROOF_PDF_MARGIN;
 
     page.drawRectangle({
-      x: rightEdge - 48,
-      y: top - 32,
-      width: 48,
-      height: 16,
+      x: rightEdge - 56,
+      y: top - 34,
+      width: 56,
+      height: 18,
       color: rgb(1, 1, 1),
     });
 
@@ -224,7 +224,9 @@ export function renderSpecificationPages(
 
   function addPage() {
     const page = doc.addPage([PROOF_PDF_PAGE_WIDTH, PROOF_PDF_PAGE_HEIGHT]);
-    const header = drawProofPageHeader(page, fonts, logo, pages.length + 2, pages.length + 2);
+    const header = drawProofPageHeader(page, fonts, logo, pages.length + 2, pages.length + 2, {
+      showPageIndicator: false,
+    });
     pages.push(page);
     return { page, contentStartY: header.contentStartY };
   }

@@ -27,6 +27,10 @@ import type {
   PreflightResult,
 } from "@/lib/proof-generator/types";
 import { buildPreflightResult } from "@/lib/proof-generator/warnings";
+import {
+  enrichProductionFeaturesWithCutPathOverlay,
+  resolveCutPathOverlayAvailabilityForPreflight,
+} from "@/lib/proof-generator/production-features";
 import { PROOF_ACTIVITY_TYPES, PROOF_SELECT } from "@/lib/proofs/constants";
 import { ProofError } from "@/lib/proofs/errors";
 import { getFileExtension, normalizeDropboxApiPath } from "@/lib/proofs/file-validation";
@@ -375,7 +379,7 @@ async function buildPreflightForSourceArtwork(
           }
         : await analyseImageBuffer(artwork.buffer, artwork.fileName, artwork.mimeType);
 
-  return buildPreflightResult({
+  const basePreflight = buildPreflightResult({
     metadata,
     quotedItems,
     sourceReference: {
@@ -386,6 +390,16 @@ async function buildPreflightForSourceArtwork(
     },
     sourceBuffer: artwork.analysisBuffer,
   });
+
+  const productionFeatures = await resolveCutPathOverlayAvailabilityForPreflight(
+    basePreflight,
+    artwork.analysisBuffer
+  );
+
+  return {
+    ...basePreflight,
+    productionFeatures,
+  };
 }
 
 export async function analyseExistingProofArtwork(
@@ -535,6 +549,17 @@ export async function generateBrandedPdfForExistingProof(
     operatorConfirmation,
     actorProfileId
   );
+
+  preflightResult = {
+    ...preflightResult,
+    productionFeatures: await enrichProductionFeaturesWithCutPathOverlay(
+      preflightResult.productionFeatures,
+      artwork.analysisBuffer,
+      preflightResult.productionFeatures.confirmedCutPath?.name ??
+        operatorConfirmation?.cutPath?.confirmedCandidateName ??
+        null
+    ),
+  };
 
   const sourceDropboxPath = artwork.dropboxPath;
   const sourceJobFileId = artwork.jobFileId;

@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   formatCustomerFontLabel,
   formatCustomerSpotColoursLabel,
+  formatProductionFeaturesForCustomerProof,
   formatPdfDimensionsLabel,
   formatPreflightCheckLine,
   formatProofFieldValue,
@@ -182,6 +183,38 @@ describe("customer-facing preflight labels", () => {
     assert.equal(
       formatCustomerFontLabel(samplePreflight()),
       "Live text detected — Candid review required"
+    );
+  });
+
+  it("shows cut path preview status on production features rows", () => {
+    const rendered = formatProductionFeaturesForCustomerProof(
+      samplePreflight({
+        productionFeatures: {
+          ...samplePreflight().productionFeatures,
+          showCutPathOnProof: true,
+          cutPathOverlayRendered: true,
+        },
+      })
+    );
+
+    assert.equal(
+      rendered.find((row) => row.label === "Cut path preview")?.value,
+      "Shown on artwork"
+    );
+
+    const failed = formatProductionFeaturesForCustomerProof(
+      samplePreflight({
+        productionFeatures: {
+          ...samplePreflight().productionFeatures,
+          showCutPathOnProof: true,
+          cutPathOverlayRendered: false,
+        },
+      })
+    );
+
+    assert.equal(
+      failed.find((row) => row.label === "Cut path preview")?.value,
+      "Unable to render — Candid review required"
     );
   });
 });

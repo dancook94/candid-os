@@ -3,6 +3,11 @@ import { PDFDocument, StandardFonts } from "pdf-lib";
 import { embedArtworkPreview } from "@/lib/proof-generator/artwork-preview";
 import { logProofGeneratorDebug } from "@/lib/proof-generator/artwork-buffer";
 import {
+  drawCutPathOverlay,
+  drawCutPathOverlayLegend,
+} from "@/lib/proof-generator/cut-path-overlay";
+import { extractCutPathGeometry } from "@/lib/proof-generator/extract-cut-path-geometry";
+import {
   PROOF_PDF_MARGIN,
   PROOF_PDF_PAGE_HEIGHT,
   PROOF_PDF_PAGE_WIDTH,
@@ -59,7 +64,9 @@ export async function generateCustomerProofPdf(input: {
     const customerMessage = input.customerMessage?.trim() ?? "";
 
     const page1 = doc.addPage([PROOF_PDF_PAGE_WIDTH, PROOF_PDF_PAGE_HEIGHT]);
-    const page1Header = drawProofPageHeader(page1, fonts, logo, 1, 1);
+    const page1Header = drawProofPageHeader(page1, fonts, logo, 1, 1, {
+      showPageIndicator: false,
+    });
     let y = drawProofHeroTitle(page1, fonts, page1Header.dividerY);
     y = drawProofVersionSubtitle(page1, fonts, y, input.versionNumber);
 
@@ -101,7 +108,11 @@ export async function generateCustomerProofPdf(input: {
         preview.kind === "image" ? preview.image.height : Math.round(preview.height),
     });
 
-    drawArtworkPreviewFrame(page1, {
+    const preflight = { ...input.preflight };
+    const features = { ...preflight.productionFeatures };
+    let cutPathOverlayRendered = false;
+
+    const placement = drawArtworkPreviewFrame(page1, {
       x: PROOF_PDF_MARGIN,
       y: previewBoxBottom,
       width: previewBoxWidth,
@@ -122,6 +133,42 @@ export async function generateCustomerProofPdf(input: {
             },
     });
 
+    const shouldRenderCutPath =
+      features.showCutPathOnProof &&
+      features.confirmedCutPath &&
+      preview.kind === "page";
+
+    if (shouldRenderCutPath && features.confirmedCutPath) {
+      const confirmedCutPath = features.confirmedCutPath;
+      const extraction = await extractCutPathGeometry(
+        input.sourceBuffer,
+        confirmedCutPath.name,
+        0
+      );
+
+      if (extraction.ok) {
+        cutPathOverlayRendered = drawCutPathOverlay(page1, extraction.geometry, placement);
+        if (cutPathOverlayRendered) {
+          drawCutPathOverlayLegend(
+            page1,
+            fonts,
+            PROOF_PDF_MARGIN + 8,
+            previewBoxBottom - 14
+          );
+        }
+      }
+
+      logProofGeneratorDebug("cut_path_overlay_render", {
+        requested: true,
+        separationName: confirmedCutPath.name,
+        extracted: extraction.ok,
+        rendered: cutPathOverlayRendered,
+      });
+    }
+
+    features.cutPathOverlayRendered = cutPathOverlayRendered;
+    preflight.productionFeatures = features;
+
     if (customerMessage) {
       drawCustomerMessagePanel(page1, fonts, {
         message: customerMessage,
@@ -138,7 +185,7 @@ export async function generateCustomerProofPdf(input: {
       "Candid Creative"
     );
 
-    renderSpecificationPages(doc, fonts, logo, input.preflight);
+    renderSpecificationPages(doc, fonts, logo, preflight);
 
     updateProofPageIndicators(doc.getPages(), fonts, 1);
 

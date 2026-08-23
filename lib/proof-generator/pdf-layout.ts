@@ -2,6 +2,10 @@ import type { PDFDocument, PDFImage, PDFPage, PDFFont } from "pdf-lib";
 import { rgb } from "pdf-lib";
 
 import {
+  computeArtworkPreviewPlacement,
+  type ArtworkPreviewPlacement,
+} from "@/lib/proof-generator/cut-path-overlay";
+import {
   PROOF_PDF_LOGO_DISPLAY_WIDTH,
   PROOF_PDF_LOGO_RASTER_SCALE,
   PROOF_PDF_MARGIN,
@@ -113,8 +117,10 @@ export function drawProofPageHeader(
   fonts: ProofPdfFonts,
   logo: { image: PDFImage; width: number; height: number },
   pageNumber: number,
-  totalPages: number
+  totalPages: number,
+  options?: { showPageIndicator?: boolean }
 ) {
+  const showPageIndicator = options?.showPageIndicator ?? true;
   const top = PROOF_PDF_PAGE_HEIGHT - PROOF_PDF_MARGIN;
   const rightEdge = PROOF_PDF_PAGE_WIDTH - PROOF_PDF_MARGIN;
 
@@ -135,18 +141,22 @@ export function drawProofPageHeader(
     color: PROOF_PDF_THEME.text,
   });
 
-  const indicator = `${String(pageNumber).padStart(2, "0")} / ${String(totalPages).padStart(2, "0")}`;
-  const indicatorWidth = fonts.bold.widthOfTextAtSize(indicator, HEADER_PAGE_INDICATOR_SIZE);
-  drawText(page, indicator, {
-    x: rightEdge - indicatorWidth,
-    y: top - 28,
-    size: HEADER_PAGE_INDICATOR_SIZE,
-    font: fonts.bold,
-    color: PROOF_PDF_THEME.yellow,
-  });
+  if (showPageIndicator) {
+    const indicator = `${String(pageNumber).padStart(2, "0")} / ${String(totalPages).padStart(2, "0")}`;
+    const indicatorWidth = fonts.bold.widthOfTextAtSize(indicator, HEADER_PAGE_INDICATOR_SIZE);
+    drawText(page, indicator, {
+      x: rightEdge - indicatorWidth,
+      y: top - 28,
+      size: HEADER_PAGE_INDICATOR_SIZE,
+      font: fonts.bold,
+      color: PROOF_PDF_THEME.yellow,
+    });
+  }
 
   const logoBottom = top - logo.height;
-  const rightBlockBottom = top - 28 - HEADER_PAGE_INDICATOR_SIZE;
+  const rightBlockBottom = showPageIndicator
+    ? top - 28 - HEADER_PAGE_INDICATOR_SIZE
+    : top - 14 - HEADER_DOC_LABEL_SIZE;
   const headerBottom = Math.min(logoBottom, rightBlockBottom);
   const dividerY = headerBottom - HEADER_DIVIDER_GAP;
 
@@ -305,7 +315,7 @@ export function drawArtworkPreviewFrame(
       | { kind: "image"; image: PDFImage; imageWidth: number; imageHeight: number }
       | { kind: "page"; page: Parameters<PDFPage["drawPage"]>[0]; pageWidth: number; pageHeight: number };
   }
-) {
+): ArtworkPreviewPlacement {
   page.drawRectangle({
     x,
     y,
@@ -316,35 +326,35 @@ export function drawArtworkPreviewFrame(
     borderWidth: 0.75,
   });
 
-  const padding = 8;
-  const innerWidth = width - padding * 2;
-  const innerHeight = height - padding * 2;
+  const placement = computeArtworkPreviewPlacement({
+    frameX: x,
+    frameY: y,
+    frameWidth: width,
+    frameHeight: height,
+    sourceWidthPt:
+      preview.kind === "image" ? preview.imageWidth : preview.pageWidth,
+    sourceHeightPt:
+      preview.kind === "image" ? preview.imageHeight : preview.pageHeight,
+  });
 
   if (preview.kind === "image") {
-    const scale = Math.min(
-      innerWidth / preview.imageWidth,
-      innerHeight / preview.imageHeight
-    );
-    const drawWidth = preview.imageWidth * scale;
-    const drawHeight = preview.imageHeight * scale;
     page.drawImage(preview.image, {
-      x: x + padding + (innerWidth - drawWidth) / 2,
-      y: y + padding + (innerHeight - drawHeight) / 2,
-      width: drawWidth,
-      height: drawHeight,
+      x: placement.drawX,
+      y: placement.drawY,
+      width: placement.drawWidth,
+      height: placement.drawHeight,
     });
-    return;
+    return placement;
   }
 
-  const scale = Math.min(innerWidth / preview.pageWidth, innerHeight / preview.pageHeight);
-  const drawWidth = preview.pageWidth * scale;
-  const drawHeight = preview.pageHeight * scale;
   page.drawPage(preview.page, {
-    x: x + padding + (innerWidth - drawWidth) / 2,
-    y: y + padding + (innerHeight - drawHeight) / 2,
-    width: drawWidth,
-    height: drawHeight,
+    x: placement.drawX,
+    y: placement.drawY,
+    width: placement.drawWidth,
+    height: placement.drawHeight,
   });
+
+  return placement;
 }
 
 export function estimateWrappedLineCount(

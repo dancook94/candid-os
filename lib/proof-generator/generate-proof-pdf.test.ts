@@ -191,4 +191,145 @@ describe("generateCustomerProofPdf", () => {
     const document = await PDFDocument.load(pdf);
     assert.ok(document.getPageCount() >= 3);
   });
+
+  it("renders cut path overlay and legend when show cut path is enabled", async () => {
+    const sourceBuffer = (
+      await import("@/lib/proof-generator/cut-path-test-pdfs")
+    ).buildCutPathTestPdfBuffer({ shape: "rectangle" });
+
+    const withoutOverlay = await generateCustomerProofPdf({
+      jobReference: "J-4",
+      projectName: "Cut Path Overlay Job",
+      proofReference: "J-4 Proof v5",
+      versionNumber: 5,
+      preflight: buildPreflight({
+        metadata: {
+          ...buildPreflight().metadata,
+          fileName: "artwork.pdf",
+          mimeType: "application/pdf",
+          inputType: "pdf",
+          pageCount: 1,
+          pageSize: {
+            value: { widthPt: 200, heightPt: 200, widthMm: 70.56, heightMm: 70.56 },
+            confidence: "high",
+            source: "test",
+          },
+        },
+        productionFeatures: {
+          cutPathCandidates: [],
+          whiteInkCandidates: [],
+          layers: [],
+          spotColourGroups: { productionSeparations: ["CutContour"], otherSpotColours: [] },
+          expectsCutPath: true,
+          cutPathOverlayAvailable: true,
+          confirmedCutPath: {
+            name: "CutContour",
+            sourceType: "separation",
+            confirmedAt: "2026-01-01T00:00:00.000Z",
+            confirmedByProfileId: "user-1",
+          },
+          showCutPathOnProof: false,
+        },
+      }),
+      sourceBuffer,
+      sourceFileName: "artwork.pdf",
+    });
+
+    const withOverlay = await generateCustomerProofPdf({
+      jobReference: "J-4",
+      projectName: "Cut Path Overlay Job",
+      proofReference: "J-4 Proof v5",
+      versionNumber: 5,
+      preflight: buildPreflight({
+        metadata: {
+          ...buildPreflight().metadata,
+          fileName: "artwork.pdf",
+          mimeType: "application/pdf",
+          inputType: "pdf",
+          pageCount: 1,
+          pageSize: {
+            value: { widthPt: 200, heightPt: 200, widthMm: 70.56, heightMm: 70.56 },
+            confidence: "high",
+            source: "test",
+          },
+        },
+        productionFeatures: {
+          cutPathCandidates: [
+            {
+              name: "CutContour",
+              sourceType: "separation",
+              confidence: "high",
+              reason: "Separation name",
+            },
+          ],
+          whiteInkCandidates: [],
+          layers: [],
+          spotColourGroups: { productionSeparations: ["CutContour"], otherSpotColours: [] },
+          expectsCutPath: true,
+          cutPathOverlayAvailable: true,
+          cutPathOverlayReason: null,
+          confirmedCutPath: {
+            name: "CutContour",
+            sourceType: "separation",
+            confirmedAt: "2026-01-01T00:00:00.000Z",
+            confirmedByProfileId: "user-1",
+          },
+          showCutPathOnProof: true,
+          cutPathOverlayRendered: false,
+        },
+      }),
+      sourceBuffer,
+      sourceFileName: "artwork.pdf",
+    });
+
+    assert.ok(withOverlay.byteLength > withoutOverlay.byteLength);
+    const document = await PDFDocument.load(withOverlay);
+    assert.equal(document.getPageCount(), 2);
+  });
+
+  it("does not render cut path overlay when show cut path is disabled", async () => {
+    const sourceBuffer = (
+      await import("@/lib/proof-generator/cut-path-test-pdfs")
+    ).buildCutPathTestPdfBuffer({ shape: "rectangle" });
+
+    const pdf = await generateCustomerProofPdf({
+      jobReference: "J-4",
+      projectName: "Cut Path Hidden Job",
+      proofReference: "J-4 Proof v5",
+      versionNumber: 5,
+      preflight: buildPreflight({
+        metadata: {
+          ...buildPreflight().metadata,
+          fileName: "artwork.pdf",
+          mimeType: "application/pdf",
+          inputType: "pdf",
+          pageCount: 1,
+          pageSize: {
+            value: { widthPt: 200, heightPt: 200, widthMm: 70.56, heightMm: 70.56 },
+            confidence: "high",
+            source: "test",
+          },
+        },
+        productionFeatures: {
+          cutPathCandidates: [],
+          whiteInkCandidates: [],
+          layers: [],
+          spotColourGroups: { productionSeparations: ["CutContour"], otherSpotColours: [] },
+          expectsCutPath: true,
+          cutPathOverlayAvailable: true,
+          confirmedCutPath: {
+            name: "CutContour",
+            sourceType: "separation",
+            confirmedAt: "2026-01-01T00:00:00.000Z",
+            confirmedByProfileId: "user-1",
+          },
+          showCutPathOnProof: false,
+        },
+      }),
+      sourceBuffer,
+      sourceFileName: "artwork.pdf",
+    });
+
+    assert.ok(pdf.byteLength > 1000);
+  });
 });

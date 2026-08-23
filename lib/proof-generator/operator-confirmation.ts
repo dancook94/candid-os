@@ -135,5 +135,15 @@ export function validateOperatorConfirmation(
     );
   }
 
+  if (
+    confirmation?.cutPath?.decision === "confirmed" &&
+    confirmation.cutPath.showOnCustomerProof &&
+    !preflight.productionFeatures.cutPathOverlayAvailable
+  ) {
+    errors.push(
+      "Show cut path on proof is unavailable because vector geometry could not be extracted from this artwork."
+    );
+  }
+
   return errors;
 }

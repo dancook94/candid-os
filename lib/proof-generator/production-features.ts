@@ -1,5 +1,9 @@
 import type { QuotedSpecificationItem } from "@/lib/proof-generator/types";
 import {
+  extractCutPathGeometry,
+  cutPathGeometryHasContent,
+} from "@/lib/proof-generator/extract-cut-path-geometry";
+import {
   buildFeatureCandidates,
   isProductionSeparationName,
   nameMatchesCutPath,
@@ -221,8 +225,76 @@ export function buildProductionFeaturesFromScan(
     expectsCutPath: quotedItemsExpectCutPath(quotedItems),
     cutPathOverlayAvailable: false,
     cutPathOverlayReason:
-      "Vector cut-path geometry cannot be extracted reliably from current PDF analysis. Text confirmation only.",
+      "Cut-path overlay availability is determined after vector geometry extraction.",
+    cutPathOverlayRendered: false,
   };
+}
+
+export async function enrichProductionFeaturesWithCutPathOverlay(
+  features: ProductionFeaturesResult,
+  sourceBuffer: Buffer | undefined,
+  separationName?: string | null
+): Promise<ProductionFeaturesResult> {
+  if (!sourceBuffer?.length || !separationName) {
+    return {
+      ...features,
+      cutPathOverlayAvailable: false,
+      cutPathOverlayReason:
+        "Visual overlay unavailable — no PDF artwork or cut path selected.",
+    };
+  }
+
+  const extraction = await extractCutPathGeometry(sourceBuffer, separationName, 0);
+  if (!extraction.ok || !cutPathGeometryHasContent(extraction.geometry)) {
+    return {
+      ...features,
+      cutPathOverlayAvailable: false,
+      cutPathOverlayReason:
+        "Visual overlay unavailable — vector geometry could not be extracted from this artwork.",
+    };
+  }
+
+  return {
+    ...features,
+    cutPathOverlayAvailable: true,
+    cutPathOverlayReason: null,
+  };
+}
+
+export async function resolveCutPathOverlayAvailabilityForPreflight(
+  preflight: {
+    productionFeatures: ProductionFeaturesResult;
+    metadata: { inputType: string };
+  },
+  sourceBuffer: Buffer | undefined
+) {
+  if (
+    preflight.metadata.inputType === "image" ||
+    preflight.metadata.inputType === "ai_unsupported" ||
+    !sourceBuffer?.length
+  ) {
+    return preflight.productionFeatures;
+  }
+
+  const candidateName =
+    preflight.productionFeatures.cutPathCandidates[0]?.name ??
+    preflight.productionFeatures.confirmedCutPath?.name ??
+    null;
+
+  if (!candidateName) {
+    return {
+      ...preflight.productionFeatures,
+      cutPathOverlayAvailable: false,
+      cutPathOverlayReason:
+        "Visual overlay unavailable — no cut path candidate detected in artwork.",
+    };
+  }
+
+  return enrichProductionFeaturesWithCutPathOverlay(
+    preflight.productionFeatures,
+    sourceBuffer,
+    candidateName
+  );
 }
 
 export function formatCandidateSourceLabel(

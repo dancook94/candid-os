@@ -150,7 +150,10 @@ export function ProofPreflightReview({
           cutPathDecision === "confirmed" ? candidate?.name ?? selectedCutPath : null,
         confirmedSourceType:
           cutPathDecision === "confirmed" ? candidate?.sourceType ?? null : null,
-        showOnCustomerProof: cutPathDecision === "confirmed" ? showCutPathOnProof : false,
+        showOnCustomerProof:
+          cutPathDecision === "confirmed" &&
+          showCutPathOnProof &&
+          preflight.productionFeatures.cutPathOverlayAvailable,
       };
     }
 
@@ -302,15 +305,28 @@ export function ProofPreflightReview({
                   <input
                     type="checkbox"
                     checked={showCutPathOnProof}
+                    disabled={!preflight.productionFeatures.cutPathOverlayAvailable}
                     onChange={(event) => setShowCutPathOnProof(event.target.checked)}
                   />
                   Show cut path on customer proof
                 </label>
               ) : null}
 
-              {!preflight.productionFeatures.cutPathOverlayAvailable ? (
+              {preflight.productionFeatures.cutPathOverlayAvailable ? (
+                <p className="text-xs text-emerald-700">Visual overlay available</p>
+              ) : (
                 <p className="text-xs text-muted-foreground">
-                  {preflight.productionFeatures.cutPathOverlayReason}
+                  {preflight.productionFeatures.cutPathOverlayReason ??
+                    "Visual overlay unavailable"}
+                </p>
+              )}
+
+              {cutPathDecision === "confirmed" &&
+              showCutPathOnProof &&
+              !preflight.productionFeatures.cutPathOverlayAvailable ? (
+                <p className="text-xs text-amber-700">
+                  Cut path confirmation will appear as text only. Vector overlay cannot be rendered
+                  from this artwork.
                 </p>
               ) : null}
             </div>

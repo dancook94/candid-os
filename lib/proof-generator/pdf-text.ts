@@ -230,6 +230,15 @@ export function formatProductionFeaturesForCustomerProof(preflight: PreflightRes
       label: "Cut path",
       value: `${features.confirmedCutPath.name} — Confirmed`,
     });
+
+    if (features.showCutPathOnProof) {
+      rows.push({
+        label: "Cut path preview",
+        value: features.cutPathOverlayRendered
+          ? "Shown on artwork"
+          : "Unable to render — Candid review required",
+      });
+    }
   } else if (features.noCutLineRequired) {
     rows.push({
       label: "Cut path",
