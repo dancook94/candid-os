@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { downloadDropboxFile } from "@/lib/dropbox/client";
+import { downloadDropboxFile, getDropboxMetadata } from "@/lib/dropbox/client";
 import { analyseImageBuffer } from "@/lib/proof-generator/analyse-image";
 import { analysePdfBuffer } from "@/lib/proof-generator/analyse-pdf";
 import {
@@ -22,10 +22,14 @@ import type {
 import { buildPreflightResult } from "@/lib/proof-generator/warnings";
 import { PROOF_ACTIVITY_TYPES, PROOF_SELECT } from "@/lib/proofs/constants";
 import { ProofError } from "@/lib/proofs/errors";
-import { getFileExtension } from "@/lib/proofs/file-validation";
+import { getFileExtension, normalizeDropboxApiPath } from "@/lib/proofs/file-validation";
+import { logDropboxProofDebug, runDropboxProofOperation } from "@/lib/proofs/dropbox-errors";
 import { logProofActivity } from "@/lib/proofs/activity";
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
-import { isPathInProofsFolder } from "@/lib/proofs/dropbox";
+import {
+  isPathInProofsFolder,
+  resolveProofsFolderPathForJob,
+} from "@/lib/proofs/dropbox";
 import { buildCustomerProofPdfFileName } from "@/lib/proofs/dropbox";
 import {
   proofHasGeneratedCustomerArtifact,
@@ -114,7 +118,7 @@ async function loadProofSourceArtwork(
   jobId: string,
   proofId: string
 ) {
-  await loadMutableProofRecord(adminClient, jobId, proofId);
+  const proof = await loadMutableProofRecord(adminClient, jobId, proofId);
 
   const { data: job, error: jobError } = await adminClient
     .from("jobs")
@@ -142,11 +146,14 @@ async function loadProofSourceArtwork(
     throw new ProofError(error.message, 500);
   }
 
-  if (!proofFile?.dropbox_path) {
-    throw new ProofError("Attach proof artwork before generating a branded PDF.", 409);
+  if (!proofFile?.dropbox_path?.trim()) {
+    throw new ProofError(
+      "No source artwork is attached to this proof version.",
+      409
+    );
   }
 
-  let dropboxPath = proofFile.dropbox_path as string;
+  const dropboxPath = normalizeDropboxApiPath(proofFile.dropbox_path as string);
   let fileName = proofFile.file_name as string;
   let mimeType = (proofFile.mime_type as string | null) ?? null;
   const jobFileId = (proofFile.job_file_id as string | null) ?? null;
@@ -164,12 +171,54 @@ async function loadProofSourceArtwork(
       throw new ProofError(jobFileError.message, 500);
     }
 
-    if (jobFile?.dropbox_path_lower) {
-      dropboxPath = jobFile.dropbox_path_lower as string;
+    if (jobFile) {
       fileName = (jobFile.file_name as string) || fileName;
       mimeType = (jobFile.mime_type as string | null) ?? mimeType;
+
+      const jobFilePath = jobFile.dropbox_path_lower
+        ? normalizeDropboxApiPath(jobFile.dropbox_path_lower as string)
+        : null;
+
+      if (jobFilePath && jobFilePath !== dropboxPath) {
+        logDropboxProofDebug("source_artwork_path_mismatch", {
+          jobId,
+          proofId,
+          proofVersion: proof.version_number,
+          proofLineageId: proof.proof_lineage_id,
+          proofFilePath: dropboxPath,
+          jobFilePath,
+          jobFileId,
+        });
+      }
+    } else {
+      logDropboxProofDebug("source_artwork_stale_job_file_id", {
+        jobId,
+        proofId,
+        proofVersion: proof.version_number,
+        proofLineageId: proof.proof_lineage_id,
+        jobFileId,
+        proofFilePath: dropboxPath,
+      });
     }
   }
+
+  const proofsFolderPath = job.dropbox_folder_path
+    ? resolveProofsFolderPathForJob(job.dropbox_folder_path as string)
+    : null;
+
+  logDropboxProofDebug("source_artwork_resolve", {
+    jobId,
+    proofId,
+    proofVersion: proof.version_number,
+    proofLineageId: proof.proof_lineage_id,
+    sourceFileName: fileName,
+    sourceDropboxPath: dropboxPath,
+    dropboxFolderPath: job.dropbox_folder_path
+      ? normalizeDropboxApiPath(job.dropbox_folder_path as string)
+      : null,
+    proofsFolderPath,
+    jobFileId,
+  });
 
   if (
     job.dropbox_folder_path &&
@@ -188,20 +237,54 @@ async function loadProofSourceArtwork(
 
   assertSupportedExtension(fileName);
 
+  await runDropboxProofOperation(
+    {
+      operation: "download_source_artwork",
+      path: dropboxPath,
+      fileName,
+      dropboxApi: "/2/files/get_metadata",
+    },
+    async () => {
+      const { metadata } = await getDropboxMetadata(dropboxPath);
+      if (!metadata || !("rev" in metadata)) {
+        throw new ProofError(
+          "Source artwork could not be found in Dropbox.",
+          404
+        );
+      }
+      return metadata;
+    }
+  );
+
   logProofGeneratorDebug("source_artwork_download_start", {
+    jobId,
     proofId,
+    proofVersion: proof.version_number,
+    proofLineageId: proof.proof_lineage_id,
     fileName,
     dropboxPath,
     mimeType,
     jobFileId,
+    dropboxApi: "/2/files/download",
   });
 
-  const downloaded = await downloadDropboxFile(dropboxPath);
+  const downloaded = await runDropboxProofOperation(
+    {
+      operation: "download_source_artwork",
+      path: dropboxPath,
+      fileName,
+      dropboxApi: "/2/files/download",
+    },
+    () => downloadDropboxFile(dropboxPath)
+  );
   assertAnalysisSize(downloaded.buffer);
   const detectedKind = assertValidSourceArtworkBuffer(downloaded.buffer, fileName);
 
   logProofGeneratorDebug("source_artwork_download_complete", {
+    jobId,
     proofId,
+    proofVersion: proof.version_number,
+    proofLineageId: proof.proof_lineage_id,
     fileName,
     dropboxPath,
     mimeType: mimeType ?? downloaded.contentType,
@@ -216,6 +299,8 @@ async function loadProofSourceArtwork(
     dropboxPath,
     jobFileId,
     detectedKind,
+    proofVersion: proof.version_number as number,
+    proofLineageId: proof.proof_lineage_id as string,
   };
 }
 
@@ -438,6 +523,21 @@ export async function generateBrandedPdfForExistingProof(
     versionNumber: proof.version_number as number,
     itemReference,
     jobReference: job.job_reference as string,
+  });
+  const proofsFolderPath = resolveProofsFolderPathForJob(
+    job.dropbox_folder_path as string
+  );
+
+  logDropboxProofDebug("branded_pdf_generate_start", {
+    jobId,
+    proofId,
+    proofVersion: proof.version_number,
+    proofLineageId: proof.proof_lineage_id,
+    sourceFileName: artwork.fileName,
+    sourceDropboxPath: artwork.dropboxPath,
+    dropboxFolderPath: normalizeDropboxApiPath(job.dropbox_folder_path as string),
+    proofsFolderPath,
+    generatedDestinationFileName: generatedFileName,
   });
 
   const uploadResult = await uploadProofFileToProofsFolder(adminClient, {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { verifyApprovedAdmin } from "@/lib/admin-auth";
+import { DropboxError } from "@/lib/dropbox/client";
 import { jobErrorResponse } from "@/lib/jobs/api-response";
 import { requireAdminJobAccess } from "@/lib/jobs/auth";
 import {
@@ -9,6 +10,7 @@ import {
 import type {
   PreflightManualOverrides,
 } from "@/lib/proof-generator/types";
+import { mapDropboxErrorToProofError } from "@/lib/proofs/dropbox-errors";
 import { ProofError } from "@/lib/proofs/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -19,6 +21,18 @@ function proofErrorResponse(error: unknown) {
   if (error instanceof ProofError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
+
+  if (error instanceof DropboxError) {
+    const proofError = mapDropboxErrorToProofError(error, {
+      operation: "upload_generated_proof",
+      path: "",
+    });
+    return NextResponse.json(
+      { error: proofError.message },
+      { status: proofError.status }
+    );
+  }
+
   return jobErrorResponse(error);
 }
 

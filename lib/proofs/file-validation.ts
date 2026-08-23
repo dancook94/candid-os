@@ -58,11 +58,62 @@ export function normalizeDropboxPath(path: string) {
   return path.replace(/\/+$/, "").toLowerCase();
 }
 
+/** Canonical Dropbox API path: leading slash, no duplicate segments, no trailing slash. */
+export function normalizeDropboxApiPath(path: string) {
+  let normalized = path.trim();
+  if (!normalized) {
+    return "/";
+  }
+
+  if (normalized.includes("%")) {
+    try {
+      normalized = decodeURIComponent(normalized);
+    } catch {
+      // Keep the original path when decoding fails.
+    }
+  }
+
+  normalized = normalized.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+  if (!normalized.startsWith("/")) {
+    normalized = `/${normalized}`;
+  }
+
+  if (normalized.length > 1) {
+    normalized = normalized.replace(/\/+$/, "");
+  }
+
+  return normalized;
+}
+
+export function joinDropboxPath(...segments: string[]) {
+  const parts: string[] = [];
+
+  for (const segment of segments) {
+    for (const piece of segment.split("/")) {
+      const trimmed = piece.trim();
+      if (trimmed) {
+        parts.push(trimmed);
+      }
+    }
+  }
+
+  return normalizeDropboxApiPath(`/${parts.join("/")}`);
+}
+
+export function joinDropboxPathWithFile(folderPath: string, fileName: string) {
+  const safeFileName = fileName.replace(/[/\\]+/g, "").trim();
+  if (!safeFileName) {
+    throw new Error("Dropbox file name is required.");
+  }
+
+  return joinDropboxPath(folderPath, safeFileName);
+}
+
 export function buildJobSubfolderPath(
   dropboxFolderPath: string,
   subfolder: string
 ) {
-  return `${dropboxFolderPath.replace(/\/+$/, "")}/${subfolder}`;
+  return joinDropboxPath(dropboxFolderPath, subfolder);
 }
 
 export function isPathUnderSubfolder(

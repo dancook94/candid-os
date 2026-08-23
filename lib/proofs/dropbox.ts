@@ -1,5 +1,7 @@
 import {
   copyDropboxFile,
+  createDropboxFolder,
+  DropboxError,
   getDropboxMetadata,
   isDropboxConfigured,
   listDropboxFolderFiles,
@@ -14,12 +16,20 @@ import {
   WORKING_FILES_SUBFOLDER,
 } from "@/lib/dropbox/job-folders";
 import { ProofError } from "@/lib/proofs/errors";
+import type { ProofArtworkOrigin } from "@/lib/proofs/constants";
 import {
   buildJobSubfolderPath,
   isPathUnderSubfolder,
+  joinDropboxPathWithFile,
+  normalizeDropboxApiPath,
   normalizeDropboxPath,
 } from "@/lib/proofs/file-validation";
-import type { ProofArtworkOrigin } from "@/lib/proofs/constants";
+import {
+  isDropboxPathNotFoundError,
+  logDropboxProofDebug,
+  mapDropboxErrorToProofError,
+  runDropboxProofOperation,
+} from "@/lib/proofs/dropbox-errors";
 
 export function resolveProofSourceFolderPath(
   origin: ProofArtworkOrigin,
@@ -50,11 +60,11 @@ export function resolveProofSourceFolderPathForJob(
   switch (origin) {
     case "customer_uploaded":
     case "existing_repeat":
-      return `${dropboxFolderPath}/${CUSTOMER_UPLOAD_SUBFOLDER}`;
+      return buildJobSubfolderPath(dropboxFolderPath, CUSTOMER_UPLOAD_SUBFOLDER);
     case "candid_created":
-      return `${dropboxFolderPath}/${WORKING_FILES_SUBFOLDER}`;
+      return buildJobSubfolderPath(dropboxFolderPath, WORKING_FILES_SUBFOLDER);
     default:
-      return `${dropboxFolderPath}/${CUSTOMER_UPLOAD_SUBFOLDER}`;
+      return buildJobSubfolderPath(dropboxFolderPath, CUSTOMER_UPLOAD_SUBFOLDER);
   }
 }
 
@@ -63,7 +73,10 @@ export function resolveProofsFolderPathForJob(dropboxFolderPath: string | null) 
     return null;
   }
 
-  return buildJobSubfolderPath(dropboxFolderPath, PROOFS_SUBFOLDER);
+  return buildJobSubfolderPath(
+    normalizeDropboxApiPath(dropboxFolderPath),
+    PROOFS_SUBFOLDER
+  );
 }
 
 export function resolveProofsFolderPath(
@@ -88,6 +101,50 @@ export function resolveProofsFolderPathOrThrow(
     throw new ProofError("Proofs folder path is unavailable.", 500);
   }
   return path;
+}
+
+export async function ensureJobProofsFolder(dropboxFolderPath: string) {
+  const proofsFolderPath = resolveProofsFolderPathForJob(dropboxFolderPath);
+  if (!proofsFolderPath) {
+    throw new ProofError("Proofs folder path is unavailable.", 500);
+  }
+
+  logDropboxProofDebug("ensure_proofs_folder_start", {
+    dropboxFolderPath: normalizeDropboxApiPath(dropboxFolderPath),
+    proofsFolderPath,
+    dropboxApi: "/2/files/get_metadata",
+  });
+
+  try {
+    await getDropboxMetadata(proofsFolderPath);
+    logDropboxProofDebug("ensure_proofs_folder_exists", { proofsFolderPath });
+    return proofsFolderPath;
+  } catch (error) {
+    if (error instanceof DropboxError && /path\/not_found/i.test(error.message)) {
+      logDropboxProofDebug("ensure_proofs_folder_create", {
+        proofsFolderPath,
+        dropboxApi: "/2/files/create_folder_v2",
+      });
+
+      try {
+        await createDropboxFolder(proofsFolderPath);
+        logDropboxProofDebug("ensure_proofs_folder_created", { proofsFolderPath });
+        return proofsFolderPath;
+      } catch (createError) {
+        throw mapDropboxErrorToProofError(createError, {
+          operation: "ensure_proofs_folder",
+          path: proofsFolderPath,
+          dropboxApi: "/2/files/create_folder_v2",
+        });
+      }
+    }
+
+    throw mapDropboxErrorToProofError(error, {
+      operation: "ensure_proofs_folder",
+      path: proofsFolderPath,
+      dropboxApi: "/2/files/get_metadata",
+    });
+  }
 }
 
 export function isPathInProofsFolder(
@@ -267,7 +324,7 @@ export async function copyProofFileToProofsFolder({
       versionNumber,
       extension,
     });
-  const targetPath = `${proofsFolderPath.replace(/\/+$/, "")}/${sanitizeDropboxPathSegment(targetName)}`;
+  const targetPath = joinDropboxPathWithFile(proofsFolderPath, targetName);
 
   const metadata = await copyDropboxFile({
     fromPath: sourcePath,
@@ -289,13 +346,31 @@ export async function resolveDropboxFileMetadata(path: string) {
     throw new ProofError("Dropbox is not configured.", 503);
   }
 
-  const { metadata } = await getDropboxMetadata(path);
+  const normalizedPath = normalizeDropboxApiPath(path);
 
-  if (!metadata || !("rev" in metadata)) {
-    throw new ProofError("Dropbox file not found.", 404);
+  try {
+    const { metadata } = await getDropboxMetadata(normalizedPath);
+
+    if (!metadata || !("rev" in metadata)) {
+      throw new ProofError("Dropbox file not found.", 404);
+    }
+
+    return metadata;
+  } catch (error) {
+    if (error instanceof ProofError) {
+      throw error;
+    }
+
+    if (isDropboxPathNotFoundError(error)) {
+      throw new ProofError("Dropbox file not found.", 404);
+    }
+
+    throw mapDropboxErrorToProofError(error, {
+      operation: "resolve_metadata",
+      path: normalizedPath,
+      dropboxApi: "/2/files/get_metadata",
+    });
   }
-
-  return metadata;
 }
 
 export async function assertVersionedProofPathAvailable(
@@ -308,14 +383,20 @@ export async function assertVersionedProofPathAvailable(
     targetFileName: string;
   }
 ) {
+  const normalizedPath = normalizeDropboxApiPath(dropboxPath);
+
   try {
-    await resolveDropboxFileMetadata(dropboxPath);
+    await resolveDropboxFileMetadata(normalizedPath);
     throw new ProofError(
       `Proof v${versionNumber} file "${targetFileName}" already exists in Dropbox. The proof version state is inconsistent — refresh the job page or create a revised proof before generating again.`,
       409
     );
   } catch (error) {
     if (error instanceof ProofError && error.status === 404) {
+      return;
+    }
+
+    if (isDropboxPathNotFoundError(error)) {
       return;
     }
 

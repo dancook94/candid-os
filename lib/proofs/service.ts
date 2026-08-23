@@ -23,6 +23,7 @@ import {
   assertDropboxPathInJobSubfolder,
   assertVersionedProofPathAvailable,
   buildProofUploadTargetFileName,
+  ensureJobProofsFolder,
   isPathInProofsFolder,
   proofArtifactMatchesVersion,
   resolveDropboxFileMetadata,
@@ -44,9 +45,15 @@ import {
   getFileExtension,
   isCustomerFacingProofAsset,
   isCustomerFacingProofExtension,
+  joinDropboxPathWithFile,
+  normalizeDropboxApiPath,
   normalizeDropboxPath,
   resolveProofFileLocationType,
 } from "@/lib/proofs/file-validation";
+import {
+  logDropboxProofDebug,
+  runDropboxProofOperation,
+} from "@/lib/proofs/dropbox-errors";
 import { syncJobProofWorkflowStatus } from "@/lib/proofs/gates";
 import { normalizeProofFileRole } from "@/lib/proofs/proof-files";
 import {
@@ -1104,7 +1111,7 @@ async function resolveAttachProofFileMetadata(
     return {
       jobFileId: jobFile.id as string,
       dropboxFileId: jobFile.dropbox_file_id as string | null,
-      dropboxPath: jobFile.dropbox_path_lower as string,
+      dropboxPath: normalizeDropboxApiPath(jobFile.dropbox_path_lower as string),
       dropboxRevision: jobFile.dropbox_revision as string | null,
       fileName: jobFile.file_name as string,
       mimeType: jobFile.mime_type as string | null,
@@ -1134,7 +1141,7 @@ async function resolveAttachProofFileMetadata(
   return {
     jobFileId: null,
     dropboxFileId: metadata.id,
-    dropboxPath: metadata.path_lower ?? metadata.path_display,
+    dropboxPath: normalizeDropboxApiPath(metadata.path_lower ?? metadata.path_display),
     dropboxRevision: metadata.rev,
     fileName: metadata.name,
     mimeType: null,
@@ -1358,10 +1365,9 @@ export async function uploadProofFileToProofsFolder(
     throw new ProofError(validationError, 400);
   }
 
-  const proofsFolderPath = resolveProofsFolderPathForJob(job.dropbox_folder_path);
-  if (!proofsFolderPath) {
-    throw new ProofError("Proofs folder path is unavailable.", 500);
-  }
+  const proofsFolderPath = await ensureJobProofsFolder(
+    normalizeDropboxApiPath(job.dropbox_folder_path)
+  );
 
   const { data: itemLinks } = await adminClient
     .from("job_proof_manifest_items")
@@ -1384,17 +1390,37 @@ export async function uploadProofFileToProofsFolder(
     versionNumber: proof.version_number,
     extension,
   });
-  const dropboxPath = `${proofsFolderPath}/${targetFileName}`;
+  const dropboxPath = joinDropboxPathWithFile(proofsFolderPath, targetFileName);
+
+  logDropboxProofDebug("upload_generated_proof_start", {
+    jobId,
+    proofId,
+    proofVersion: proof.version_number,
+    dropboxFolderPath: normalizeDropboxApiPath(job.dropbox_folder_path),
+    proofsFolderPath,
+    generatedDestinationFileName: targetFileName,
+    dropboxPath,
+    dropboxApi: "/2/files/upload",
+  });
 
   await assertVersionedProofPathAvailable(dropboxPath, {
     versionNumber: proof.version_number,
     targetFileName,
   });
 
-  const uploaded = await uploadSmallDropboxFile({
-    dropboxPath,
-    body: fileBuffer,
-  });
+  const uploaded = await runDropboxProofOperation(
+    {
+      operation: "upload_generated_proof",
+      path: dropboxPath,
+      fileName: targetFileName,
+      dropboxApi: "/2/files/upload",
+    },
+    () =>
+      uploadSmallDropboxFile({
+        dropboxPath,
+        body: fileBuffer,
+      })
+  );
 
   const uploadedPath = uploaded.path_lower ?? uploaded.path_display;
   const verified = await resolveDropboxFileMetadata(uploadedPath);
