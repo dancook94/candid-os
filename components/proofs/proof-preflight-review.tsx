@@ -11,7 +11,9 @@ import {
   formatCandidateSourceLabel,
 } from "@/lib/proof-generator/production-features";
 import { formatDimensionsLabel } from "@/lib/proof-generator/analyse-pdf";
+import { formatCutPathShapeLabel } from "@/lib/proof-generator/cut-path-bounds";
 import { formatFinishedSizeSourceLabel } from "@/lib/proof-generator/resolve-pdf-geometry";
+import { formatAuthoritativeFinishedSizeSourceLabel } from "@/lib/proof-generator/resolve-finished-size";
 import type {
   PreflightCheck,
   PreflightOperatorConfirmation,
@@ -51,6 +53,7 @@ function statusLabel(status: PreflightCheck["status"]) {
 type ProofPreflightReviewProps = {
   preflight: PreflightResult;
   pending: boolean;
+  generating?: boolean;
   warningsReviewed: Record<string, boolean>;
   onWarningsReviewedChange: (value: Record<string, boolean>) => void;
   onCancel: () => void;
@@ -61,6 +64,7 @@ type ProofPreflightReviewProps = {
 export function ProofPreflightReview({
   preflight,
   pending,
+  generating = false,
   warningsReviewed,
   onWarningsReviewedChange,
   onCancel,
@@ -203,6 +207,62 @@ export function ProofPreflightReview({
       <div className="grid gap-4 md:grid-cols-2">
         <Section title="Artwork specification">
           <CheckList checks={artworkChecks} />
+          <details className="mt-3 rounded-md border border-border p-3 text-sm">
+            <summary className="cursor-pointer font-medium">Size information</summary>
+            <dl className="mt-2 space-y-1 text-muted-foreground">
+              <div>
+                <dt className="font-medium text-foreground">Page size</dt>
+                <dd>{formatDimensionsLabel(preflight.metadata.pageSize.value)}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-foreground">Trim size</dt>
+                <dd>{formatDimensionsLabel(preflight.metadata.trimBox.value)}</dd>
+              </div>
+              {preflight.productionFeatures.confirmedCutPath ? (
+                <div>
+                  <dt className="font-medium text-foreground">Confirmed cut path</dt>
+                  <dd>{preflight.productionFeatures.confirmedCutPath.name}</dd>
+                </div>
+              ) : null}
+              {preflight.productionFeatures.cutPathSize ? (
+                <div>
+                  <dt className="font-medium text-foreground">Cut-path size</dt>
+                  <dd>
+                    {formatDimensionsLabel(preflight.productionFeatures.cutPathSize)}
+                    {preflight.productionFeatures.cutPathShape
+                      ? ` (${formatCutPathShapeLabel(preflight.productionFeatures.cutPathShape)})`
+                      : ""}
+                  </dd>
+                </div>
+              ) : preflight.productionFeatures.confirmedCutPath ? (
+                <div>
+                  <dt className="font-medium text-foreground">Cut-path size</dt>
+                  <dd>Unable to determine</dd>
+                </div>
+              ) : null}
+              <div>
+                <dt className="font-medium text-foreground">Resolved production finished size</dt>
+                <dd>
+                  {formatDimensionsLabel(
+                    preflight.productionFeatures.resolvedProductionFinishedSize ??
+                      preflight.metadata.finishedSize?.value ??
+                      preflight.metadata.trimBox.value
+                  )}
+                </dd>
+              </div>
+              <div>
+                <dt className="font-medium text-foreground">Finished-size source</dt>
+                <dd>
+                  {formatAuthoritativeFinishedSizeSourceLabel(
+                    preflight.productionFeatures.resolvedProductionFinishedSizeSource ??
+                      preflight.metadata.finishedSizeSource?.value ??
+                      null,
+                    preflight.productionFeatures.confirmedCutPath?.name ?? null
+                  )}
+                </dd>
+              </div>
+            </dl>
+          </details>
           {preflight.metadata.inputType === "pdf" ||
           preflight.metadata.inputType === "ai_pdf_compatible" ? (
             <details className="mt-3 rounded-md border border-border p-3 text-sm">
@@ -387,12 +447,23 @@ export function ProofPreflightReview({
                 </p>
               )}
 
+              {cutPathDecision === "confirmed" && preflight.productionFeatures.cutPathSize ? (
+                <div className="rounded-md border border-border bg-muted/20 p-3 text-sm">
+                  <p>
+                    <span className="font-medium">Detected cut size:</span>{" "}
+                    {formatDimensionsLabel(preflight.productionFeatures.cutPathSize)}
+                    {preflight.productionFeatures.cutPathShape
+                      ? ` (${formatCutPathShapeLabel(preflight.productionFeatures.cutPathShape)})`
+                      : ""}
+                  </p>
+                </div>
+              ) : null}
+
               {cutPathDecision === "confirmed" &&
-              showCutPathOnProof &&
-              !preflight.productionFeatures.cutPathOverlayAvailable ? (
+              !preflight.productionFeatures.cutPathSize ? (
                 <p className="text-xs text-amber-700">
-                  Cut path confirmation will appear as text only. Vector overlay cannot be rendered
-                  from this artwork.
+                  Cut size could not be determined from vector geometry. Finished size will require
+                  manual review.
                 </p>
               ) : null}
             </div>
@@ -450,6 +521,9 @@ export function ProofPreflightReview({
               ["bleed_trim_checked", "Bleed / trim checked"],
               ["spelling_content_checked", "Spelling / content checked"],
               ["material_specification_checked", "Material / specification checked"],
+              ...(cutPathDecision === "confirmed" && preflight.productionFeatures.cutPathSize
+                ? [["cut_size_checked", "Cut size checked"] as const]
+                : []),
             ].map(([key, label]) => (
               <label key={key} className="flex items-center gap-2 text-sm">
                 <input
@@ -531,10 +605,10 @@ export function ProofPreflightReview({
         <Button
           type="button"
           size="sm"
-          disabled={pending}
+          disabled={pending || generating}
           onClick={() => onGenerate(buildConfirmation())}
         >
-          Generate branded proof PDF
+          {generating ? "Generating PDF…" : "Generate branded proof PDF"}
         </Button>
       </div>
     </div>

@@ -24,11 +24,14 @@ import {
   formatProofHistoryEntry,
   getCurrentProofInLineage,
   groupProofsByLineage,
-  proofAttachmentIsEditable,
   proofReferenceMatchesVersion,
-  revisionCreatesNewImmutableVersion,
-  shouldOfferCreateRevisedProof,
 } from "@/lib/proofs/versioning";
+import {
+  canCreateRevision,
+  canSendProofToCustomer,
+  requiresGeneratedCustomerProof,
+  revisionHelpText,
+} from "@/lib/proofs/workflow-policy";
 import type { JobProofView } from "@/lib/proofs/types";
 import type { ProofSelectableManifestItem } from "@/lib/proofs/manifest-items";
 import {
@@ -58,16 +61,8 @@ type AdminJobProofsPanelProps = {
   schemaMissing?: boolean;
 };
 
-function requiresGeneratedCustomerProof(proof: JobProofView) {
-  return Boolean(getSourceArtworkFile(proof.files));
-}
-
 function canSendBrandedProof(proof: JobProofView) {
-  if (!requiresGeneratedCustomerProof(proof)) {
-    return true;
-  }
-
-  return hasGeneratedCustomerProof(proof.files);
+  return canSendProofToCustomer(proof);
 }
 
 function mapProofStatusToBadge(status: string) {
@@ -576,7 +571,7 @@ export function AdminJobProofsPanel({
             const currentProof = getCurrentProofInLineage(lineageProofs);
             const previousProofs = lineageProofs.filter((proof) => proof.id !== currentProof?.id);
             const canReviseCurrentProof = currentProof
-              ? shouldOfferCreateRevisedProof(currentProof, proofs)
+              ? canCreateRevision(currentProof, proofs)
               : false;
             const lineageSummary = formatLineageManifestSummary(
               lineageProofs[0]?.manifestItems ?? []
@@ -671,9 +666,7 @@ export function AdminJobProofsPanel({
 
                     {canReviseCurrentProof ? (
                       <p className="text-xs text-muted-foreground">
-                        {revisionCreatesNewImmutableVersion(currentProof.status)
-                          ? `Creates v${currentProof.version_number + 1} as a new draft. v${currentProof.version_number} and its files stay unchanged until the new version is sent.`
-                          : "Starts the next proof version in this series as a new draft. Attach revised artwork, run preflight, then generate the branded PDF."}
+                        {revisionHelpText(currentProof)}
                       </p>
                     ) : null}
 

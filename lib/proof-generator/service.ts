@@ -19,6 +19,7 @@ import {
   PROOF_GENERATOR_OVERSIZE_MESSAGE,
   PROOF_GENERATOR_UNSUPPORTED_MESSAGE,
 } from "@/lib/proof-generator/constants";
+import { applyAuthoritativeFinishedSizeToPreflight } from "@/lib/proof-generator/resolve-finished-size";
 import { generateCustomerProofPdf } from "@/lib/proof-generator/generate-proof-pdf";
 import { loadQuotedSpecificationItems } from "@/lib/proof-generator/quoted-specification";
 import type {
@@ -255,7 +256,7 @@ async function loadProofSourceArtwork(
       const { metadata } = await getDropboxMetadata(dropboxPath);
       if (!metadata || !("rev" in metadata)) {
         throw new ProofError(
-          "Source artwork could not be found in Dropbox.",
+          "Source artwork could not be found in Dropbox. Please attach the current artwork again.",
           404
         );
       }
@@ -563,6 +564,11 @@ export async function generateBrandedPdfForExistingProof(
         null
     ),
   };
+
+  preflightResult = await applyAuthoritativeFinishedSizeToPreflight(
+    preflightResult,
+    artwork.analysisBuffer
+  );
 
   const sourceDropboxPath = artwork.dropboxPath;
   const sourceJobFileId = artwork.jobFileId;

@@ -190,12 +190,10 @@ export function validateOperatorConfirmation(
 
   if (
     confirmation?.cutPath?.decision === "confirmed" &&
-    confirmation.cutPath.showOnCustomerProof &&
-    !preflight.productionFeatures.cutPathOverlayAvailable
+    preflight.productionFeatures.cutPathSizeExtractable &&
+    !confirmation?.checklist?.cut_size_checked
   ) {
-    errors.push(
-      "Show cut path on proof is unavailable because vector geometry could not be extracted from this artwork."
-    );
+    errors.push("Confirm the detected cut size before generating.");
   }
 
   return errors;

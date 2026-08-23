@@ -1,5 +1,9 @@
 import type { QuotedSpecificationItem } from "@/lib/proof-generator/types";
 import {
+  computeCutPathBounds,
+  cutPathBoundsToDimensions,
+} from "@/lib/proof-generator/cut-path-bounds";
+import {
   extractCutPathGeometry,
   cutPathGeometryHasContent,
   formatCutPathExtractionFailureReason,
@@ -255,13 +259,22 @@ export async function enrichProductionFeaturesWithCutPathOverlay(
       cutPathOverlayReason:
         formatCutPathExtractionFailureReason(extraction.diagnostic) ??
         "Visual overlay unavailable — vector geometry could not be extracted from this artwork.",
+      cutPathSizeExtractable: false,
     };
   }
+
+  const bounds = computeCutPathBounds(extraction.geometry);
+  const cutPathSize = bounds ? cutPathBoundsToDimensions(bounds) : null;
 
   return {
     ...features,
     cutPathOverlayAvailable: true,
     cutPathOverlayReason: null,
+    cutPathSize,
+    cutPathBounds: bounds,
+    cutPathContours: bounds?.contours ?? [],
+    cutPathShape: bounds?.overallShape ?? null,
+    cutPathSizeExtractable: Boolean(bounds),
   };
 }
 

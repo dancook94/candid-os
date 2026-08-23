@@ -283,7 +283,8 @@ export function drawCutPathOverlayLegend(
   page: PDFPage,
   fonts: { regular: PDFFont },
   x: number,
-  y: number
+  y: number,
+  options?: { finishedCutSizeLabel?: string | null }
 ) {
   const label = sanitizePdfText("Cut line — does not print");
   page.drawLine({
@@ -302,4 +303,14 @@ export function drawCutPathOverlayLegend(
     font: fonts.regular,
     color: rgb(0.35, 0.35, 0.35),
   });
+
+  if (options?.finishedCutSizeLabel) {
+    page.drawText(sanitizePdfText(`Finished cut size: ${options.finishedCutSizeLabel}`), {
+      x,
+      y: y - 11,
+      size: 7,
+      font: fonts.regular,
+      color: rgb(0.35, 0.35, 0.35),
+    });
+  }
 }

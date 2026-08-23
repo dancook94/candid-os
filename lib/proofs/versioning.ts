@@ -1,17 +1,13 @@
+import { REVISABLE_PROOF_STATUSES, type RevisableProofStatus } from "@/lib/proofs/constants";
 import type { JobProofView } from "@/lib/proofs/types";
+import { canCreateRevision, canEditProofAttachment } from "@/lib/proofs/workflow-policy";
 
-/** Statuses where staff can start the next version from the current proof in a lineage. */
-export const REVISABLE_PROOF_STATUSES = [
-  "ready_to_send",
-  "sent",
-  "viewed",
-  "changes_requested",
-  "approved",
-] as const;
-
-export type RevisableProofStatus = (typeof REVISABLE_PROOF_STATUSES)[number];
+export { REVISABLE_PROOF_STATUSES, type RevisableProofStatus };
 
 const IN_PROGRESS_PROOF_STATUSES = ["draft", "internal_review", "ready_to_send"] as const;
+
+/** Statuses that block creating a newer revision in the same lineage. */
+const REVISION_BLOCKING_STATUSES = ["draft", "internal_review"] as const;
 
 export function manifestItemSetsMatch(left: string[], right: string[]) {
   if (left.length !== right.length) {
@@ -136,8 +132,8 @@ export function hasBlockingInProgressRevision<
   return lineageProofs.some(
     (proof) =>
       proof.id !== sourceProof.id &&
-      IN_PROGRESS_PROOF_STATUSES.includes(
-        proof.status as (typeof IN_PROGRESS_PROOF_STATUSES)[number]
+      REVISION_BLOCKING_STATUSES.includes(
+        proof.status as (typeof REVISION_BLOCKING_STATUSES)[number]
       ) &&
       proof.version_number > sourceProof.version_number
   );
@@ -233,20 +229,15 @@ export function proofHasGeneratedCustomerArtifactView(
     return true;
   }
 
-  return proof.files.some(
+  return proof.files?.some(
     (file) => file.file_role === "customer_proof" && Boolean(file.dropbox_path)
-  );
+  ) ?? false;
 }
 
-/** Whether staff can attach, replace, or remove source artwork on this proof version. */
 export function proofAttachmentIsEditable(
   proof: Pick<JobProofView, "status" | "files" | "brandedPdfGeneratedAt">
 ) {
-  if (!["draft", "internal_review", "ready_to_send"].includes(proof.status)) {
-    return false;
-  }
-
-  return !proofHasGeneratedCustomerArtifactView(proof);
+  return canEditProofAttachment(proof);
 }
 
 export function buildProofRevisionContext(
@@ -287,32 +278,7 @@ export function shouldOfferCreateRevisedProof<
   >,
   U extends Pick<JobProofView, "id" | "status" | "version_number" | "proof_lineage_id">,
 >(proof: T, proofs: U[]) {
-  if (["superseded", "cancelled"].includes(proof.status)) {
-    return false;
-  }
-
-  const lineageProofs = proofs.filter(
-    (candidate) => candidate.proof_lineage_id === proof.proof_lineage_id
-  );
-  const currentInLineage = getCurrentProofInLineage(lineageProofs);
-
-  if (currentInLineage?.id !== proof.id) {
-    return false;
-  }
-
-  if (hasBlockingInProgressRevision(lineageProofs, proof)) {
-    return false;
-  }
-
-  if (revisionCreatesNewImmutableVersion(proof.status)) {
-    return true;
-  }
-
-  if (proofHasGeneratedCustomerArtifactView(proof)) {
-    return true;
-  }
-
-  return canCreateRevisedProof(buildProofRevisionContext(proof), proofs);
+  return canCreateRevision(proof, proofs);
 }
 
 export function formatProofHistoryEntry(

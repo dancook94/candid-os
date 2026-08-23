@@ -86,7 +86,15 @@ export function compareArtworkToQuotedSize(input: {
   quotedHeightMm: number | null;
   detectedWidthMm: number | null;
   detectedHeightMm: number | null;
-  finishedSizeSource?: "trim_box" | "art_box" | "crop_marks" | "crop_box" | "media_box" | null;
+  finishedSizeSource?:
+    | "trim_box"
+    | "art_box"
+    | "crop_marks"
+    | "crop_box"
+    | "media_box"
+    | "cut_path"
+    | "manual_review"
+    | null;
 }): SizeComparisonResult {
   const {
     quotedWidthMm,
@@ -127,7 +135,10 @@ export function compareArtworkToQuotedSize(input: {
   ) {
     return {
       ...base,
-      message: "Size comparison requires quoted and detected dimensions.",
+      message:
+        finishedSizeSource === "manual_review"
+          ? "Finished cut size requires manual review before comparison."
+          : "Size comparison requires quoted and detected dimensions.",
     };
   }
 
@@ -153,12 +164,16 @@ export function compareArtworkToQuotedSize(input: {
   const scaleMatch = directMatch ?? rotatedMatch;
 
   if (scaleMatch) {
+    const sizeLabel =
+      finishedSizeSource === "cut_path" ? "Finished cut size" : "Finished artwork size";
     const message =
       scaleMatch.matchedScale === 1
-        ? "Finished artwork size matches quoted specification."
+        ? `${sizeLabel} matches quoted specification.`
         : scaleMatch.rotationMatches
-          ? `Artwork supplied at ${scaleMatch.matchedScaleLabel} scale with orientation rotated.`
-          : `Artwork supplied at ${scaleMatch.matchedScaleLabel} scale.`;
+          ? `Cut path supplied at ${scaleMatch.matchedScaleLabel} scale with orientation rotated.`
+          : finishedSizeSource === "cut_path"
+            ? `Cut path supplied at ${scaleMatch.matchedScaleLabel} scale.`
+            : `Artwork supplied at ${scaleMatch.matchedScaleLabel} scale.`;
 
     return {
       quotedWidthMm,
@@ -224,9 +239,13 @@ export function compareArtworkToQuotedSize(input: {
       artworkResolutionDpi: null,
       effectiveResolutionDpi: null,
       message:
-        finishedSizeSource === "media_box"
-          ? "Finished size could not be reliably determined."
-          : `Artwork proportions do not match quoted finished size. Width scale: ${widthScaleLabel}. Height scale: ${heightScaleLabel}.`,
+        finishedSizeSource === "manual_review"
+          ? "Finished cut size requires manual review."
+          : finishedSizeSource === "media_box"
+            ? "Finished size could not be reliably determined."
+            : finishedSizeSource === "cut_path"
+              ? `Cut path proportions do not match quoted finished size. Width scale: ${widthScaleLabel}. Height scale: ${heightScaleLabel}.`
+              : `Artwork proportions do not match quoted finished size. Width scale: ${widthScaleLabel}. Height scale: ${heightScaleLabel}.`,
     };
   }
 

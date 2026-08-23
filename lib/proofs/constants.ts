@@ -12,6 +12,17 @@ export const PROOF_STATUSES = [
 
 export type ProofStatus = (typeof PROOF_STATUSES)[number];
 
+/** Proof statuses where staff can start the next version from the current proof. */
+export const REVISABLE_PROOF_STATUSES = [
+  "ready_to_send",
+  "sent",
+  "viewed",
+  "changes_requested",
+  "approved",
+] as const satisfies readonly ProofStatus[];
+
+export type RevisableProofStatus = (typeof REVISABLE_PROOF_STATUSES)[number];
+
 export const PROOF_WORKFLOW_STATUSES = [
   "not_required",
   "no_proof",

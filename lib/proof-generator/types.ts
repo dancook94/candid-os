@@ -34,6 +34,43 @@ export type PdfBoxDimensions = {
   heightMm: number;
 };
 
+export type CutPathShapeKind = "circle" | "rectangle" | "custom_contour";
+
+export type CutPathContourBounds = {
+  index: number;
+  widthPt: number;
+  heightPt: number;
+  widthMm: number;
+  heightMm: number;
+  minXPt: number;
+  minYPt: number;
+  maxXPt: number;
+  maxYPt: number;
+  shape: CutPathShapeKind;
+};
+
+export type CutPathBoundsSummary = {
+  widthPt: number;
+  heightPt: number;
+  widthMm: number;
+  heightMm: number;
+  minXPt: number;
+  minYPt: number;
+  maxXPt: number;
+  maxYPt: number;
+  contours: CutPathContourBounds[];
+  overallShape: CutPathShapeKind;
+};
+
+export type AuthoritativeFinishedSizeSource =
+  | "trim_box"
+  | "art_box"
+  | "crop_marks"
+  | "crop_box"
+  | "media_box"
+  | "cut_path"
+  | "manual_review";
+
 export type DetectedArtworkMetadata = {
   fileName: string;
   fileSizeBytes: number;
@@ -51,7 +88,7 @@ export type DetectedArtworkMetadata = {
   artBox: DetectedValue<PdfBoxDimensions | null>;
   finishedSize: DetectedValue<PdfBoxDimensions | null>;
   finishedSizeSource: DetectedValue<
-    "trim_box" | "art_box" | "crop_marks" | "crop_box" | "media_box" | null
+    "trim_box" | "art_box" | "crop_marks" | "crop_box" | "media_box" | "cut_path" | "manual_review" | null
   >;
   bleedAllowanceMm: DetectedValue<number | null>;
   colourMode: DetectedValue<
@@ -118,6 +155,14 @@ export type ProductionFeaturesResult = {
   cutPathOverlayGeometryAvailable?: boolean;
   cutPathOverlayRendered?: boolean;
   originalCutPathSuppressed?: boolean;
+  cutPathSize?: PdfBoxDimensions | null;
+  cutPathBounds?: CutPathBoundsSummary | null;
+  cutPathContours?: CutPathContourBounds[];
+  cutPathShape?: CutPathShapeKind | null;
+  cutPathSizeExtractable?: boolean;
+  resolvedProductionFinishedSize?: PdfBoxDimensions | null;
+  resolvedProductionFinishedSizeSource?: AuthoritativeFinishedSizeSource | null;
+  finishedSizeRequiresManualReview?: boolean;
   confirmedCutPath?: ConfirmedProductionFeature | null;
   noCutLineRequired?: boolean;
   cutPathRequiredNotDetected?: boolean;
@@ -167,7 +212,8 @@ export type PreflightOperatorConfirmation = {
     Record<
       | "bleed_trim_checked"
       | "spelling_content_checked"
-      | "material_specification_checked",
+      | "material_specification_checked"
+      | "cut_size_checked",
       boolean
     >
   >;

@@ -28,7 +28,7 @@ import {
   renderSpecificationPages,
   updateProofPageIndicators,
 } from "@/lib/proof-generator/pdf-spec-pages";
-import { PDF_NOT_SPECIFIED, joinPdfParts } from "@/lib/proof-generator/pdf-text";
+import { joinPdfParts, PDF_NOT_SPECIFIED } from "@/lib/proof-generator/pdf-text";
 import type { PreflightResult } from "@/lib/proof-generator/types";
 import { buildCustomerProofPdfFileName } from "@/lib/proofs/dropbox";
 
@@ -101,12 +101,31 @@ export async function generateCustomerProofPdf(input: {
       input.preflight.productionFeatures.showCutPathOnProof &&
         input.preflight.productionFeatures.confirmedCutPath
     );
-    const previewSource = overlayRequestedInitial
-      ? createCustomerPreviewPdfBuffer(
+
+    let previewSource: ReturnType<typeof createCustomerPreviewPdfBuffer> = {
+      buffer: input.sourceBuffer,
+      originalCutPathSuppressed: false,
+      method: "none",
+    };
+
+    if (overlayRequestedInitial) {
+      try {
+        previewSource = createCustomerPreviewPdfBuffer(
           input.sourceBuffer,
           input.preflight.productionFeatures.confirmedCutPath ?? null
-        )
-      : { buffer: input.sourceBuffer, originalCutPathSuppressed: false, method: "none" as const };
+        );
+      } catch (error) {
+        logProofGeneratorDebug("cut_path_preview_suppression_failed", {
+          sourceFileName: input.sourceFileName,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        previewSource = {
+          buffer: input.sourceBuffer,
+          originalCutPathSuppressed: false,
+          method: "none",
+        };
+      }
+    }
 
     const preview = await embedArtworkPreview(doc, input.sourceBuffer, input.sourceFileName, {
       previewBuffer: previewSource.buffer,
@@ -170,11 +189,17 @@ export async function generateCustomerProofPdf(input: {
       if (cutPathOverlayGeometryAvailable && extraction.ok) {
         cutPathOverlayRendered = drawCutPathOverlay(page1, extraction.geometry, placement);
         if (cutPathOverlayRendered) {
+          const cutPathSize = features.cutPathSize ?? features.resolvedProductionFinishedSize;
           drawCutPathOverlayLegend(
             page1,
             fonts,
             PROOF_PDF_MARGIN + 8,
-            previewBoxBottom - 14
+            previewBoxBottom - 14,
+            {
+              finishedCutSizeLabel: cutPathSize
+                ? `${cutPathSize.widthMm} x ${cutPathSize.heightMm} mm`
+                : null,
+            }
           );
         }
       }

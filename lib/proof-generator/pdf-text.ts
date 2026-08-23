@@ -248,6 +248,21 @@ export function formatProductionFeaturesForCustomerProof(preflight: PreflightRes
       value: `${features.confirmedCutPath.name} — Confirmed`,
     });
 
+    if (features.cutPathSize) {
+      rows.push({
+        label: "Cut size",
+        value: formatPdfDimensionsLabel(
+          features.cutPathSize.widthMm,
+          features.cutPathSize.heightMm
+        ),
+      });
+    } else if (features.finishedSizeRequiresManualReview) {
+      rows.push({
+        label: "Cut size",
+        value: PDF_MANUAL_REVIEW,
+      });
+    }
+
     if (features.showCutPathOnProof) {
       rows.push({
         label: "Cut path preview",

@@ -16,12 +16,12 @@ import {
   estimateSpecificationSectionCardHeight,
   type ProofPdfFonts,
 } from "@/lib/proof-generator/pdf-layout";
+import { formatAuthoritativeFinishedSizeSourceLabel } from "@/lib/proof-generator/resolve-finished-size";
 import {
   PDF_NOT_SPECIFIED,
   formatBleedAllowanceLabel,
   formatCustomerSpotColoursLabel,
   formatEffectiveResolutionLabel,
-  formatFinishedSizeDetectionLabel,
   formatPdfDimensionsLabel,
   formatPdfDimensionsFromBox,
   formatProductionFeaturesForCustomerProof,
@@ -158,12 +158,18 @@ export function renderSpecificationPages(
 
   const primaryItem = preflight.quotedItems[0] ?? null;
   const pageSize = preflight.metadata.pageSize.value;
-  const finishedSize =
+  const trimSize = preflight.metadata.trimBox.value ?? preflight.metadata.finishedSize?.value ?? pageSize;
+  const resolvedFinishedSize =
+    preflight.productionFeatures.resolvedProductionFinishedSize ??
     preflight.metadata.finishedSize?.value ??
-    preflight.metadata.trimBox.value ??
-    pageSize;
+    trimSize;
+  const cutPathSize = preflight.productionFeatures.cutPathSize;
   const sizeComparison = preflight.sizeComparison;
   const bleedAllowanceMm = preflight.metadata.bleedAllowanceMm?.value ?? null;
+  const finishedSizeSource =
+    preflight.productionFeatures.resolvedProductionFinishedSizeSource ??
+    preflight.metadata.finishedSizeSource?.value ??
+    null;
 
   const quotedRows = [
     {
@@ -187,20 +193,35 @@ export function renderSpecificationPages(
 
   const suppliedRows = [
     {
-      label: "Finished / trim size",
-      value: formatPdfDimensionsFromBox(finishedSize),
-    },
-    {
       label: "Page size",
       value: formatPdfDimensionsFromBox(pageSize),
     },
     {
-      label: "Bleed",
-      value: formatBleedAllowanceLabel(bleedAllowanceMm),
+      label: "Trim size",
+      value: formatPdfDimensionsFromBox(trimSize),
+    },
+    ...(cutPathSize
+      ? [
+          {
+            label: "Cut-path size",
+            value: formatPdfDimensionsFromBox(cutPathSize),
+          },
+        ]
+      : []),
+    {
+      label: "Resolved finished size",
+      value: formatPdfDimensionsFromBox(resolvedFinishedSize),
     },
     {
-      label: "Size detection",
-      value: formatFinishedSizeDetectionLabel(preflight.metadata),
+      label: "Finished-size source",
+      value: formatAuthoritativeFinishedSizeSourceLabel(
+        finishedSizeSource,
+        preflight.productionFeatures.confirmedCutPath?.name ?? null
+      ),
+    },
+    {
+      label: "Bleed",
+      value: formatBleedAllowanceLabel(bleedAllowanceMm),
     },
     { label: "Scale", value: formatProofScaleLabel(sizeComparison?.matchedScaleLabel ?? null) },
     {

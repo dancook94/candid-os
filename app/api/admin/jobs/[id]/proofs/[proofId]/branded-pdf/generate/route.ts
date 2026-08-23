@@ -68,6 +68,7 @@ export async function POST(request: Request, context: RouteContext) {
 
     return NextResponse.json(result);
   } catch (error) {
+    console.error("[proofs:branded-pdf:generate]", error);
     return proofErrorResponse(error);
   }
 }

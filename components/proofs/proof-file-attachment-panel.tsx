@@ -10,7 +10,8 @@ import {
 } from "@/lib/proofs/constants";
 import { PROOF_UPLOAD_MAX_BYTES_LABEL } from "@/lib/proofs/file-validation";
 import { getSourceArtworkFile } from "@/lib/proofs/proof-files";
-import { proofAttachmentIsEditable, revisionCreatesNewImmutableVersion } from "@/lib/proofs/versioning";
+import { canEditProofAttachment } from "@/lib/proofs/workflow-policy";
+import { revisionCreatesNewImmutableVersion } from "@/lib/proofs/versioning";
 import type { JobProofFileView, JobProofView } from "@/lib/proofs/types";
 
 type DropboxListFile = {
@@ -87,7 +88,7 @@ export function ProofFileAttachmentPanel({
 
   const proofFile = getSourceArtworkFile(proof.files);
   const completeJobFiles = jobFiles.filter((file) => file.upload_status === "complete");
-  const canEditAttachment = proofAttachmentIsEditable(proof);
+  const canEditAttachment = canEditProofAttachment(proof);
   const attachmentLockedForRevision =
     !canEditAttachment &&
     Boolean(proofFile) &&

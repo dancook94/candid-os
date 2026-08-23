@@ -2,6 +2,169 @@ import { deflateSync } from "node:zlib";
 
 type CutPathShape = "circle" | "rectangle" | "irregular";
 
+function mmToPt(mm: number) {
+  return (mm / 25.4) * 72;
+}
+
+function buildCircleCutPathStream(centerXPt: number, centerYPt: number, radiusPt: number) {
+  const k = radiusPt * 0.5522847498;
+  const left = centerXPt - radiusPt;
+  const right = centerXPt + radiusPt;
+  const top = centerYPt + radiusPt;
+  const bottom = centerYPt - radiusPt;
+
+  return [
+    "q",
+    "/CutContour CS 1 SC",
+    `${centerXPt} ${top} m`,
+    `${centerXPt + k} ${top} ${right} ${centerYPt + k} ${right} ${centerYPt} c`,
+    `${right} ${centerYPt - k} ${centerXPt + k} ${bottom} ${centerXPt} ${bottom} c`,
+    `${centerXPt - k} ${bottom} ${left} ${centerYPt - k} ${left} ${centerYPt} c`,
+    `${left} ${centerYPt + k} ${centerXPt - k} ${top} ${centerXPt} ${top} c`,
+    "h S",
+    "Q",
+  ].join(" ");
+}
+
+function buildRectangleCutPathStream(
+  xPt: number,
+  yPt: number,
+  widthPt: number,
+  heightPt: number
+) {
+  return `q /CutContour CS 1 SC ${xPt} ${yPt} ${widthPt} ${heightPt} re S Q`;
+}
+
+function buildIrregularCutPathStream(insetPt: number, widthPt: number, heightPt: number) {
+  const x1 = insetPt;
+  const y1 = insetPt;
+  const x2 = insetPt + widthPt;
+  const y2 = insetPt + heightPt;
+  return [
+    "q",
+    "/CutContour CS 1 SC",
+    `${x1} ${y1} m`,
+    `${x2} ${y1 + heightPt * 0.15} l`,
+    `${x2 - widthPt * 0.1} ${y2} l`,
+    `${x1 + widthPt * 0.25} ${y2 - heightPt * 0.08} l`,
+    `${x1} ${y1 + heightPt * 0.35} l`,
+    "h S",
+    "Q",
+  ].join(" ");
+}
+
+function buildPathStreamForMmShape(input: {
+  shape: CutPathShape;
+  pageSizeMm: number;
+  trimSizeMm: number;
+  cutWidthMm: number;
+  cutHeightMm: number;
+}) {
+  const pagePt = mmToPt(input.pageSizeMm);
+  const trimPt = mmToPt(input.trimSizeMm);
+  const insetPt = (pagePt - trimPt) / 2;
+  const cutWidthPt = mmToPt(input.cutWidthMm);
+  const cutHeightPt = mmToPt(input.cutHeightMm);
+  const cutInsetXPt = insetPt + (trimPt - cutWidthPt) / 2;
+  const cutInsetYPt = insetPt + (trimPt - cutHeightPt) / 2;
+  const centerXPt = cutInsetXPt + cutWidthPt / 2;
+  const centerYPt = cutInsetYPt + cutHeightPt / 2;
+
+  switch (input.shape) {
+    case "circle":
+      return buildCircleCutPathStream(centerXPt, centerYPt, Math.min(cutWidthPt, cutHeightPt) / 2);
+    case "rectangle":
+      return buildRectangleCutPathStream(cutInsetXPt, cutInsetYPt, cutWidthPt, cutHeightPt);
+    case "irregular":
+      return buildIrregularCutPathStream(cutInsetXPt, cutWidthPt, cutHeightPt);
+  }
+}
+
+function buildTrimmedCutPathPdfBuffer(input: {
+  shape: CutPathShape;
+  pageSizeMm?: number;
+  trimSizeMm?: number;
+  cutWidthMm: number;
+  cutHeightMm: number;
+  includeCutPath?: boolean;
+}) {
+  const pageSizeMm = input.pageSizeMm ?? 523.28;
+  const trimSizeMm = input.trimSizeMm ?? 500;
+  const pagePt = mmToPt(pageSizeMm);
+  const trimPt = mmToPt(trimSizeMm);
+  const insetPt = (pagePt - trimPt) / 2;
+  const includeCutPath = input.includeCutPath ?? true;
+  const cutPathStream = includeCutPath
+    ? buildPathStreamForMmShape({
+        shape: input.shape,
+        pageSizeMm,
+        trimSizeMm,
+        cutWidthMm: input.cutWidthMm,
+        cutHeightMm: input.cutHeightMm,
+      })
+    : "";
+  const artworkStream = `q 0.9 0.9 0.9 rg ${insetPt} ${insetPt} ${trimPt} ${trimPt} re f Q`;
+  const contentStream = `${artworkStream}\n${cutPathStream}`.trim();
+  const streamBytes = Buffer.from(contentStream, "latin1");
+
+  const prefix = [
+    "%PDF-1.4",
+    "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+    "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj",
+    `3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${pagePt} ${pagePt}]/CropBox[0 0 ${pagePt} ${pagePt}]/BleedBox[0 0 ${pagePt} ${pagePt}]/TrimBox[${insetPt} ${insetPt} ${insetPt + trimPt} ${insetPt + trimPt}]/Contents 4 0 R/Resources<</ColorSpace<</CutContour 5 0 R>>>>>>endobj`,
+    `4 0 obj<</Length ${streamBytes.length}>>stream\n`,
+  ].join("\n");
+
+  const suffix = [
+    "endstream",
+    "endobj",
+    buildSeparationObject("CutContour"),
+    buildTintFunctionObject(),
+    "trailer<</Size 7/Root 1 0 R>>",
+    "%%EOF",
+  ].join("\n");
+
+  return Buffer.concat([
+    Buffer.from(prefix, "latin1"),
+    streamBytes,
+    Buffer.from(`\n${suffix}`, "latin1"),
+  ]);
+}
+
+/** 500 x 500 mm trim artboard with centred contour cut path. */
+export function buildContourCutTestPdfBuffer(input?: {
+  shape?: CutPathShape;
+  cutWidthMm?: number;
+  cutHeightMm?: number;
+}) {
+  return buildTrimmedCutPathPdfBuffer({
+    shape: input?.shape ?? "circle",
+    cutWidthMm: input?.cutWidthMm ?? 400,
+    cutHeightMm: input?.cutHeightMm ?? 400,
+  });
+}
+
+/** 50 x 50 mm trim with 40 x 40 mm cut path (10% of 400 x 400 quoted size). */
+export function buildScaledContourCutTestPdfBuffer() {
+  return buildTrimmedCutPathPdfBuffer({
+    shape: "circle",
+    pageSizeMm: 52.33,
+    trimSizeMm: 50,
+    cutWidthMm: 40,
+    cutHeightMm: 40,
+  });
+}
+
+/** Trim-only PDF without cut path geometry for extraction-failure scenarios. */
+export function buildTrimOnlyTestPdfBuffer() {
+  return buildTrimmedCutPathPdfBuffer({
+    shape: "circle",
+    cutWidthMm: 400,
+    cutHeightMm: 400,
+    includeCutPath: false,
+  });
+}
+
 function buildSeparationObject(separationName: string) {
   return `5 0 obj[/Separation/${separationName}/DeviceCMYK 6 0 R]endobj`;
 }

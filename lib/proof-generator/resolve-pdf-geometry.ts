@@ -11,7 +11,9 @@ export type FinishedSizeSource =
   | "art_box"
   | "crop_marks"
   | "crop_box"
-  | "media_box";
+  | "media_box"
+  | "cut_path"
+  | "manual_review";
 
 export type PdfBoxRect = PdfBoxDimensions & {
   x1Pt: number;
@@ -551,6 +553,10 @@ export function formatFinishedSizeSourceLabel(
       return "PDF CropBox";
     case "media_box":
       return "PDF MediaBox";
+    case "cut_path":
+      return "Confirmed cut path";
+    case "manual_review":
+      return "Manual review required";
     default:
       return "Not determined";
   }

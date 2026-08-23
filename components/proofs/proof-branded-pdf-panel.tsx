@@ -3,15 +3,15 @@
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { validateOperatorConfirmation } from "@/lib/proof-generator/operator-confirmation";
 import type { PreflightResult, PreflightOperatorConfirmation } from "@/lib/proof-generator/types";
-import { PROOF_ATTACHABLE_STATUSES } from "@/lib/proofs/constants";
+import type { JobProofView } from "@/lib/proofs/types";
+import { canGenerateBrandedPdf, requiresGeneratedCustomerProof } from "@/lib/proofs/workflow-policy";
 import {
   getCustomerProofFile,
   getSourceArtworkFile,
   hasGeneratedCustomerProof,
-  hasGeneratorEligibleSourceArtwork,
 } from "@/lib/proofs/proof-files";
-import type { JobProofView } from "@/lib/proofs/types";
 import { ProofPreflightReview } from "@/components/proofs/proof-preflight-review";
 
 type ProofBrandedPdfPanelProps = {
@@ -34,6 +34,26 @@ function formatTimestamp(value: string | null) {
   return new Date(value).toLocaleString("en-GB");
 }
 
+function mapGenerationErrorMessage(payload: { error?: string }, response: Response) {
+  if (payload.error?.trim()) {
+    return payload.error;
+  }
+
+  if (response.status === 404) {
+    return "Source artwork could not be found in Dropbox. Please attach the current artwork again.";
+  }
+
+  if (response.status === 409) {
+    return "This proof version cannot be updated. Create a revised proof if you need a new version.";
+  }
+
+  if (response.status >= 500) {
+    return "Failed to generate branded proof PDF. Check server logs for details.";
+  }
+
+  return "Unable to generate branded proof PDF.";
+}
+
 export function ProofBrandedPdfPanel({
   jobId,
   proof,
@@ -46,14 +66,15 @@ export function ProofBrandedPdfPanel({
   const [step, setStep] = useState<PanelStep>("idle");
   const [preflight, setPreflight] = useState<PreflightResult | null>(null);
   const [warningsReviewed, setWarningsReviewed] = useState<Record<string, boolean>>({});
+  const [panelError, setPanelError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
 
-  const canGenerate = PROOF_ATTACHABLE_STATUSES.includes(
-    proof.status as (typeof PROOF_ATTACHABLE_STATUSES)[number]
-  );
-  const sourceArtwork = getSourceArtworkFile(proof.files);
-  const customerProof = getCustomerProofFile(proof.files);
-  const hasAttachment = hasGeneratorEligibleSourceArtwork(proof.files);
-  const hasCustomerProof = hasGeneratedCustomerProof(proof.files);
+  const canGenerate = canGenerateBrandedPdf(proof);
+  const sourceArtwork = getSourceArtworkFile(proof.files ?? []);
+  const customerProof = getCustomerProofFile(proof.files ?? []);
+  const hasAttachment = requiresGeneratedCustomerProof(proof);
+  const hasCustomerProof = hasGeneratedCustomerProof(proof.files ?? []);
 
   const warningChecks = useMemo(
     () =>
@@ -71,36 +92,61 @@ export function ProofBrandedPdfPanel({
   }
 
   async function analyseArtwork() {
+    setPanelError(null);
+    setSuccessMessage(null);
     onError(null);
     onPendingChange(true);
 
-    const response = await fetch(
-      `/api/admin/jobs/${jobId}/proofs/${proof.id}/branded-pdf/analyse`,
-      { method: "POST" }
-    );
+    try {
+      const response = await fetch(
+        `/api/admin/jobs/${jobId}/proofs/${proof.id}/branded-pdf/analyse`,
+        { method: "POST" }
+      );
 
-    const payload = (await response.json()) as {
-      preflight?: PreflightResult;
-      error?: string;
-    };
+      let payload: { preflight?: PreflightResult; error?: string } = {};
+      try {
+        payload = (await response.json()) as typeof payload;
+      } catch {
+        payload = {};
+      }
 
-    onPendingChange(false);
+      if (!response.ok) {
+        const message = payload.error ?? "Unable to analyse proof artwork.";
+        setPanelError(message);
+        onError(message);
+        return;
+      }
 
-    if (!response.ok) {
-      onError(payload.error ?? "Unable to analyse proof artwork.");
-      return;
+      setPreflight(payload.preflight ?? null);
+      setWarningsReviewed({});
+      setStep("review");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to analyse proof artwork.";
+      setPanelError(message);
+      onError(message);
+    } finally {
+      onPendingChange(false);
     }
-
-    setPreflight(payload.preflight ?? null);
-    setWarningsReviewed({});
-    setStep("review");
   }
 
   async function generateBrandedPdf(operatorConfirmation: PreflightOperatorConfirmation) {
+    setPanelError(null);
+    setSuccessMessage(null);
     onError(null);
 
     if (!preflight) {
-      onError("Run artwork analysis before generating the branded PDF.");
+      const message = "Run artwork analysis before generating the branded PDF.";
+      setPanelError(message);
+      onError(message);
+      return;
+    }
+
+    const confirmationErrors = validateOperatorConfirmation(preflight, operatorConfirmation);
+    if (confirmationErrors.length > 0) {
+      const message = confirmationErrors.join(" ");
+      setPanelError(message);
+      onError(message);
       return;
     }
 
@@ -109,37 +155,59 @@ export function ProofBrandedPdfPanel({
     );
 
     if (unreviewedWarnings.length > 0) {
-      onError("Confirm each warning, review, or fail item before generating.");
+      const message = "Confirm each warning, review, or fail item before generating.";
+      setPanelError(message);
+      onError(message);
       return;
     }
 
     onPendingChange(true);
+    setGenerating(true);
 
-    const response = await fetch(
-      `/api/admin/jobs/${jobId}/proofs/${proof.id}/branded-pdf/generate`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ operatorConfirmation }),
+    try {
+      const response = await fetch(
+        `/api/admin/jobs/${jobId}/proofs/${proof.id}/branded-pdf/generate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operatorConfirmation }),
+        }
+      );
+
+      let payload: { error?: string; generatedFileName?: string } = {};
+      try {
+        payload = (await response.json()) as typeof payload;
+      } catch {
+        payload = {};
       }
-    );
 
-    const payload = (await response.json()) as {
-      error?: string;
-      generatedFileName?: string;
-    };
+      if (!response.ok) {
+        const message = mapGenerationErrorMessage(payload, response);
+        setPanelError(message);
+        onError(message);
+        return;
+      }
 
-    onPendingChange(false);
-
-    if (!response.ok) {
-      onError(payload.error ?? "Unable to generate branded proof PDF.");
-      return;
+      const message = payload.generatedFileName
+        ? `Proof PDF generated successfully: ${payload.generatedFileName}`
+        : "Proof PDF generated successfully.";
+      setSuccessMessage(message);
+      setStep("idle");
+      setPreflight(null);
+      setWarningsReviewed({});
+      onError(null);
+      await onRefresh();
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to generate branded proof PDF.";
+      setPanelError(message);
+      onError(message);
+    } finally {
+      setGenerating(false);
+      onPendingChange(false);
     }
-
-    setStep("idle");
-    setPreflight(null);
-    setWarningsReviewed({});
-    await onRefresh();
   }
 
   function downloadCustomerProof() {
@@ -181,6 +249,18 @@ export function ProofBrandedPdfPanel({
         </div>
       </dl>
 
+      {panelError ? (
+        <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {panelError}
+        </p>
+      ) : null}
+
+      {successMessage ? (
+        <p className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          {successMessage}
+        </p>
+      ) : null}
+
       {hasCustomerProof ? (
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" onClick={downloadCustomerProof}>
@@ -200,7 +280,7 @@ export function ProofBrandedPdfPanel({
               type="button"
               variant="outline"
               size="sm"
-              disabled={pending}
+              disabled={pending || generating}
               onClick={() => void analyseArtwork()}
             >
               Analyse artwork & review preflight
@@ -212,7 +292,8 @@ export function ProofBrandedPdfPanel({
       {step === "review" && preflight ? (
         <ProofPreflightReview
           preflight={preflight}
-          pending={pending}
+          pending={pending || generating}
+          generating={generating}
           warningsReviewed={warningsReviewed}
           onWarningsReviewedChange={setWarningsReviewed}
           onCancel={() => {

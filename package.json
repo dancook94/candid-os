@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:proof-generator": "node --import tsx --test lib/proof-generator/compare-specification.test.ts lib/proof-generator/pdf-text.test.ts lib/proof-generator/generate-proof-pdf.test.ts lib/proof-generator/quoted-specification.test.ts lib/proof-generator/extract-cut-path-geometry.test.ts lib/proof-generator/production-features.test.ts lib/proof-generator/resolve-pdf-geometry.test.ts lib/proof-generator/suppress-cut-path-preview.test.ts"
+    "test:proof-generator": "node --import tsx --test lib/proof-generator/compare-specification.test.ts lib/proof-generator/pdf-text.test.ts lib/proof-generator/generate-proof-pdf.test.ts lib/proof-generator/quoted-specification.test.ts lib/proof-generator/extract-cut-path-geometry.test.ts lib/proof-generator/production-features.test.ts lib/proof-generator/resolve-pdf-geometry.test.ts lib/proof-generator/resolve-finished-size.test.ts lib/proof-generator/suppress-cut-path-preview.test.ts lib/proofs/workflow-policy.test.ts lib/proofs/versioning.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
