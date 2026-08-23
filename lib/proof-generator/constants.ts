@@ -1,5 +1,5 @@
 /** Preflight analysis schema version stored with each result. */
-export const PROOF_GENERATOR_ANALYSIS_VERSION = "1.0.0";
+export const PROOF_GENERATOR_ANALYSIS_VERSION = "2.0.0";
 
 /** Default maximum source file size for automated analysis (50 MB). Override via env. */
 export const DEFAULT_PROOF_GENERATOR_MAX_ANALYSIS_BYTES = 50 * 1024 * 1024;
@@ -48,6 +48,7 @@ export const LOW_EFFECTIVE_DPI_THRESHOLD = 50;
 
 export const PROOF_GENERATOR_SUPPORTED_EXTENSIONS = [
   "pdf",
+  "ai",
   "jpg",
   "jpeg",
   "png",

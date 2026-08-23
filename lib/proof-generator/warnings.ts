@@ -3,6 +3,12 @@ import {
   PROOF_GENERATOR_ANALYSIS_VERSION,
 } from "@/lib/proof-generator/constants";
 import {
+  buildFontPreflight,
+  buildImagePreflight,
+  buildProductionFeaturesFromScan,
+} from "@/lib/proof-generator/production-features";
+import { scanPdfContent, type PdfContentScan } from "@/lib/proof-generator/scan-pdf-content";
+import {
   computeBleedAllowanceMm,
   formatDimensionsLabel,
 } from "@/lib/proof-generator/analyse-pdf";
@@ -13,14 +19,36 @@ import {
 } from "@/lib/proof-generator/compare-specification";
 import type {
   DetectedArtworkMetadata,
+  FontPreflightResult,
+  ImagePreflightResult,
   PreflightCheck,
   PreflightOverallStatus,
   PreflightResult,
+  ProductionFeaturesResult,
   QuotedSpecificationItem,
   SizeComparisonResult,
 } from "@/lib/proof-generator/types";
 
+const EMPTY_PDF_SCAN: PdfContentScan = {
+  layers: [],
+  separations: [],
+  spotColourNames: [],
+  fontNames: [],
+  hasFontObjects: false,
+  hasToUnicode: false,
+  hasEmbeddedFileRefs: false,
+  missingLinkHints: [],
+  rasterImages: [],
+  cmykPresent: false,
+  rgbPresent: false,
+  grayscalePresent: false,
+};
+
 function worstStatus(statuses: PreflightOverallStatus[]): PreflightOverallStatus {
+  if (statuses.includes("fail")) {
+    return "fail";
+  }
+
   if (statuses.includes("manual_review")) {
     return "manual_review";
   }
@@ -33,6 +61,10 @@ function worstStatus(statuses: PreflightOverallStatus[]): PreflightOverallStatus
 }
 
 function checkToOverall(status: PreflightCheck["status"]): PreflightOverallStatus {
+  if (status === "fail") {
+    return "fail";
+  }
+
   if (status === "manual_review") {
     return "manual_review";
   }
@@ -98,7 +130,7 @@ function buildSizeComparison(input: {
   });
 }
 
-export function buildPreflightChecks(input: {
+function buildBasePreflightChecks(input: {
   metadata: DetectedArtworkMetadata;
   quotedItems: QuotedSpecificationItem[];
   sizeComparison: SizeComparisonResult | null;
@@ -327,20 +359,246 @@ export function buildPreflightChecks(input: {
   return checks;
 }
 
+function buildProductionFeatureChecks(input: {
+  metadata: DetectedArtworkMetadata;
+  productionFeatures: ProductionFeaturesResult;
+  fonts: FontPreflightResult;
+  images: ImagePreflightResult;
+}): PreflightCheck[] {
+  const checks: PreflightCheck[] = [];
+  const { productionFeatures, fonts, images, metadata } = input;
+
+  if (metadata.inputType === "ai_unsupported") {
+    checks.push({
+      key: "ai_preflight_unavailable",
+      label: "Illustrator preflight",
+      status: "manual_review",
+      detectedValue: "Unsupported AI file",
+      expectedValue: "PDF-compatible export",
+      message:
+        metadata.analysisNote ??
+        "Advanced preflight is unavailable for this Illustrator file. Export a PDF-compatible copy for analysis.",
+      confidence: "high",
+    });
+    return checks;
+  }
+
+  if (productionFeatures.cutPathCandidates.length > 0) {
+    checks.push({
+      key: "cut_path_candidates",
+      label: "Cut path candidates",
+      status: "manual_review",
+      detectedValue: productionFeatures.cutPathCandidates
+        .map((candidate) => candidate.name)
+        .join(", "),
+      expectedValue: null,
+      message:
+        "Possible cut paths detected. Confirm the production cut path or mark no cut line required.",
+      confidence: productionFeatures.cutPathCandidates[0]?.confidence ?? "medium",
+    });
+  } else if (productionFeatures.expectsCutPath) {
+    checks.push({
+      key: "cut_path_expected",
+      label: "Cut path expected",
+      status: "manual_review",
+      detectedValue: "None detected",
+      expectedValue: "Cut path for contour/kiss-cut item",
+      message:
+        "Quoted finishing suggests contour cutting, but no cut path candidate was detected.",
+      confidence: "medium",
+    });
+  }
+
+  if (productionFeatures.whiteInkCandidates.length > 0) {
+    checks.push({
+      key: "white_ink_candidates",
+      label: "White ink candidates",
+      status: "manual_review",
+      detectedValue: productionFeatures.whiteInkCandidates
+        .map((candidate) => candidate.name)
+        .join(", "),
+      expectedValue: null,
+      message: "Possible white-ink separation detected. Confirm or mark not required.",
+      confidence: productionFeatures.whiteInkCandidates[0]?.confidence ?? "medium",
+    });
+  }
+
+  if (fonts.status === "live_fonts_detected") {
+    checks.push({
+      key: "live_fonts",
+      label: "Live fonts",
+      status: "warning",
+      detectedValue: fonts.names.join(", "),
+      expectedValue: "Outlined or embedded fonts",
+      message: fonts.message,
+      confidence: fonts.confidence,
+    });
+  } else if (fonts.status === "all_outlined") {
+    checks.push({
+      key: "live_fonts",
+      label: "Live fonts",
+      status: "pass",
+      detectedValue: "None detected",
+      expectedValue: null,
+      message: fonts.message,
+      confidence: fonts.confidence,
+    });
+  } else {
+    checks.push({
+      key: "live_fonts",
+      label: "Live fonts",
+      status: "manual_review",
+      detectedValue: null,
+      expectedValue: null,
+      message: fonts.message,
+      confidence: fonts.confidence,
+    });
+  }
+
+  if (images.linkStatus === "missing_links_detected") {
+    checks.push({
+      key: "missing_linked_artwork",
+      label: "Missing linked artwork",
+      status: "fail",
+      detectedValue: images.missingLinks.join(", "),
+      expectedValue: "Embedded artwork",
+      message: images.message,
+      confidence: images.confidence,
+    });
+  } else {
+    checks.push({
+      key: "embedded_images",
+      label: "Images",
+      status: images.linkStatus === "unknown" ? "manual_review" : "info",
+      detectedValue:
+        images.count > 0
+          ? `${images.count} embedded image${images.count === 1 ? "" : "s"}`
+          : "None detected",
+      expectedValue: null,
+      message: images.message,
+      confidence: images.confidence,
+    });
+  }
+
+  const productionSpots = productionFeatures.spotColourGroups.productionSeparations;
+  if (productionSpots.length > 0) {
+    checks.push({
+      key: "production_separations",
+      label: "Production separations",
+      status: "info",
+      detectedValue: productionSpots.join(", "),
+      expectedValue: null,
+      message: "Production separation names detected (cut path, white ink, etc.).",
+      confidence: "medium",
+    });
+  }
+
+  const otherSpots = productionFeatures.spotColourGroups.otherSpotColours;
+  if (otherSpots.length > 0) {
+    checks.push({
+      key: "other_spot_colours",
+      label: "Other spot colours",
+      status: "info",
+      detectedValue: otherSpots.join(", "),
+      expectedValue: null,
+      message: "Additional spot colour names detected.",
+      confidence: "medium",
+    });
+  }
+
+  return checks;
+}
+
+export function buildPreflightChecks(input: {
+  metadata: DetectedArtworkMetadata;
+  quotedItems: QuotedSpecificationItem[];
+  sizeComparison: SizeComparisonResult | null;
+  productionFeatures: ProductionFeaturesResult;
+  fonts: FontPreflightResult;
+  images: ImagePreflightResult;
+}): PreflightCheck[] {
+  return [
+    ...buildBasePreflightChecks(input),
+    ...buildProductionFeatureChecks(input),
+  ];
+}
+
+function resolvePdfScan(
+  metadata: DetectedArtworkMetadata,
+  sourceBuffer?: Buffer
+): PdfContentScan | null {
+  if (
+    metadata.inputType === "ai_unsupported" ||
+    metadata.inputType === "image" ||
+    !sourceBuffer?.length
+  ) {
+    return null;
+  }
+
+  return scanPdfContent(sourceBuffer);
+}
+
+function resolveImageScan(metadata: DetectedArtworkMetadata): PdfContentScan {
+  return {
+    ...EMPTY_PDF_SCAN,
+    rasterImages: metadata.rasterImages.value.map((image) => ({
+      widthPx: image.widthPx,
+      heightPx: image.heightPx,
+    })),
+  };
+}
+
 export function buildPreflightResult(input: {
   metadata: DetectedArtworkMetadata;
   quotedItems: QuotedSpecificationItem[];
   sourceReference: PreflightResult["sourceReference"];
+  sourceBuffer?: Buffer;
 }): PreflightResult {
   const sizeComparison = buildSizeComparison({
     metadata: input.metadata,
     quotedItems: input.quotedItems,
   });
 
+  const scan = resolvePdfScan(input.metadata, input.sourceBuffer);
+  const imageScan = resolveImageScan(input.metadata);
+  const productionFeatures = buildProductionFeaturesFromScan(
+    scan ?? EMPTY_PDF_SCAN,
+    input.quotedItems
+  );
+
+  const fonts = scan
+    ? buildFontPreflight(scan)
+    : input.metadata.inputType === "image"
+      ? {
+          status: "unknown" as const,
+          names: [],
+          confidence: "low" as const,
+          message: "Font status could not be determined for raster artwork.",
+        }
+      : {
+          status: "unknown" as const,
+          names: [],
+          confidence: "low" as const,
+          message: "Font status could not be determined.",
+        };
+
+  const images = scan
+    ? buildImagePreflight(
+        scan,
+        input.metadata.inputType === "ai_pdf_compatible" ? "ai_pdf_compatible" : "pdf"
+      )
+    : buildImagePreflight(
+        imageScan,
+        input.metadata.inputType === "image" ? "image" : "pdf"
+      );
+
   const checks = buildPreflightChecks({
     metadata: input.metadata,
     quotedItems: input.quotedItems,
     sizeComparison,
+    productionFeatures,
+    fonts,
+    images,
   });
 
   const overallStatus = worstStatus(
@@ -354,6 +612,9 @@ export function buildPreflightResult(input: {
     metadata: input.metadata,
     sizeComparison,
     quotedItems: input.quotedItems,
+    productionFeatures,
+    fonts,
+    images,
     sourceReference: input.sourceReference,
   };
 }

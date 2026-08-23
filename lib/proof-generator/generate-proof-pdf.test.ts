@@ -101,6 +101,28 @@ function buildPreflight(overrides?: Partial<PreflightResult>): PreflightResult {
       fileSizeBytes: MINIMAL_PNG.length,
       mimeType: "image/png",
     },
+    productionFeatures: {
+      cutPathCandidates: [],
+      whiteInkCandidates: [],
+      layers: [],
+      spotColourGroups: { productionSeparations: [], otherSpotColours: [] },
+      expectsCutPath: false,
+      cutPathOverlayAvailable: false,
+      cutPathOverlayReason: null,
+    },
+    fonts: {
+      status: "unknown",
+      names: [],
+      confidence: "low",
+      message: "Font status could not be determined for raster artwork.",
+    },
+    images: {
+      count: 1,
+      linkStatus: "embedded",
+      missingLinks: [],
+      confidence: "high",
+      message: "Image file.",
+    },
     ...overrides,
   };
 }

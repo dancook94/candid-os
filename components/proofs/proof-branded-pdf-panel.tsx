@@ -3,8 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { StatusBadge } from "@/components/status-badge";
-import type { PreflightCheck, PreflightResult } from "@/lib/proof-generator/types";
+import type { PreflightResult, PreflightOperatorConfirmation } from "@/lib/proof-generator/types";
 import { PROOF_ATTACHABLE_STATUSES } from "@/lib/proofs/constants";
 import {
   getCustomerProofFile,
@@ -13,6 +12,7 @@ import {
   hasGeneratorEligibleSourceArtwork,
 } from "@/lib/proofs/proof-files";
 import type { JobProofView } from "@/lib/proofs/types";
+import { ProofPreflightReview } from "@/components/proofs/proof-preflight-review";
 
 type ProofBrandedPdfPanelProps = {
   jobId: string;
@@ -25,30 +25,6 @@ type ProofBrandedPdfPanelProps = {
 };
 
 type PanelStep = "idle" | "review";
-
-function mapCheckStatusToBadge(status: PreflightCheck["status"]) {
-  switch (status) {
-    case "pass":
-      return "approved" as const;
-    case "warning":
-      return "pending" as const;
-    case "manual_review":
-      return "declined" as const;
-    default:
-      return "draft" as const;
-  }
-}
-
-function mapOverallStatusToBadge(status: PreflightResult["overallStatus"]) {
-  switch (status) {
-    case "pass":
-      return "approved" as const;
-    case "warning":
-      return "pending" as const;
-    default:
-      return "declined" as const;
-  }
-}
 
 function formatTimestamp(value: string | null) {
   if (!value) {
@@ -82,7 +58,10 @@ export function ProofBrandedPdfPanel({
   const warningChecks = useMemo(
     () =>
       (preflight?.checks ?? []).filter(
-        (check) => check.status === "warning" || check.status === "manual_review"
+        (check) =>
+          check.status === "warning" ||
+          check.status === "manual_review" ||
+          check.status === "fail"
       ),
     [preflight]
   );
@@ -117,7 +96,7 @@ export function ProofBrandedPdfPanel({
     setStep("review");
   }
 
-  async function generateBrandedPdf() {
+  async function generateBrandedPdf(operatorConfirmation: PreflightOperatorConfirmation) {
     onError(null);
 
     if (!preflight) {
@@ -130,7 +109,7 @@ export function ProofBrandedPdfPanel({
     );
 
     if (unreviewedWarnings.length > 0) {
-      onError("Confirm each warning or manual review item before generating.");
+      onError("Confirm each warning, review, or fail item before generating.");
       return;
     }
 
@@ -141,7 +120,7 @@ export function ProofBrandedPdfPanel({
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ preflight }),
+        body: JSON.stringify({ operatorConfirmation }),
       }
     );
 
@@ -231,124 +210,19 @@ export function ProofBrandedPdfPanel({
       ) : null}
 
       {step === "review" && preflight ? (
-        <div className="space-y-4 rounded-lg border border-border p-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium">Preflight analysis</span>
-            <StatusBadge
-              status={mapOverallStatusToBadge(preflight.overallStatus)}
-              label={
-                preflight.overallStatus === "pass"
-                  ? "Pass"
-                  : preflight.overallStatus === "warning"
-                    ? "Warnings"
-                    : "Manual review required"
-              }
-            />
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded-md border border-border p-3 text-sm">
-              <p className="font-medium">Quoted specification</p>
-              <ul className="mt-2 space-y-1 text-muted-foreground">
-                {preflight.quotedItems.map((item) => (
-                  <li key={item.id}>
-                    {item.itemReference ?? "Item"} · {item.itemName}
-                    {item.quotedWidthMm != null && item.quotedHeightMm != null
-                      ? ` · ${item.quotedWidthMm} × ${item.quotedHeightMm} mm`
-                      : ""}
-                    {item.quantity != null ? ` · Qty ${item.quantity}` : ""}
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div className="rounded-md border border-border p-3 text-sm">
-              <p className="font-medium">Artwork specification</p>
-              <ul className="mt-2 space-y-1 text-muted-foreground">
-                <li>File: {preflight.metadata.fileName}</li>
-                <li>
-                  Detected size:{" "}
-                  {preflight.metadata.pageSize.value
-                    ? `${preflight.metadata.pageSize.value.widthMm} × ${preflight.metadata.pageSize.value.heightMm} mm`
-                    : "—"}
-                </li>
-                <li>Pages: {preflight.metadata.pageCount ?? "—"}</li>
-                <li>Colour mode: {preflight.metadata.colourMode.value ?? "Unknown"}</li>
-                {preflight.sizeComparison?.matchedScaleLabel ? (
-                  <li>Scale: {preflight.sizeComparison.matchedScaleLabel}</li>
-                ) : null}
-              </ul>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <p className="text-sm font-medium">Automated checks</p>
-            <div className="space-y-2">
-              {preflight.checks.map((check) => (
-                <div
-                  key={check.key}
-                  className="flex flex-wrap items-start justify-between gap-2 rounded-md border border-border p-3 text-sm"
-                >
-                  <div>
-                    <StatusBadge
-                      status={mapCheckStatusToBadge(check.status)}
-                      label={check.label}
-                    />
-                    <p className="mt-2 text-muted-foreground">{check.message}</p>
-                  </div>
-                  {check.status === "warning" || check.status === "manual_review" ? (
-                    <label className="flex items-center gap-2 text-xs">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(warningsReviewed[check.key])}
-                        onChange={(event) =>
-                          setWarningsReviewed((current) => ({
-                            ...current,
-                            [check.key]: event.target.checked,
-                          }))
-                        }
-                      />
-                      Reviewed
-                    </label>
-                  ) : null}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={pending}
-              onClick={() => {
-                setStep("idle");
-                setPreflight(null);
-                setWarningsReviewed({});
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={pending}
-              onClick={() => void analyseArtwork()}
-            >
-              Re-analyse
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={pending}
-              onClick={() => void generateBrandedPdf()}
-            >
-              Generate branded proof PDF
-            </Button>
-          </div>
-        </div>
+        <ProofPreflightReview
+          preflight={preflight}
+          pending={pending}
+          warningsReviewed={warningsReviewed}
+          onWarningsReviewedChange={setWarningsReviewed}
+          onCancel={() => {
+            setStep("idle");
+            setPreflight(null);
+            setWarningsReviewed({});
+          }}
+          onReanalyse={() => void analyseArtwork()}
+          onGenerate={(confirmation) => void generateBrandedPdf(confirmation)}
+        />
       ) : null}
 
       {hasAttachment && !hasCustomerProof ? (

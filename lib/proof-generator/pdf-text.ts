@@ -1,5 +1,5 @@
 import type { PdfBoxDimensions } from "@/lib/proof-generator/types";
-import type { DetectedArtworkMetadata, PreflightCheck, SizeComparisonResult } from "@/lib/proof-generator/types";
+import type { DetectedArtworkMetadata, PreflightCheck, PreflightResult, SizeComparisonResult } from "@/lib/proof-generator/types";
 
 /** Legacy placeholder retained for joins that still expect a dash. */
 export const PDF_MISSING_VALUE = "-";
@@ -183,4 +183,61 @@ export function formatPreflightCheckLine(input: {
   return sanitizePdfText(
     `${statusPrefixForCheck(input.status)} - ${input.label}: ${input.message}`
   );
+}
+
+export function formatProductionFeaturesForCustomerProof(preflight: PreflightResult) {
+  const rows: Array<{ label: string; value: string }> = [];
+  const features = preflight.productionFeatures;
+
+  if (features.confirmedCutPath) {
+    rows.push({
+      label: "Cut path",
+      value: `${features.confirmedCutPath.name} — Confirmed`,
+    });
+  } else if (features.noCutLineRequired) {
+    rows.push({
+      label: "Cut path",
+      value: "No cut line required",
+    });
+  }
+
+  if (features.confirmedWhiteInk) {
+    rows.push({
+      label: "White ink",
+      value: `${features.confirmedWhiteInk.name} — Confirmed`,
+    });
+  } else if (features.noWhiteInkRequired) {
+    rows.push({
+      label: "White ink",
+      value: "Not required",
+    });
+  }
+
+  if (preflight.fonts.status === "all_outlined") {
+    rows.push({ label: "Fonts", value: "No live fonts detected" });
+  } else if (preflight.fonts.status === "live_fonts_detected") {
+    rows.push({
+      label: "Fonts",
+      value: sanitizePdfText(preflight.fonts.names.slice(0, 3).join(", ") || "Live fonts detected"),
+    });
+  }
+
+  if (preflight.images.linkStatus === "embedded") {
+    rows.push({ label: "Images", value: "Embedded" });
+  } else if (preflight.images.linkStatus === "missing_links_detected") {
+    rows.push({ label: "Images", value: "Missing linked artwork detected" });
+  }
+
+  if (
+    features.showCutPathOnProof &&
+    features.confirmedCutPath &&
+    !features.cutPathOverlayAvailable
+  ) {
+    rows.push({
+      label: "Cut path preview",
+      value: `Cut path confirmed: ${features.confirmedCutPath.name}. Visual overlay unavailable.`,
+    });
+  }
+
+  return rows;
 }

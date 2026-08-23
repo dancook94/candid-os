@@ -1,11 +1,17 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { downloadDropboxFile, getDropboxMetadata } from "@/lib/dropbox/client";
+import { resolveAiPreflightAvailability, isAiFileName } from "@/lib/proof-generator/analyse-ai";
 import { analyseImageBuffer } from "@/lib/proof-generator/analyse-image";
 import { analysePdfBuffer } from "@/lib/proof-generator/analyse-pdf";
 import {
+  applyOperatorConfirmationToPreflight,
+  validateOperatorConfirmation,
+} from "@/lib/proof-generator/operator-confirmation";
+import {
   assertValidSourceArtworkBuffer,
   logProofGeneratorDebug,
+  resolveAnalysisBuffer,
 } from "@/lib/proof-generator/artwork-buffer";
 import {
   formatProofGeneratorMaxAnalysisLabel,
@@ -17,6 +23,7 @@ import { generateCustomerProofPdf } from "@/lib/proof-generator/generate-proof-p
 import { loadQuotedSpecificationItems } from "@/lib/proof-generator/quoted-specification";
 import type {
   PreflightManualOverrides,
+  PreflightOperatorConfirmation,
   PreflightResult,
 } from "@/lib/proof-generator/types";
 import { buildPreflightResult } from "@/lib/proof-generator/warnings";
@@ -50,13 +57,9 @@ function assertAnalysisSize(buffer: Buffer) {
 function assertSupportedExtension(fileName: string) {
   const extension = getFileExtension(fileName);
 
-  if (extension === "ai") {
-    throw new ProofError(PROOF_GENERATOR_UNSUPPORTED_MESSAGE, 400);
-  }
-
-  if (!["pdf", "jpg", "jpeg", "png"].includes(extension)) {
+  if (!["pdf", "ai", "jpg", "jpeg", "png"].includes(extension)) {
     throw new ProofError(
-      "Only PDF, JPG, and PNG files are supported for automated proof generation.",
+      "Only PDF, AI, JPG, and PNG files are supported for automated proof generation.",
       400
     );
   }
@@ -279,6 +282,10 @@ async function loadProofSourceArtwork(
   );
   assertAnalysisSize(downloaded.buffer);
   const detectedKind = assertValidSourceArtworkBuffer(downloaded.buffer, fileName);
+  const { analysisBuffer, analysisNote } = resolveAnalysisBuffer(
+    downloaded.buffer,
+    fileName
+  );
 
   logProofGeneratorDebug("source_artwork_download_complete", {
     jobId,
@@ -294,6 +301,8 @@ async function loadProofSourceArtwork(
 
   return {
     buffer: downloaded.buffer,
+    analysisBuffer,
+    analysisNote,
     fileName,
     mimeType: mimeType ?? downloaded.contentType,
     dropboxPath,
@@ -334,8 +343,37 @@ async function buildPreflightForSourceArtwork(
 
   const metadata =
     artwork.detectedKind === "pdf"
-      ? await analysePdfBuffer(artwork.buffer, artwork.fileName, artwork.mimeType)
-      : await analyseImageBuffer(artwork.buffer, artwork.fileName, artwork.mimeType);
+      ? await analysePdfBuffer(artwork.buffer, artwork.fileName, artwork.mimeType, {
+          inputType: isAiFileName(artwork.fileName) ? "ai_pdf_compatible" : "pdf",
+          analysisNote: artwork.analysisNote ?? null,
+        })
+      : artwork.detectedKind === "ai_unsupported"
+        ? {
+            fileName: artwork.fileName,
+            fileSizeBytes: artwork.buffer.length,
+            mimeType: artwork.mimeType,
+            inputType: "ai_unsupported" as const,
+            analysisNote: artwork.analysisNote ?? null,
+            pageCount: null,
+            pdfVersion: { value: null, confidence: "low" as const, source: "ai_scan" },
+            pageSize: { value: null, confidence: "low" as const, source: "ai_scan" },
+            orientation: { value: null, confidence: "low" as const, source: "ai_scan" },
+            mediaBox: { value: null, confidence: "low" as const, source: "ai_scan" },
+            cropBox: { value: null, confidence: "low" as const, source: "ai_scan" },
+            trimBox: { value: null, confidence: "low" as const, source: "ai_scan" },
+            bleedBox: { value: null, confidence: "low" as const, source: "ai_scan" },
+            artBox: { value: null, confidence: "low" as const, source: "ai_scan" },
+            colourMode: { value: "Unknown" as const, confidence: "low" as const, source: "ai_scan" },
+            cmykPresent: { value: false, confidence: "low" as const, source: "ai_scan" },
+            rgbPresent: { value: false, confidence: "low" as const, source: "ai_scan" },
+            grayscalePresent: { value: false, confidence: "low" as const, source: "ai_scan" },
+            spotColourNames: { value: [], confidence: "low" as const, source: "ai_scan" },
+            fonts: { value: [], confidence: "low" as const, source: "ai_scan" },
+            rasterImages: { value: [], confidence: "low" as const, source: "ai_scan" },
+            imageWidthPx: { value: null, confidence: "low" as const, source: "ai_scan" },
+            imageHeightPx: { value: null, confidence: "low" as const, source: "ai_scan" },
+          }
+        : await analyseImageBuffer(artwork.buffer, artwork.fileName, artwork.mimeType);
 
   return buildPreflightResult({
     metadata,
@@ -346,6 +384,7 @@ async function buildPreflightForSourceArtwork(
       fileSizeBytes: artwork.buffer.length,
       mimeType: artwork.mimeType,
     },
+    sourceBuffer: artwork.analysisBuffer,
   });
 }
 
@@ -402,6 +441,10 @@ export async function saveProofPreflightRecord(
       quotedItems: preflight.quotedItems,
       sourceReference: preflight.sourceReference,
       sourceJobFileId: sourceJobFileId ?? null,
+      productionFeatures: preflight.productionFeatures,
+      fonts: preflight.fonts,
+      images: preflight.images,
+      operatorConfirmation: manualOverrides?.operatorConfirmation ?? null,
     },
     updated_at: new Date().toISOString(),
   };
@@ -434,12 +477,14 @@ export async function generateBrandedPdfForExistingProof(
     proofId,
     actorProfileId,
     manualOverrides,
+    operatorConfirmation,
   }: {
     jobId: string;
     proofId: string;
     actorProfileId: string;
     preflightResult?: PreflightResult;
     manualOverrides?: PreflightManualOverrides;
+    operatorConfirmation?: PreflightOperatorConfirmation;
   }
 ) {
   const proof = await loadMutableProofRecord(adminClient, jobId, proofId);
@@ -470,11 +515,25 @@ export async function generateBrandedPdfForExistingProof(
   }
 
   const artwork = await loadProofSourceArtwork(adminClient, jobId, proofId);
-  const preflightResult = await buildPreflightForSourceArtwork(
+  let preflightResult = await buildPreflightForSourceArtwork(
     adminClient,
     jobId,
     proofId,
     artwork
+  );
+
+  const confirmationErrors = validateOperatorConfirmation(
+    preflightResult,
+    operatorConfirmation
+  );
+  if (confirmationErrors.length) {
+    throw new ProofError(confirmationErrors.join(" "), 400);
+  }
+
+  preflightResult = applyOperatorConfirmationToPreflight(
+    preflightResult,
+    operatorConfirmation,
+    actorProfileId
   );
 
   const sourceDropboxPath = artwork.dropboxPath;
@@ -554,7 +613,10 @@ export async function generateBrandedPdfForExistingProof(
   await saveProofPreflightRecord(adminClient, {
     proofId,
     preflight: preflightResult,
-    manualOverrides,
+    manualOverrides: {
+      ...(manualOverrides ?? {}),
+      operatorConfirmation: operatorConfirmation ?? null,
+    },
     sourceDropboxPath,
     sourceJobFileId,
     reviewedByProfileId: actorProfileId,

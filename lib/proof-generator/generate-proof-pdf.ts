@@ -31,6 +31,7 @@ import {
   formatProofFieldValue,
   formatProofQuantity,
   formatProofScaleLabel,
+  formatProductionFeaturesForCustomerProof,
   formatSpotColoursLabel,
   joinPdfParts,
 } from "@/lib/proof-generator/pdf-text";
@@ -235,8 +236,19 @@ export async function generateCustomerProofPdf(input: {
       x: rightX,
       y: contentStartY,
       width: rightWidth,
-      checks: preflightChecks.slice(0, 7),
+      checks: preflightChecks.slice(0, 5),
     });
+
+    const productionFeatureRows = formatProductionFeaturesForCustomerProof(input.preflight);
+    if (productionFeatureRows.length > 0) {
+      drawSpecificationSectionCard(page2, fonts, {
+        title: "Production features",
+        x: rightX,
+        y: contentStartY - 190,
+        width: rightWidth,
+        rows: productionFeatureRows,
+      });
+    }
 
     const disclaimer =
       "Please check all wording, spelling, positioning, dimensions and visual content carefully.\n\nApproval confirms that the artwork shown in this proof is authorised to proceed to production.\n\nColours shown on screen may vary from the final printed result.";

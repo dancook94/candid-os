@@ -9,6 +9,7 @@ import {
 } from "@/lib/proof-generator/service";
 import type {
   PreflightManualOverrides,
+  PreflightOperatorConfirmation,
 } from "@/lib/proof-generator/types";
 import { mapDropboxErrorToProofError } from "@/lib/proofs/dropbox-errors";
 import { ProofError } from "@/lib/proofs/errors";
@@ -54,6 +55,7 @@ export async function POST(request: Request, context: RouteContext) {
 
     const body = (await request.json()) as {
       manualOverrides?: PreflightManualOverrides;
+      operatorConfirmation?: PreflightOperatorConfirmation;
     };
 
     const result = await generateBrandedPdfForExistingProof(adminClient, {
@@ -61,6 +63,7 @@ export async function POST(request: Request, context: RouteContext) {
       proofId,
       actorProfileId: authResult.userId,
       manualOverrides: body.manualOverrides,
+      operatorConfirmation: body.operatorConfirmation,
     });
 
     return NextResponse.json(result);

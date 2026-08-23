@@ -1,6 +1,7 @@
 import { PDFDocument } from "pdf-lib";
 
 import { PT_TO_MM } from "@/lib/proof-generator/constants";
+import { scanPdfContent } from "@/lib/proof-generator/scan-pdf-content";
 import type {
   DetectedArtworkMetadata,
   DetectedConfidence,
@@ -92,111 +93,45 @@ function pickBox(
   );
 }
 
-function scanColourUsage(buffer: Buffer) {
-  const text = buffer.toString("latin1");
-  const cmykPresent =
-    /\/DeviceCMYK|\/CMYK\b|\/ICCBased.*\/Alternate\s*\/DeviceCMYK/.test(text);
-  const rgbPresent =
-    /\/DeviceRGB|\/RGB\b|\/ICCBased.*\/Alternate\s*\/DeviceRGB/.test(text);
-  const grayscalePresent = /\/DeviceGray|\/G\b/.test(text);
+export async function analysePdfBuffer(
+  buffer: Buffer,
+  fileName: string,
+  mimeType: string | null,
+  options?: { inputType?: DetectedArtworkMetadata["inputType"]; analysisNote?: string | null }
+): Promise<DetectedArtworkMetadata> {
+  const pdfVersion = extractPdfVersion(buffer);
+  const boxes = extractPdfBoxes(buffer);
+  const scan = scanPdfContent(buffer);
 
-  const spotNames = new Set<string>();
-  const separationPattern = /\/Separation\s*\/([A-Za-z0-9_+-]+)/g;
-  let match: RegExpExecArray | null;
-  while ((match = separationPattern.exec(text)) !== null) {
-    if (match[1] && !["DeviceCMYK", "DeviceRGB", "DeviceGray"].includes(match[1])) {
-      spotNames.add(match[1]);
-    }
-  }
-
-  let colourMode: DetectedArtworkMetadata["colourMode"]["value"] = "Unknown";
   const modes = [
-    cmykPresent ? "CMYK" : null,
-    rgbPresent ? "RGB" : null,
-    grayscalePresent ? "Grayscale" : null,
+    scan.cmykPresent ? "CMYK" : null,
+    scan.rgbPresent ? "RGB" : null,
+    scan.grayscalePresent ? "Grayscale" : null,
   ].filter(Boolean);
 
+  let colourMode: DetectedArtworkMetadata["colourMode"]["value"] = "Unknown";
   if (modes.length > 1) {
     colourMode = "Mixed";
   } else if (modes.length === 1) {
     colourMode = modes[0] as "CMYK" | "RGB" | "Grayscale";
   }
 
-  return {
-    colourMode: detected(colourMode, modes.length ? "medium" : "low", "pdf_content_scan"),
-    cmykPresent: detected(cmykPresent, "medium", "pdf_content_scan"),
-    rgbPresent: detected(rgbPresent, "medium", "pdf_content_scan"),
-    grayscalePresent: detected(grayscalePresent, "medium", "pdf_content_scan"),
-    spotColourNames: detected(
-      [...spotNames],
-      spotNames.size ? "medium" : "low",
-      "pdf_content_scan"
-    ),
-  };
-}
-
-function scanFonts(buffer: Buffer): DetectedValue<string[]> {
-  const text = buffer.toString("latin1");
-  const fonts = new Set<string>();
-  const pattern = /\/BaseFont\s*\/([A-Za-z0-9+-]+)/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(text)) !== null) {
-    if (match[1]) {
-      fonts.add(match[1].replace(/^\+/, ""));
-    }
-  }
-
-  return detected(
-    [...fonts].slice(0, 20),
-    fonts.size ? "medium" : "low",
+  const fonts = detected(
+    scan.fontNames,
+    scan.fontNames.length ? "medium" : scan.hasFontObjects ? "low" : "medium",
     "pdf_font_scan"
   );
-}
 
-function scanRasterHints(buffer: Buffer) {
-  const text = buffer.toString("latin1");
-  const images: Array<{
-    widthPx: number;
-    heightPx: number;
-    effectiveDpiAtArtworkSize: number | null;
-    effectiveDpiAtFinishedSize: number | null;
-  }> = [];
-
-  const pattern = /\/Width\s+(\d+)[\s\S]{0,120}?\/Height\s+(\d+)/g;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(text)) !== null) {
-    const widthPx = Number.parseInt(match[1], 10);
-    const heightPx = Number.parseInt(match[2], 10);
-
-    if (widthPx > 0 && heightPx > 0) {
-      images.push({
-        widthPx,
-        heightPx,
-        effectiveDpiAtArtworkSize: null,
-        effectiveDpiAtFinishedSize: null,
-      });
-    }
-  }
-
-  return detected(
-    images.slice(0, 10),
-    images.length ? "low" : "low",
+  const rasterImages = detected(
+    scan.rasterImages.map((image) => ({
+      widthPx: image.widthPx,
+      heightPx: image.heightPx,
+      effectiveDpiAtArtworkSize: null,
+      effectiveDpiAtFinishedSize: null,
+    })),
+    scan.rasterImages.length ? "medium" : "low",
     "pdf_image_scan"
   );
-}
-
-export async function analysePdfBuffer(
-  buffer: Buffer,
-  fileName: string,
-  mimeType: string | null
-): Promise<DetectedArtworkMetadata> {
-  const pdfVersion = extractPdfVersion(buffer);
-  const boxes = extractPdfBoxes(buffer);
-  const colour = scanColourUsage(buffer);
-  const fonts = scanFonts(buffer);
-  const rasterImages = scanRasterHints(buffer);
 
   let pageCount: number | null = null;
   let pageSize: DetectedValue<PdfBoxDimensions | null> = detected(
@@ -247,7 +182,8 @@ export async function analysePdfBuffer(
     fileName,
     fileSizeBytes: buffer.length,
     mimeType,
-    inputType: "pdf",
+    inputType: options?.inputType ?? "pdf",
+    analysisNote: options?.analysisNote ?? null,
     pageCount,
     pdfVersion,
     pageSize,
@@ -257,11 +193,15 @@ export async function analysePdfBuffer(
     trimBox: pickBox(boxes, "TrimBox"),
     bleedBox: pickBox(boxes, "BleedBox"),
     artBox: pickBox(boxes, "ArtBox"),
-    colourMode: colour.colourMode,
-    cmykPresent: colour.cmykPresent,
-    rgbPresent: colour.rgbPresent,
-    grayscalePresent: colour.grayscalePresent,
-    spotColourNames: colour.spotColourNames,
+    colourMode: detected(colourMode, modes.length ? "medium" : "low", "pdf_content_scan"),
+    cmykPresent: detected(scan.cmykPresent, "medium", "pdf_content_scan"),
+    rgbPresent: detected(scan.rgbPresent, "medium", "pdf_content_scan"),
+    grayscalePresent: detected(scan.grayscalePresent, "medium", "pdf_content_scan"),
+    spotColourNames: detected(
+      scan.spotColourNames,
+      scan.spotColourNames.length ? "medium" : "low",
+      "pdf_content_scan"
+    ),
     fonts,
     rasterImages,
     imageWidthPx: detected(null, "low", "n/a"),
@@ -300,3 +240,5 @@ export function computeBleedAllowanceMm(
 
   return Math.max(horizontal, vertical);
 }
+
+export { scanPdfContent };

@@ -38,7 +38,7 @@ export function hasGeneratorEligibleSourceArtwork(files: JobProofFileView[]) {
   }
 
   const extension = getFileExtension(source.file_name);
-  return ["pdf", "jpg", "jpeg", "png"].includes(extension);
+  return ["pdf", "jpg", "jpeg", "png", "ai"].includes(extension);
 }
 
 export function hasGeneratedCustomerProof(files: JobProofFileView[]) {

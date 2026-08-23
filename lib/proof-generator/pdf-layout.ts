@@ -58,6 +58,8 @@ function statusColors(status: PreflightCheck["status"]) {
       return { accent: PROOF_PDF_THEME.warning, background: PROOF_PDF_THEME.warningBg };
     case "manual_review":
       return { accent: PROOF_PDF_THEME.review, background: PROOF_PDF_THEME.reviewBg };
+    case "fail":
+      return { accent: PROOF_PDF_THEME.fail, background: PROOF_PDF_THEME.failBg };
     default:
       return { accent: PROOF_PDF_THEME.review, background: PROOF_PDF_THEME.reviewBg };
   }
