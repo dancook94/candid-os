@@ -1,13 +1,20 @@
 import { PDFDocument, StandardFonts } from "pdf-lib";
 
+import { CutPathGeometryCache } from "@/lib/proof-generator/cut-path-geometry-cache";
 import { embedArtworkPreview } from "@/lib/proof-generator/artwork-preview";
 import { logProofGeneratorDebug } from "@/lib/proof-generator/artwork-buffer";
+import {
+  logProofGeneratorStage,
+  PROOF_GENERATOR_TIMEOUTS,
+  withProofGeneratorTimeout,
+} from "@/lib/proof-generator/runtime";
 import {
   drawCutPathOverlay,
   drawCutPathOverlayLegend,
 } from "@/lib/proof-generator/cut-path-overlay";
-import { extractCutPathGeometry, cutPathGeometryHasContent } from "@/lib/proof-generator/extract-cut-path-geometry";
+import { cutPathGeometryHasContent } from "@/lib/proof-generator/extract-cut-path-geometry";
 import { createCustomerPreviewPdfBuffer } from "@/lib/proof-generator/suppress-cut-path-preview";
+import type { SuppressCutPathPreviewResult } from "@/lib/proof-generator/suppress-cut-path-preview";
 import {
   PROOF_PDF_MARGIN,
   PROOF_PDF_PAGE_HEIGHT,
@@ -48,6 +55,7 @@ export async function generateCustomerProofPdf(input: {
   preflight: PreflightResult;
   sourceBuffer: Buffer;
   sourceFileName: string;
+  cutPathGeometryCache?: CutPathGeometryCache;
 }) {
   try {
     const doc = await PDFDocument.create();
@@ -102,7 +110,7 @@ export async function generateCustomerProofPdf(input: {
         input.preflight.productionFeatures.confirmedCutPath
     );
 
-    let previewSource: ReturnType<typeof createCustomerPreviewPdfBuffer> = {
+    let previewSource: SuppressCutPathPreviewResult = {
       buffer: input.sourceBuffer,
       originalCutPathSuppressed: false,
       method: "none",
@@ -110,7 +118,7 @@ export async function generateCustomerProofPdf(input: {
 
     if (overlayRequestedInitial) {
       try {
-        previewSource = createCustomerPreviewPdfBuffer(
+        previewSource = await createCustomerPreviewPdfBuffer(
           input.sourceBuffer,
           input.preflight.productionFeatures.confirmedCutPath ?? null
         );
@@ -127,8 +135,23 @@ export async function generateCustomerProofPdf(input: {
       }
     }
 
-    const preview = await embedArtworkPreview(doc, input.sourceBuffer, input.sourceFileName, {
-      previewBuffer: previewSource.buffer,
+    logProofGeneratorStage("preview render started", {
+      sourceFileName: input.sourceFileName,
+      suppressionMethod: previewSource.method,
+    });
+
+    const preview = await withProofGeneratorTimeout(
+      "Preview render",
+      PROOF_GENERATOR_TIMEOUTS.previewRenderMs,
+      () =>
+        embedArtworkPreview(doc, input.sourceBuffer, input.sourceFileName, {
+          previewBuffer: previewSource.buffer,
+        })
+    );
+
+    logProofGeneratorStage("preview render complete", {
+      sourceFileName: input.sourceFileName,
+      previewMethod: preview.previewMethod,
     });
 
     logProofGeneratorDebug("artwork_preview_embedded", {
@@ -175,7 +198,8 @@ export async function generateCustomerProofPdf(input: {
 
     if (overlayRequested && features.confirmedCutPath) {
       const confirmedCutPath = features.confirmedCutPath;
-      const extraction = await extractCutPathGeometry(
+      const geometryCache = input.cutPathGeometryCache ?? new CutPathGeometryCache();
+      const extraction = await geometryCache.extract(
         input.sourceBuffer,
         confirmedCutPath.name,
         0,
@@ -212,6 +236,12 @@ export async function generateCustomerProofPdf(input: {
         rendered: cutPathOverlayRendered,
         originalCutPathSuppressed: previewSource.originalCutPathSuppressed,
         previewSuppressionMethod: previewSource.method,
+      });
+
+      logProofGeneratorStage("overlay rendered", {
+        sourceFileName: input.sourceFileName,
+        rendered: cutPathOverlayRendered,
+        geometryAvailable: cutPathOverlayGeometryAvailable,
       });
     }
 

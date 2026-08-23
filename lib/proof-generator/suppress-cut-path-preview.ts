@@ -1,6 +1,11 @@
 import { deflateSync, inflateSync } from "node:zlib";
 
 import { logProofGeneratorDebug } from "@/lib/proof-generator/artwork-buffer";
+import {
+  logProofGeneratorStage,
+  PROOF_GENERATOR_TIMEOUTS,
+  withProofGeneratorTimeout,
+} from "@/lib/proof-generator/runtime";
 import type { ProductionFeatureSourceType } from "@/lib/proof-generator/types";
 
 export type SuppressCutPathPreviewResult = {
@@ -633,6 +638,8 @@ function filterContentStream(input: {
   };
 }
 
+const MAX_PREVIEW_STREAMS_TO_FILTER = 48;
+
 function collectStreamObjectKeys(
   rootHeader: string,
   objects: Map<string, ParsedPdfObject>,
@@ -735,10 +742,10 @@ function findFirstPageObject(objects: Map<string, ParsedPdfObject>) {
   return null;
 }
 
-export function createCustomerPreviewPdfBuffer(
+export async function createCustomerPreviewPdfBuffer(
   sourceBuffer: Buffer,
   confirmedCutPath: { name: string; sourceType: ProductionFeatureSourceType } | null
-): SuppressCutPathPreviewResult {
+): Promise<SuppressCutPathPreviewResult> {
   if (!confirmedCutPath) {
     return { buffer: sourceBuffer, originalCutPathSuppressed: false, method: "none" };
   }
@@ -759,6 +766,19 @@ export function createCustomerPreviewPdfBuffer(
     };
   }
 
+  return withProofGeneratorTimeout(
+    "OCG suppression",
+    PROOF_GENERATOR_TIMEOUTS.ocgSuppressionMs,
+    async () =>
+      createCustomerPreviewPdfBufferInternal(sourceBuffer, confirmedCutPath, mode)
+  );
+}
+
+function createCustomerPreviewPdfBufferInternal(
+  sourceBuffer: Buffer,
+  confirmedCutPath: { name: string; sourceType: ProductionFeatureSourceType },
+  mode: "optional_content_group" | "separation"
+): SuppressCutPathPreviewResult {
   const objects = parsePdfObjects(sourceBuffer);
   const pageObject = findFirstPageObject(objects);
   if (!pageObject) {
@@ -766,13 +786,22 @@ export function createCustomerPreviewPdfBuffer(
   }
 
   const ocgRegistry = buildGlobalOcgRegistry(objects);
-  const streamKeys = collectStreamObjectKeys(pageObject.header, objects);
+  const streamKeys = collectStreamObjectKeys(pageObject.header, objects).slice(
+    0,
+    MAX_PREVIEW_STREAMS_TO_FILTER
+  );
   let workingBuffer: Buffer = Buffer.from(sourceBuffer);
+  let workingObjects = objects;
   let changedAny = false;
 
+  logProofGeneratorStage("cut-path suppression attempted", {
+    streamCount: streamKeys.length,
+    cutPathName: confirmedCutPath.name,
+    mode,
+  });
+
   for (const streamKey of streamKeys) {
-    const currentObjects = parsePdfObjects(workingBuffer);
-    const object = currentObjects.get(streamKey);
+    const object = workingObjects.get(streamKey);
     if (!object?.stream) {
       continue;
     }
@@ -782,7 +811,7 @@ export function createCustomerPreviewPdfBuffer(
     const { colorSpaceMap, propertiesMap } = resolveStreamResourceMaps({
       pageHeader: pageObject.header,
       streamHeader: object.header,
-      objects,
+      objects: workingObjects,
     });
     const { filtered, changed } = filterContentStream({
       content,
@@ -790,7 +819,7 @@ export function createCustomerPreviewPdfBuffer(
       mode,
       colorSpaceMap,
       propertiesMap,
-      objects,
+      objects: workingObjects,
       ocgRegistry,
     });
 
@@ -807,6 +836,7 @@ export function createCustomerPreviewPdfBuffer(
     );
 
     workingBuffer = replaceStreamBytes(workingBuffer, object, nextBytes);
+    workingObjects = parsePdfObjects(workingBuffer);
 
     logProofGeneratorDebug("cut_path_preview_stream_filtered", {
       streamKey,

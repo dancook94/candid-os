@@ -27,10 +27,8 @@ import {
   proofReferenceMatchesVersion,
 } from "@/lib/proofs/versioning";
 import {
-  canCreateRevision,
-  canSendProofToCustomer,
+  getProofActions,
   requiresGeneratedCustomerProof,
-  revisionHelpText,
 } from "@/lib/proofs/workflow-policy";
 import type { JobProofView } from "@/lib/proofs/types";
 import type { ProofSelectableManifestItem } from "@/lib/proofs/manifest-items";
@@ -62,7 +60,11 @@ type AdminJobProofsPanelProps = {
 };
 
 function canSendBrandedProof(proof: JobProofView) {
-  return canSendProofToCustomer(proof);
+  if (!requiresGeneratedCustomerProof(proof)) {
+    return true;
+  }
+
+  return hasGeneratedCustomerProof(proof.files ?? []);
 }
 
 function mapProofStatusToBadge(status: string) {
@@ -570,9 +572,12 @@ export function AdminJobProofsPanel({
             const lineageId = lineageProofs[0]?.proof_lineage_id ?? lineageProofs[0]?.id ?? "";
             const currentProof = getCurrentProofInLineage(lineageProofs);
             const previousProofs = lineageProofs.filter((proof) => proof.id !== currentProof?.id);
-            const canReviseCurrentProof = currentProof
-              ? canCreateRevision(currentProof, proofs)
-              : false;
+            const currentProofActions = currentProof
+              ? getProofActions(currentProof, proofs, {
+                  lineageProofs,
+                  assumeCurrentInLineage: true,
+                })
+              : null;
             const lineageSummary = formatLineageManifestSummary(
               lineageProofs[0]?.manifestItems ?? []
             );
@@ -643,16 +648,16 @@ export function AdminJobProofsPanel({
                           View generated proof
                         </Button>
                       ) : null}
-                      {currentProof.status === "ready_to_send" ? (
+                      {currentProofActions?.canSendToCustomer ? (
                         <Button
                           type="button"
-                          disabled={pending || !canSendBrandedProof(currentProof)}
+                          disabled={pending}
                           onClick={() => proofAction(currentProof.id, "send")}
                         >
                           Send to customer
                         </Button>
                       ) : null}
-                      {canReviseCurrentProof ? (
+                      {currentProofActions?.canCreateRevision ? (
                         <Button
                           type="button"
                           variant="outline"
@@ -664,9 +669,9 @@ export function AdminJobProofsPanel({
                       ) : null}
                     </div>
 
-                    {canReviseCurrentProof ? (
+                    {currentProofActions?.revisionHelpText ? (
                       <p className="text-xs text-muted-foreground">
-                        {revisionHelpText(currentProof)}
+                        {currentProofActions.revisionHelpText}
                       </p>
                     ) : null}
 

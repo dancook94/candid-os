@@ -1,3 +1,4 @@
+import { CutPathGeometryCache } from "@/lib/proof-generator/cut-path-geometry-cache";
 import {
   computeCutPathBounds,
   cutPathBoundsToDimensions,
@@ -6,7 +7,6 @@ import {
 import { compareArtworkToQuotedSize, enrichSizeComparisonWithResolution } from "@/lib/proof-generator/compare-specification";
 import {
   cutPathGeometryHasContent,
-  extractCutPathGeometry,
 } from "@/lib/proof-generator/extract-cut-path-geometry";
 import type { FinishedSizeSource } from "@/lib/proof-generator/resolve-pdf-geometry";
 import type {
@@ -54,13 +54,15 @@ function resolveTrimSize(metadata: DetectedArtworkMetadata): PdfBoxDimensions | 
 
 export async function extractCutPathBoundsFromArtwork(
   sourceBuffer: Buffer | undefined,
-  cutPathName: string | null | undefined
+  cutPathName: string | null | undefined,
+  geometryCache?: CutPathGeometryCache
 ): Promise<CutPathBoundsResult | null> {
   if (!sourceBuffer?.length || !cutPathName) {
     return null;
   }
 
-  const extraction = await extractCutPathGeometry(sourceBuffer, cutPathName, 0, {
+  const cache = geometryCache ?? new CutPathGeometryCache();
+  const extraction = await cache.extract(sourceBuffer, cutPathName, 0, {
     debugLabel: "cut_path_bounds",
   });
 
@@ -75,6 +77,7 @@ export async function resolveAuthoritativeFinishedSize(input: {
   metadata: DetectedArtworkMetadata;
   productionFeatures: ProductionFeaturesResult;
   sourceBuffer?: Buffer;
+  cutPathGeometryCache?: CutPathGeometryCache;
 }): Promise<ResolvedProductionFinishedSize> {
   const trimSize = resolveTrimSize(input.metadata);
   const baseFinishedSize = input.metadata.finishedSize?.value ?? trimSize;
@@ -117,7 +120,8 @@ export async function resolveAuthoritativeFinishedSize(input: {
   if (features.confirmedCutPath) {
     const bounds = await extractCutPathBoundsFromArtwork(
       input.sourceBuffer,
-      features.confirmedCutPath.name
+      features.confirmedCutPath.name,
+      input.cutPathGeometryCache
     );
 
     if (bounds) {
@@ -220,12 +224,14 @@ export function buildSizeComparisonForFinishedSize(input: {
 
 export async function applyAuthoritativeFinishedSizeToPreflight(
   preflight: PreflightResult,
-  sourceBuffer?: Buffer
+  sourceBuffer?: Buffer,
+  cutPathGeometryCache?: CutPathGeometryCache
 ): Promise<PreflightResult> {
   const resolved = await resolveAuthoritativeFinishedSize({
     metadata: preflight.metadata,
     productionFeatures: preflight.productionFeatures,
     sourceBuffer,
+    cutPathGeometryCache,
   });
 
   const metadata: DetectedArtworkMetadata = {

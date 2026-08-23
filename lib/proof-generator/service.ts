@@ -20,7 +20,15 @@ import {
   PROOF_GENERATOR_UNSUPPORTED_MESSAGE,
 } from "@/lib/proof-generator/constants";
 import { applyAuthoritativeFinishedSizeToPreflight } from "@/lib/proof-generator/resolve-finished-size";
+import { CutPathGeometryCache } from "@/lib/proof-generator/cut-path-geometry-cache";
 import { generateCustomerProofPdf } from "@/lib/proof-generator/generate-proof-pdf";
+import {
+  logProofGeneratorStage,
+  proofGeneratorTimeoutMessage,
+  PROOF_GENERATOR_TIMEOUTS,
+  ProofGeneratorTimeoutError,
+  withProofGeneratorTimeout,
+} from "@/lib/proof-generator/runtime";
 import { loadQuotedSpecificationItems } from "@/lib/proof-generator/quoted-specification";
 import type {
   PreflightManualOverrides,
@@ -505,7 +513,15 @@ export async function generateBrandedPdfForExistingProof(
     operatorConfirmation?: PreflightOperatorConfirmation;
   }
 ) {
+  logProofGeneratorStage("start", { jobId, proofId });
+
   const proof = await loadMutableProofRecord(adminClient, jobId, proofId);
+  logProofGeneratorStage("proof loaded", {
+    proofId,
+    proofLineageId: proof.proof_lineage_id,
+    versionNumber: proof.version_number,
+    status: proof.status,
+  });
 
   if (await proofHasGeneratedCustomerArtifact(adminClient, proofId)) {
     throw new ProofError(
@@ -532,13 +548,36 @@ export async function generateBrandedPdfForExistingProof(
     throw new ProofError("No Dropbox folder is linked to this job yet.", 409);
   }
 
-  const artwork = await loadProofSourceArtwork(adminClient, jobId, proofId);
-  let preflightResult = await buildPreflightForSourceArtwork(
-    adminClient,
-    jobId,
-    proofId,
-    artwork
+  const artwork = await withProofGeneratorTimeout(
+    "Source download",
+    PROOF_GENERATOR_TIMEOUTS.dropboxDownloadMs,
+    () => loadProofSourceArtwork(adminClient, jobId, proofId)
   );
+
+  logProofGeneratorStage("source file resolved", {
+    proofId,
+    sourceFileName: artwork.fileName,
+    sourceDropboxPath: artwork.dropboxPath,
+  });
+  logProofGeneratorStage("source downloaded", {
+    proofId,
+    byteLength: artwork.buffer.length,
+    detectedKind: artwork.detectedKind,
+  });
+
+  let preflightResult = await withProofGeneratorTimeout(
+    "Preflight analysis",
+    PROOF_GENERATOR_TIMEOUTS.artworkAnalysisMs,
+    () => buildPreflightForSourceArtwork(adminClient, jobId, proofId, artwork)
+  );
+
+  logProofGeneratorStage("preflight resolved", {
+    proofId,
+    overallStatus: preflightResult.overallStatus,
+    trimBox: preflightResult.metadata.trimBox.value,
+    cutPathName: preflightResult.productionFeatures.confirmedCutPath?.name ?? null,
+    cutOverlayEnabled: preflightResult.productionFeatures.showCutPathOnProof ?? false,
+  });
 
   const confirmationErrors = validateOperatorConfirmation(
     preflightResult,
@@ -554,20 +593,32 @@ export async function generateBrandedPdfForExistingProof(
     actorProfileId
   );
 
+  const cutPathGeometryCache = new CutPathGeometryCache();
+  const confirmedCutPathName =
+    preflightResult.productionFeatures.confirmedCutPath?.name ??
+    operatorConfirmation?.cutPath?.confirmedCandidateName ??
+    null;
+
   preflightResult = {
     ...preflightResult,
     productionFeatures: await enrichProductionFeaturesWithCutPathOverlay(
       preflightResult.productionFeatures,
       artwork.analysisBuffer,
-      preflightResult.productionFeatures.confirmedCutPath?.name ??
-        operatorConfirmation?.cutPath?.confirmedCandidateName ??
-        null
+      confirmedCutPathName,
+      cutPathGeometryCache
     ),
   };
 
+  logProofGeneratorStage("trim/cut size resolved", {
+    proofId,
+    cutPathSize: preflightResult.productionFeatures.cutPathSize,
+    resolvedFinishedSize: preflightResult.productionFeatures.resolvedProductionFinishedSize,
+  });
+
   preflightResult = await applyAuthoritativeFinishedSizeToPreflight(
     preflightResult,
-    artwork.analysisBuffer
+    artwork.analysisBuffer,
+    cutPathGeometryCache
   );
 
   const sourceDropboxPath = artwork.dropboxPath;
@@ -575,17 +626,31 @@ export async function generateBrandedPdfForExistingProof(
 
   let generatedPdf: Buffer;
   try {
-    generatedPdf = await generateCustomerProofPdf({
-      jobReference: job.job_reference as string,
-      projectName: job.project_name as string,
-      proofReference: proof.proof_reference as string,
-      versionNumber: proof.version_number as number,
-      customerMessage: (proof.customer_message as string | null) ?? null,
-      preflight: preflightResult,
-      sourceBuffer: artwork.buffer,
-      sourceFileName: artwork.fileName,
+    generatedPdf = await withProofGeneratorTimeout(
+      "PDF generation",
+      PROOF_GENERATOR_TIMEOUTS.pdfGenerationMs,
+      () =>
+        generateCustomerProofPdf({
+          jobReference: job.job_reference as string,
+          projectName: job.project_name as string,
+          proofReference: proof.proof_reference as string,
+          versionNumber: proof.version_number as number,
+          customerMessage: (proof.customer_message as string | null) ?? null,
+          preflight: preflightResult,
+          sourceBuffer: artwork.buffer,
+          sourceFileName: artwork.fileName,
+          cutPathGeometryCache,
+        })
+    );
+    logProofGeneratorStage("PDF generated", {
+      proofId,
+      byteLength: generatedPdf.length,
     });
   } catch (error) {
+    if (error instanceof ProofGeneratorTimeoutError) {
+      throw new ProofError(proofGeneratorTimeoutMessage(error), 504);
+    }
+
     const message =
       error instanceof Error ? error.message : "Branded proof PDF generation failed.";
     throw new ProofError(message, 500);
@@ -633,32 +698,56 @@ export async function generateBrandedPdfForExistingProof(
     generatedDestinationFileName: generatedFileName,
   });
 
-  const uploadResult = await uploadProofFileToProofsFolder(adminClient, {
-    jobId,
+  logProofGeneratorStage("Dropbox upload started", {
     proofId,
-    fileName: generatedFileName,
-    mimeType: "application/pdf",
-    fileBuffer: pdfBuffer.buffer,
-    actorProfileId,
+    generatedFileName,
+    proofsFolderPath,
+  });
+
+  const uploadResult = await withProofGeneratorTimeout(
+    "Dropbox upload",
+    PROOF_GENERATOR_TIMEOUTS.dropboxUploadMs,
+    () =>
+      uploadProofFileToProofsFolder(adminClient, {
+        jobId,
+        proofId,
+        fileName: generatedFileName,
+        mimeType: "application/pdf",
+        fileBuffer: pdfBuffer.buffer,
+        actorProfileId,
+      })
+  );
+
+  logProofGeneratorStage("Dropbox upload complete", {
+    proofId,
+    generatedDropboxPath: uploadResult.dropboxPath,
+    generatedFileName: uploadResult.fileName,
   });
 
   const generatedAt = new Date().toISOString();
 
-  await saveProofPreflightRecord(adminClient, {
-    proofId,
-    preflight: preflightResult,
-    manualOverrides: {
-      ...(manualOverrides ?? {}),
-      operatorConfirmation: operatorConfirmation ?? null,
-    },
-    sourceDropboxPath,
-    sourceJobFileId,
-    reviewedByProfileId: actorProfileId,
-    generatedAt,
-    generatedDropboxPath: uploadResult.dropboxPath,
-    generatedFileName: uploadResult.fileName,
-    requirePersisted: true,
-  });
+  await withProofGeneratorTimeout(
+    "Metadata save",
+    PROOF_GENERATOR_TIMEOUTS.metadataSaveMs,
+    () =>
+      saveProofPreflightRecord(adminClient, {
+        proofId,
+        preflight: preflightResult,
+        manualOverrides: {
+          ...(manualOverrides ?? {}),
+          operatorConfirmation: operatorConfirmation ?? null,
+        },
+        sourceDropboxPath,
+        sourceJobFileId,
+        reviewedByProfileId: actorProfileId,
+        generatedAt,
+        generatedDropboxPath: uploadResult.dropboxPath,
+        generatedFileName: uploadResult.fileName,
+        requirePersisted: true,
+      })
+  );
+
+  logProofGeneratorStage("metadata saved", { proofId, generatedAt });
 
   await logProofActivity(adminClient, {
     activityType: PROOF_ACTIVITY_TYPES.proofBrandedPdfGenerated,
@@ -684,11 +773,19 @@ export async function generateBrandedPdfForExistingProof(
     opportunityId: job.opportunity_id as string | null,
   });
 
-  return {
+  const result = {
     proofId,
     proofReference: proof.proof_reference as string,
     generatedFileName: uploadResult.fileName,
     generatedDropboxPath: uploadResult.dropboxPath,
     generatedAt,
   };
+
+  logProofGeneratorStage("response returned", {
+    proofId,
+    generatedFileName: result.generatedFileName,
+    generatedDropboxPath: result.generatedDropboxPath,
+  });
+
+  return result;
 }

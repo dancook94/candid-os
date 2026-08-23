@@ -10,7 +10,7 @@ import {
 } from "@/lib/proofs/constants";
 import { PROOF_UPLOAD_MAX_BYTES_LABEL } from "@/lib/proofs/file-validation";
 import { getSourceArtworkFile } from "@/lib/proofs/proof-files";
-import { canEditProofAttachment } from "@/lib/proofs/workflow-policy";
+import { getProofActions } from "@/lib/proofs/workflow-policy";
 import { revisionCreatesNewImmutableVersion } from "@/lib/proofs/versioning";
 import type { JobProofFileView, JobProofView } from "@/lib/proofs/types";
 
@@ -88,7 +88,8 @@ export function ProofFileAttachmentPanel({
 
   const proofFile = getSourceArtworkFile(proof.files);
   const completeJobFiles = jobFiles.filter((file) => file.upload_status === "complete");
-  const canEditAttachment = canEditProofAttachment(proof);
+  const proofActions = getProofActions(proof, []);
+  const canEditAttachment = proofActions.canEditAttachment;
   const attachmentLockedForRevision =
     !canEditAttachment &&
     Boolean(proofFile) &&

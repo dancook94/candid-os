@@ -4,8 +4,43 @@ import { describe, it } from "node:test";
 import {
   canCreateRevision,
   canEditProofAttachment,
+  getProofActions,
   hasBlockingRevisionInLineage,
 } from "@/lib/proofs/workflow-policy";
+
+describe("getProofActions", () => {
+  it("shows create revision on the current ready_to_send card", () => {
+    const proof = {
+      id: "1",
+      status: "ready_to_send" as const,
+      proof_lineage_id: "lineage-a",
+      version_number: 7,
+      brandedPdfGeneratedAt: null,
+      files: [],
+      created_at: "2026-01-02",
+    };
+
+    const actions = getProofActions(proof, [proof], {
+      lineageProofs: [proof],
+      assumeCurrentInLineage: true,
+    });
+
+    assert.equal(actions.canCreateRevision, true);
+    assert.equal(actions.canEditAttachment, false);
+    assert.match(actions.revisionHelpText ?? "", /Creates v8/);
+  });
+
+  it("blocks attachment edits once a proof is ready_to_send", () => {
+    assert.equal(
+      canEditProofAttachment({
+        status: "ready_to_send",
+        brandedPdfGeneratedAt: null,
+        files: [{ file_role: "source_artwork", dropbox_path: "/art.pdf" } as never],
+      }),
+      false
+    );
+  });
+});
 
 describe("canCreateRevision", () => {
   it("offers revision for ready_to_send current proof without generated file metadata", () => {
@@ -25,6 +60,7 @@ describe("canCreateRevision", () => {
             status: "ready_to_send",
             proof_lineage_id: "lineage-a",
             version_number: 7,
+            created_at: "2026-01-02",
           },
         ]
       ),
@@ -49,12 +85,14 @@ describe("canCreateRevision", () => {
             status: "ready_to_send",
             proof_lineage_id: "lineage-a",
             version_number: 7,
+            created_at: "2026-01-02",
           },
           {
             id: "2",
             status: "draft",
             proof_lineage_id: "lineage-a",
             version_number: 8,
+            created_at: "2026-01-03",
           },
         ]
       ),
@@ -71,6 +109,62 @@ describe("canCreateRevision", () => {
             status: "ready_to_send",
             proof_lineage_id: "lineage-a",
             version_number: 7,
+            created_at: "2026-01-02",
+          },
+        ],
+        { id: "1", version_number: 7 }
+      ),
+      false
+    );
+  });
+
+  it("ignores cancelled drafts when checking for blocking revisions", () => {
+    assert.equal(
+      hasBlockingRevisionInLineage(
+        [
+          {
+            id: "1",
+            status: "ready_to_send",
+            proof_lineage_id: "lineage-a",
+            version_number: 7,
+            created_at: "2026-01-02",
+          },
+          {
+            id: "2",
+            status: "draft",
+            proof_lineage_id: "lineage-a",
+            version_number: 8,
+            created_at: "2026-01-03",
+          },
+          {
+            id: "3",
+            status: "cancelled",
+            proof_lineage_id: "lineage-a",
+            version_number: 9,
+            created_at: "2026-01-04",
+          },
+        ],
+        { id: "1", version_number: 7 }
+      ),
+      true
+    );
+
+    assert.equal(
+      hasBlockingRevisionInLineage(
+        [
+          {
+            id: "1",
+            status: "ready_to_send",
+            proof_lineage_id: "lineage-a",
+            version_number: 7,
+            created_at: "2026-01-02",
+          },
+          {
+            id: "2",
+            status: "cancelled",
+            proof_lineage_id: "lineage-a",
+            version_number: 8,
+            created_at: "2026-01-03",
           },
         ],
         { id: "1", version_number: 7 }

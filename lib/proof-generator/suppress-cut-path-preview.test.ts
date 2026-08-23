@@ -8,9 +8,9 @@ import {
 import { createCustomerPreviewPdfBuffer } from "@/lib/proof-generator/suppress-cut-path-preview";
 
 describe("createCustomerPreviewPdfBuffer", () => {
-  it("suppresses OCG CutContour content from preview copy", () => {
+  it("suppresses OCG CutContour content from preview copy", async () => {
     const sourceBuffer = buildOcgCutPathPdfBuffer({ shape: "rectangle" });
-    const result = createCustomerPreviewPdfBuffer(sourceBuffer, {
+    const result = await createCustomerPreviewPdfBuffer(sourceBuffer, {
       name: "CutContour",
       sourceType: "optional_content_group",
     });
@@ -20,9 +20,9 @@ describe("createCustomerPreviewPdfBuffer", () => {
     assert.notEqual(result.buffer.toString("latin1"), sourceBuffer.toString("latin1"));
   });
 
-  it("suppresses separation CutContour strokes from preview copy", () => {
+  it("suppresses separation CutContour strokes from preview copy", async () => {
     const sourceBuffer = buildCutPathTestPdfBuffer({ shape: "rectangle" });
-    const result = createCustomerPreviewPdfBuffer(sourceBuffer, {
+    const result = await createCustomerPreviewPdfBuffer(sourceBuffer, {
       name: "CutContour",
       sourceType: "separation",
     });
@@ -31,18 +31,18 @@ describe("createCustomerPreviewPdfBuffer", () => {
     assert.equal(result.method, "separation_content_filter");
   });
 
-  it("does not suppress when cut path is not confirmed", () => {
+  it("does not suppress when cut path is not confirmed", async () => {
     const sourceBuffer = buildCutPathTestPdfBuffer({ shape: "rectangle" });
-    const result = createCustomerPreviewPdfBuffer(sourceBuffer, null);
+    const result = await createCustomerPreviewPdfBuffer(sourceBuffer, null);
 
     assert.equal(result.originalCutPathSuppressed, false);
     assert.equal(result.method, "none");
     assert.equal(result.buffer, sourceBuffer);
   });
 
-  it("falls back safely for unsupported source types", () => {
+  it("falls back safely for unsupported source types", async () => {
     const sourceBuffer = buildCutPathTestPdfBuffer({ shape: "rectangle" });
-    const result = createCustomerPreviewPdfBuffer(sourceBuffer, {
+    const result = await createCustomerPreviewPdfBuffer(sourceBuffer, {
       name: "CutContour",
       sourceType: "layer",
     });

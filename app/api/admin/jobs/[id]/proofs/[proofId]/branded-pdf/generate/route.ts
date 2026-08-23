@@ -13,12 +13,23 @@ import type {
 } from "@/lib/proof-generator/types";
 import { mapDropboxErrorToProofError } from "@/lib/proofs/dropbox-errors";
 import { ProofError } from "@/lib/proofs/errors";
+import {
+  ProofGeneratorTimeoutError,
+  proofGeneratorTimeoutMessage,
+} from "@/lib/proof-generator/runtime";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 type RouteContext = { params: Promise<{ id: string; proofId: string }> };
 
 function proofErrorResponse(error: unknown) {
+  if (error instanceof ProofGeneratorTimeoutError) {
+    return NextResponse.json(
+      { error: proofGeneratorTimeoutMessage(error) },
+      { status: 504 }
+    );
+  }
+
   if (error instanceof ProofError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
   }
@@ -36,6 +47,8 @@ function proofErrorResponse(error: unknown) {
 
   return jobErrorResponse(error);
 }
+
+export const maxDuration = 180;
 
 export async function POST(request: Request, context: RouteContext) {
   try {

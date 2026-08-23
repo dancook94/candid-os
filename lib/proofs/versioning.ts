@@ -1,6 +1,12 @@
 import { REVISABLE_PROOF_STATUSES, type RevisableProofStatus } from "@/lib/proofs/constants";
 import type { JobProofView } from "@/lib/proofs/types";
-import { canCreateRevision, canEditProofAttachment } from "@/lib/proofs/workflow-policy";
+import {
+  canCreateRevision,
+  canEditProofAttachment,
+  getCurrentProofInLineage,
+} from "@/lib/proofs/workflow-policy";
+
+export { getCurrentProofInLineage };
 
 export { REVISABLE_PROOF_STATUSES, type RevisableProofStatus };
 
@@ -88,21 +94,6 @@ export function getInProgressProof(
       )
     ) ?? null
   );
-}
-
-/** Highest non-archived proof version within one lineage. */
-export function getCurrentProofInLineage<
-  T extends { status: string; version_number: number },
->(proofs: T[]): T | null {
-  const active = proofs.filter(
-    (proof) => !["superseded", "cancelled"].includes(proof.status)
-  );
-
-  if (!active.length) {
-    return null;
-  }
-
-  return [...active].sort((left, right) => right.version_number - left.version_number)[0];
 }
 
 /** Highest non-archived proof version driving admin/customer "current" context. */

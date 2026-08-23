@@ -3,8 +3,8 @@ import {
   computeCutPathBounds,
   cutPathBoundsToDimensions,
 } from "@/lib/proof-generator/cut-path-bounds";
+import { CutPathGeometryCache } from "@/lib/proof-generator/cut-path-geometry-cache";
 import {
-  extractCutPathGeometry,
   cutPathGeometryHasContent,
   formatCutPathExtractionFailureReason,
 } from "@/lib/proof-generator/extract-cut-path-geometry";
@@ -238,7 +238,8 @@ export function buildProductionFeaturesFromScan(
 export async function enrichProductionFeaturesWithCutPathOverlay(
   features: ProductionFeaturesResult,
   sourceBuffer: Buffer | undefined,
-  separationName?: string | null
+  separationName?: string | null,
+  geometryCache?: CutPathGeometryCache
 ): Promise<ProductionFeaturesResult> {
   if (!sourceBuffer?.length || !separationName) {
     return {
@@ -249,7 +250,8 @@ export async function enrichProductionFeaturesWithCutPathOverlay(
     };
   }
 
-  const extraction = await extractCutPathGeometry(sourceBuffer, separationName, 0, {
+  const cache = geometryCache ?? new CutPathGeometryCache();
+  const extraction = await cache.extract(sourceBuffer, separationName, 0, {
     debugLabel: "preflight_overlay_availability",
   });
   if (!extraction.ok || !cutPathGeometryHasContent(extraction.geometry)) {

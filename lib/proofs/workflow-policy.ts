@@ -29,15 +29,35 @@ type ProofWorkflowContext = Pick<
 type ProofLineageMember = Pick<
   JobProofView,
   "id" | "status" | "version_number" | "proof_lineage_id"
->;
+> & {
+  created_at?: string;
+};
+
+export type ProofActionContext = {
+  /** Pre-filtered proofs for this proof's lineage (avoids mismatched filters). */
+  lineageProofs?: ProofLineageMember[];
+  /** Caller already selected the lineage head for the current proof card. */
+  assumeCurrentInLineage?: boolean;
+};
+
+export type ProofActions = {
+  isCurrentInLineage: boolean;
+  canEditAttachment: boolean;
+  canReplaceAttachment: boolean;
+  canRemoveAttachment: boolean;
+  canGenerateBrandedPdf: boolean;
+  canSendToCustomer: boolean;
+  canCreateRevision: boolean;
+  revisionHelpText: string | null;
+};
 
 function proofFiles(proof: Pick<JobProofView, "files">) {
   return proof.files ?? [];
 }
 
-function getCurrentProofInLineage<T extends { status: string; version_number: number }>(
-  proofs: T[]
-): T | null {
+export function getCurrentProofInLineage<
+  T extends { status: string; version_number: number; created_at?: string },
+>(proofs: T[]): T | null {
   const active = proofs.filter(
     (proof) => !["superseded", "cancelled"].includes(proof.status)
   );
@@ -46,7 +66,15 @@ function getCurrentProofInLineage<T extends { status: string; version_number: nu
     return null;
   }
 
-  return [...active].sort((left, right) => right.version_number - left.version_number)[0];
+  return [...active].sort((left, right) => {
+    if (right.version_number !== left.version_number) {
+      return right.version_number - left.version_number;
+    }
+
+    const leftCreated = left.created_at ?? "";
+    const rightCreated = right.created_at ?? "";
+    return rightCreated.localeCompare(leftCreated);
+  })[0];
 }
 
 function proofHasGeneratedCustomerArtifactView(
@@ -61,6 +89,19 @@ function proofHasGeneratedCustomerArtifactView(
   );
 }
 
+function lineageProofsFor(
+  proof: Pick<JobProofView, "proof_lineage_id">,
+  allProofs: ProofLineageMember[],
+  context?: ProofActionContext
+) {
+  return (
+    context?.lineageProofs ??
+    allProofs.filter(
+      (candidate) => candidate.proof_lineage_id === proof.proof_lineage_id
+    )
+  );
+}
+
 export function hasBlockingRevisionInLineage(
   lineageProofs: ProofLineageMember[],
   sourceProof: Pick<JobProofView, "id" | "version_number">
@@ -68,6 +109,7 @@ export function hasBlockingRevisionInLineage(
   return lineageProofs.some(
     (proof) =>
       proof.id !== sourceProof.id &&
+      !["superseded", "cancelled"].includes(proof.status) &&
       REVISION_BLOCKING_STATUSES.includes(
         proof.status as (typeof REVISION_BLOCKING_STATUSES)[number]
       ) &&
@@ -83,34 +125,7 @@ export function isCurrentProofInLineage(
   return current?.id === proof.id;
 }
 
-/**
- * Whether staff can create the next proof version from this proof.
- * Single authoritative rule used by all admin proof UI.
- */
-export function canCreateRevision(
-  proof: ProofWorkflowContext,
-  allProofs: ProofLineageMember[]
-): boolean {
-  if (["superseded", "cancelled"].includes(proof.status)) {
-    return false;
-  }
-
-  const lineageProofs = allProofs.filter(
-    (candidate) => candidate.proof_lineage_id === proof.proof_lineage_id
-  );
-
-  if (!lineageProofs.length) {
-    return false;
-  }
-
-  if (!isCurrentProofInLineage(proof, lineageProofs)) {
-    return false;
-  }
-
-  if (hasBlockingRevisionInLineage(lineageProofs, proof)) {
-    return false;
-  }
-
+function proofSupportsNextRevision(proof: ProofWorkflowContext) {
   if (
     REVISABLE_PROOF_STATUSES.includes(
       proof.status as (typeof REVISABLE_PROOF_STATUSES)[number]
@@ -119,16 +134,88 @@ export function canCreateRevision(
     return true;
   }
 
-  if (proofHasGeneratedCustomerArtifactView(proof)) {
-    return true;
+  return proofHasGeneratedCustomerArtifactView(proof);
+}
+
+/**
+ * Core revision rule for a proof within its lineage (does not verify lineage head).
+ */
+export function canCreateNextRevision(
+  proof: ProofWorkflowContext,
+  lineageProofs: ProofLineageMember[]
+): boolean {
+  if (["superseded", "cancelled"].includes(proof.status)) {
+    return false;
   }
 
-  return false;
+  if (!lineageProofs.length) {
+    return false;
+  }
+
+  if (hasBlockingRevisionInLineage(lineageProofs, proof)) {
+    return false;
+  }
+
+  return proofSupportsNextRevision(proof);
+}
+
+/**
+ * Whether staff can create the next proof version from this proof.
+ * Single authoritative rule used by all admin proof UI.
+ */
+export function canCreateRevision(
+  proof: ProofWorkflowContext,
+  allProofs: ProofLineageMember[]
+): boolean {
+  const lineageProofs = lineageProofsFor(proof, allProofs);
+
+  if (!isCurrentProofInLineage(proof, lineageProofs)) {
+    return false;
+  }
+
+  return canCreateNextRevision(proof, lineageProofs);
+}
+
+/**
+ * Central action policy for admin proof UI. Pass lineageProofs when rendering
+ * a lineage card to avoid re-filtering the full job proof list.
+ */
+export function getProofActions(
+  proof: ProofWorkflowContext,
+  allProofs: ProofLineageMember[],
+  context: ProofActionContext = {}
+): ProofActions {
+  const lineageProofs = lineageProofsFor(proof, allProofs, context);
+  const isCurrentInLineage =
+    context.assumeCurrentInLineage === true ||
+    isCurrentProofInLineage(proof, lineageProofs);
+  const canEditAttachment = canEditProofAttachment(proof);
+  const canCreateRevisionAction =
+    isCurrentInLineage && canCreateNextRevision(proof, lineageProofs);
+
+  return {
+    isCurrentInLineage,
+    canEditAttachment,
+    canReplaceAttachment: canEditAttachment,
+    canRemoveAttachment: canEditAttachment,
+    canGenerateBrandedPdf: canGenerateBrandedPdf(proof),
+    canSendToCustomer: canSendProofToCustomer(proof as JobProofView),
+    canCreateRevision: canCreateRevisionAction,
+    revisionHelpText: canCreateRevisionAction ? revisionHelpText(proof) : null,
+  };
 }
 
 export function canEditProofAttachment(
   proof: Pick<JobProofView, "status" | "files" | "brandedPdfGeneratedAt">
 ) {
+  if (
+    IMMUTABLE_REVISION_STATUSES.includes(
+      proof.status as (typeof IMMUTABLE_REVISION_STATUSES)[number]
+    )
+  ) {
+    return false;
+  }
+
   if (!["draft", "internal_review"].includes(proof.status)) {
     return false;
   }

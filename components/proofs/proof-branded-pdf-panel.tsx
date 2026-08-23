@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { validateOperatorConfirmation } from "@/lib/proof-generator/operator-confirmation";
 import type { PreflightResult, PreflightOperatorConfirmation } from "@/lib/proof-generator/types";
 import type { JobProofView } from "@/lib/proofs/types";
-import { canGenerateBrandedPdf, requiresGeneratedCustomerProof } from "@/lib/proofs/workflow-policy";
+import { getProofActions, requiresGeneratedCustomerProof } from "@/lib/proofs/workflow-policy";
 import {
   getCustomerProofFile,
   getSourceArtworkFile,
@@ -34,6 +34,21 @@ function formatTimestamp(value: string | null) {
   return new Date(value).toLocaleString("en-GB");
 }
 
+const GENERATE_PDF_TIMEOUT_MS = 180_000;
+
+function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  timeoutMs: number
+) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+  return fetch(input, { ...init, signal: controller.signal }).finally(() => {
+    window.clearTimeout(timeoutId);
+  });
+}
+
 function mapGenerationErrorMessage(payload: { error?: string }, response: Response) {
   if (payload.error?.trim()) {
     return payload.error;
@@ -45,6 +60,10 @@ function mapGenerationErrorMessage(payload: { error?: string }, response: Respon
 
   if (response.status === 409) {
     return "This proof version cannot be updated. Create a revised proof if you need a new version.";
+  }
+
+  if (response.status === 504) {
+    return payload.error ?? "Branded proof PDF generation timed out.";
   }
 
   if (response.status >= 500) {
@@ -70,7 +89,8 @@ export function ProofBrandedPdfPanel({
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
 
-  const canGenerate = canGenerateBrandedPdf(proof);
+  const proofActions = getProofActions(proof, []);
+  const canGenerate = proofActions.canGenerateBrandedPdf;
   const sourceArtwork = getSourceArtworkFile(proof.files ?? []);
   const customerProof = getCustomerProofFile(proof.files ?? []);
   const hasAttachment = requiresGeneratedCustomerProof(proof);
@@ -165,13 +185,14 @@ export function ProofBrandedPdfPanel({
     setGenerating(true);
 
     try {
-      const response = await fetch(
+      const response = await fetchWithTimeout(
         `/api/admin/jobs/${jobId}/proofs/${proof.id}/branded-pdf/generate`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ operatorConfirmation }),
-        }
+        },
+        GENERATE_PDF_TIMEOUT_MS
       );
 
       let payload: { error?: string; generatedFileName?: string } = {};
@@ -199,9 +220,11 @@ export function ProofBrandedPdfPanel({
       await onRefresh();
     } catch (error) {
       const message =
-        error instanceof Error
-          ? error.message
-          : "Failed to generate branded proof PDF.";
+        error instanceof DOMException && error.name === "AbortError"
+          ? "Branded proof PDF generation timed out. Try again or check server logs for the last completed stage."
+          : error instanceof Error
+            ? error.message
+            : "Failed to generate branded proof PDF.";
       setPanelError(message);
       onError(message);
     } finally {
