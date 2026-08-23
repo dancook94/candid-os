@@ -1,7 +1,12 @@
 import type { JobProofView } from "@/lib/proofs/types";
 
-/** Statuses that allow staff to create the next proof version from an existing one. */
-export const REVISABLE_PROOF_STATUSES = ["changes_requested", "approved"] as const;
+/** Statuses where staff can start the next version from the current proof in a lineage. */
+export const REVISABLE_PROOF_STATUSES = [
+  "changes_requested",
+  "approved",
+  "sent",
+  "viewed",
+] as const;
 
 export type RevisableProofStatus = (typeof REVISABLE_PROOF_STATUSES)[number];
 
@@ -55,15 +60,17 @@ export function isRevisableProofStatus(status: string): status is RevisableProof
 export function proofSupportsRevision(proof: {
   status: string;
   brandedPdfGeneratedAt?: string | null;
+  hasGeneratedCustomerProof?: boolean;
 }) {
   if (isRevisableProofStatus(proof.status)) {
     return true;
   }
 
-  return (
-    Boolean(proof.brandedPdfGeneratedAt) &&
-    ["draft", "internal_review", "ready_to_send"].includes(proof.status)
-  );
+  if (!["draft", "internal_review", "ready_to_send"].includes(proof.status)) {
+    return false;
+  }
+
+  return Boolean(proof.brandedPdfGeneratedAt) || Boolean(proof.hasGeneratedCustomerProof);
 }
 
 export function hasInProgressProof(proofs: Array<{ status: string }>) {
@@ -126,7 +133,9 @@ export function canCreateRevisedProof(
   sourceProof: Pick<
     JobProofView,
     "status" | "proof_lineage_id" | "version_number" | "brandedPdfGeneratedAt"
-  >,
+  > & {
+    hasGeneratedCustomerProof?: boolean;
+  },
   proofs: Array<
     Pick<JobProofView, "id" | "status" | "version_number" | "proof_lineage_id">
   >
@@ -135,7 +144,13 @@ export function canCreateRevisedProof(
     return false;
   }
 
-  if (!proofSupportsRevision(sourceProof)) {
+  if (
+    !proofSupportsRevision({
+      status: sourceProof.status,
+      brandedPdfGeneratedAt: sourceProof.brandedPdfGeneratedAt,
+      hasGeneratedCustomerProof: sourceProof.hasGeneratedCustomerProof,
+    })
+  ) {
     return false;
   }
 
@@ -143,12 +158,57 @@ export function canCreateRevisedProof(
     (proof) => proof.proof_lineage_id === sourceProof.proof_lineage_id
   );
 
+  if (lineageProofs.length === 0) {
+    return false;
+  }
+
   if (getInProgressProof(lineageProofs)) {
     return false;
   }
 
   const latestInLineage = getCurrentProofInLineage(lineageProofs);
   return latestInLineage?.version_number === sourceProof.version_number;
+}
+
+export function getLineageRevisionSourceProof<
+  T extends Pick<
+    JobProofView,
+    | "id"
+    | "status"
+    | "proof_lineage_id"
+    | "version_number"
+    | "brandedPdfGeneratedAt"
+    | "files"
+  >,
+>(lineageProofs: T[], proofs: T[]) {
+  const currentInLineage = getCurrentProofInLineage(lineageProofs);
+  if (!currentInLineage) {
+    return null;
+  }
+
+  const revisionContext = {
+    status: currentInLineage.status,
+    proof_lineage_id: currentInLineage.proof_lineage_id,
+    version_number: currentInLineage.version_number,
+    brandedPdfGeneratedAt: currentInLineage.brandedPdfGeneratedAt,
+    hasGeneratedCustomerProof: hasGeneratedCustomerProofForRevision(currentInLineage),
+  };
+
+  return canCreateRevisedProof(revisionContext, proofs) ? currentInLineage : null;
+}
+
+function hasGeneratedCustomerProofForRevision(
+  proof: Pick<JobProofView, "files" | "brandedPdfGeneratedAt">
+) {
+  if (proof.brandedPdfGeneratedAt) {
+    return true;
+  }
+
+  return proof.files.some((file) => file.file_role === "customer_proof" && file.dropbox_path);
+}
+
+export function revisionCreatesNewImmutableVersion(status: string) {
+  return ["sent", "viewed", "approved", "changes_requested"].includes(status);
 }
 
 export function formatProofHistoryEntry(

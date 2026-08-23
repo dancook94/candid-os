@@ -189,6 +189,51 @@ describe("canCreateRevisedProof", () => {
       false
     );
   });
+
+  it("allows revision from sent proofs when nothing is in progress", () => {
+    assert.equal(
+      canCreateRevisedProof(
+        {
+          status: "sent",
+          proof_lineage_id: "lineage-a",
+          version_number: 1,
+          brandedPdfGeneratedAt: "2026-01-01",
+        },
+        [
+          {
+            id: "1",
+            status: "sent",
+            version_number: 1,
+            proof_lineage_id: "lineage-a",
+          },
+        ]
+      ),
+      true
+    );
+  });
+
+  it("allows revision from draft proofs with a generated customer PDF", () => {
+    assert.equal(
+      canCreateRevisedProof(
+        {
+          status: "draft",
+          proof_lineage_id: "lineage-a",
+          version_number: 1,
+          brandedPdfGeneratedAt: null,
+          hasGeneratedCustomerProof: true,
+        },
+        [
+          {
+            id: "1",
+            status: "draft",
+            version_number: 1,
+            proof_lineage_id: "lineage-a",
+          },
+        ]
+      ),
+      true
+    );
+  });
 });
 
 describe("hasInProgressProof", () => {

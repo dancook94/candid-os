@@ -77,15 +77,16 @@ export async function POST(request: Request, context: RouteContext) {
           actorProfileId: authResult.userId,
         });
         break;
-      case "create_revised_proof":
-        await createRevisedJobProof(adminClient, {
+      case "create_revised_proof": {
+        const revisedProof = await createRevisedJobProof(adminClient, {
           jobId,
           sourceProofId: proofId,
           actorProfileId: authResult.userId,
           customerMessage: body.customerMessage,
           internalNote: body.internalNote,
         });
-        break;
+        return NextResponse.json({ ok: true, proofId: revisedProof.id });
+      }
       default:
         return NextResponse.json({ error: "Unknown action." }, { status: 400 });
     }

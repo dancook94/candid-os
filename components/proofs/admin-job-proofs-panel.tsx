@@ -24,7 +24,9 @@ import {
   formatProofHistoryEntry,
   getCurrentProofInLineage,
   getCurrentProofRecord,
+  getLineageRevisionSourceProof,
   groupProofsByLineage,
+  revisionCreatesNewImmutableVersion,
 } from "@/lib/proofs/versioning";
 import type { JobProofView } from "@/lib/proofs/types";
 import type { ProofSelectableManifestItem } from "@/lib/proofs/manifest-items";
@@ -114,6 +116,7 @@ export function AdminJobProofsPanel({
     Array<{ id: string; name: string; path: string; size: number }>
   >([]);
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
+  const [focusedProofId, setFocusedProofId] = useState<string | null>(null);
 
   const completeJobFiles = jobFiles.filter((file) => file.upload_status === "complete");
 
@@ -218,7 +221,7 @@ export function AdminJobProofsPanel({
       body: JSON.stringify({ action: "create_revised_proof" }),
     });
 
-    const payload = (await response.json()) as { error?: string };
+    const payload = (await response.json()) as { error?: string; proofId?: string };
     setPending(false);
 
     if (!response.ok) {
@@ -226,7 +229,29 @@ export function AdminJobProofsPanel({
       return;
     }
 
-    await refreshAfterProofAction();
+    await refreshProofs();
+
+    if (payload.proofId) {
+      setFocusedProofId(payload.proofId);
+      window.requestAnimationFrame(() => {
+        document
+          .getElementById(`proof-${payload.proofId}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    }
+  }
+
+  function proofRevisionEligible(proof: JobProofView) {
+    return canCreateRevisedProof(
+      {
+        status: proof.status,
+        proof_lineage_id: proof.proof_lineage_id,
+        version_number: proof.version_number,
+        brandedPdfGeneratedAt: proof.brandedPdfGeneratedAt,
+        hasGeneratedCustomerProof: hasGeneratedCustomerProof(proof.files),
+      },
+      proofs
+    );
   }
 
   const currentProof = getCurrentProofRecord(proofs);
@@ -423,6 +448,13 @@ export function AdminJobProofsPanel({
           <ul className="space-y-2 text-sm">
             {lineageGroups.map((lineageProofs) => {
               const currentInLineage = getCurrentProofInLineage(lineageProofs);
+              const revisionSource = getLineageRevisionSourceProof(lineageProofs, proofs);
+              const currentStatusLabel = currentInLineage
+                ? PROOF_STATUS_LABELS[
+                    currentInLineage.status as keyof typeof PROOF_STATUS_LABELS
+                  ] ?? currentInLineage.status
+                : null;
+
               return (
                 <li key={lineageProofs[0]?.proof_lineage_id ?? lineageProofs[0]?.id} className="rounded-md border border-border/70 bg-background px-3 py-2">
                   <p className="font-medium">{lineageProofs[0]?.title}</p>
@@ -431,10 +463,20 @@ export function AdminJobProofsPanel({
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     Current: v{currentInLineage?.version_number ?? "—"}
-                    {currentInLineage
-                      ? ` (${PROOF_STATUS_LABELS[currentInLineage.status as keyof typeof PROOF_STATUS_LABELS] ?? currentInLineage.status})`
-                      : ""}
+                    {currentStatusLabel ? ` — ${currentStatusLabel}` : ""}
                   </p>
+                  {revisionSource ? (
+                    <div className="mt-3">
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={pending}
+                        onClick={() => createRevisedProof(revisionSource.id)}
+                      >
+                        Create revised proof
+                      </Button>
+                    </div>
+                  ) : null}
                 </li>
               );
             })}
@@ -446,37 +488,72 @@ export function AdminJobProofsPanel({
         <div className="space-y-8">
           {lineageGroups.map((lineageProofs) => {
             const currentInLineage = getCurrentProofInLineage(lineageProofs);
+            const revisionSource = getLineageRevisionSourceProof(lineageProofs, proofs);
             const lineageSummary = formatLineageManifestSummary(
               lineageProofs[0]?.manifestItems ?? []
             );
+            const currentStatusLabel = currentInLineage
+              ? PROOF_STATUS_LABELS[
+                  currentInLineage.status as keyof typeof PROOF_STATUS_LABELS
+                ] ?? currentInLineage.status
+              : null;
 
             return (
               <div key={lineageProofs[0]?.proof_lineage_id ?? lineageProofs[0]?.id} className="space-y-4">
-                <div>
-                  <h3 className="font-semibold">{lineageProofs[0]?.title}</h3>
-                  <p className="text-sm text-muted-foreground">{lineageSummary}</p>
-                  {currentInLineage ? (
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      Current proof: v{currentInLineage.version_number}
-                    </p>
+                <div className="rounded-lg border border-border bg-muted/10 p-4 space-y-3">
+                  <div>
+                    <h3 className="font-semibold">{lineageProofs[0]?.title}</h3>
+                    <p className="text-sm text-muted-foreground">{lineageSummary}</p>
+                    {currentInLineage ? (
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        Current proof: v{currentInLineage.version_number}
+                        {currentStatusLabel ? ` — ${currentStatusLabel}` : ""}
+                      </p>
+                    ) : null}
+                  </div>
+
+                  {revisionSource ? (
+                    <div className="space-y-2 border-t border-border pt-3">
+                      <Button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => createRevisedProof(revisionSource.id)}
+                      >
+                        Create revised proof
+                      </Button>
+                      {revisionCreatesNewImmutableVersion(revisionSource.status) ? (
+                        <p className="text-xs text-muted-foreground">
+                          Creates v{(revisionSource.version_number ?? 0) + 1} as a new draft.
+                          v{revisionSource.version_number} and its generated PDF stay unchanged
+                          until the new version is sent.
+                        </p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          Starts the next proof version in this series as a new draft. Attach
+                          revised artwork, run preflight, then generate the branded PDF.
+                        </p>
+                      )}
+                    </div>
                   ) : null}
                 </div>
 
                 {lineageProofs.length > 1 ? (
                   <div className="rounded-lg border border-border bg-muted/10 p-3">
-                    <p className="text-sm font-medium">Previous versions</p>
+                    <p className="text-sm font-medium">Proof history</p>
                     <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-                      {lineageProofs
-                        .filter((proof) => proof.id !== currentInLineage?.id)
-                        .map((proof) => (
+                      {lineageProofs.map((proof) => {
+                        const isCurrent = proof.id === currentInLineage?.id;
+                        const statusLabel =
+                          PROOF_STATUS_LABELS[proof.status as keyof typeof PROOF_STATUS_LABELS] ??
+                          proof.status;
+
+                        return (
                           <li key={proof.id}>
-                            {formatProofHistoryEntry(
-                              proof,
-                              PROOF_STATUS_LABELS[proof.status as keyof typeof PROOF_STATUS_LABELS] ??
-                                proof.status
-                            )}
+                            {isCurrent ? "Current: " : "Previous: "}
+                            {formatProofHistoryEntry(proof, statusLabel)}
                           </li>
-                        ))}
+                        );
+                      })}
                     </ul>
                   </div>
                 ) : null}
@@ -487,12 +564,18 @@ export function AdminJobProofsPanel({
               proof.status
             );
             const isArchived = ["superseded", "cancelled"].includes(proof.status);
+            const showRevisionAction = proofRevisionEligible(proof);
 
             return (
             <div
               key={proof.id}
+              id={`proof-${proof.id}`}
               className={`rounded-lg border p-4 space-y-3 ${
-                isArchived ? "border-border/70 bg-muted/20 opacity-80" : "border-border"
+                focusedProofId === proof.id
+                  ? "border-[var(--candid-yellow)] ring-2 ring-[var(--candid-yellow)]/30"
+                  : isArchived
+                    ? "border-border/70 bg-muted/20 opacity-80"
+                    : "border-border"
               }`}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -640,14 +723,19 @@ export function AdminJobProofsPanel({
                 </Button>
               ) : null}
 
-              {canCreateRevisedProof(proof, proofs) ? (
-                <Button
-                  type="button"
-                  disabled={pending}
-                  onClick={() => createRevisedProof(proof.id)}
-                >
-                  Create revised proof
-                </Button>
+              {showRevisionAction && revisionSource?.id === proof.id ? (
+                <div className="rounded-md border border-border bg-muted/10 p-3 space-y-2">
+                  <Button
+                    type="button"
+                    disabled={pending}
+                    onClick={() => createRevisedProof(proof.id)}
+                  >
+                    Create revised proof
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Use this to start v{proof.version_number + 1} in this proof series.
+                  </p>
+                </div>
               ) : null}
 
               {isArchived ? (

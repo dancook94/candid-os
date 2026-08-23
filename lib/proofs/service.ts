@@ -757,6 +757,10 @@ export async function createRevisedJobProof(
   const sourceSupportsRevision = proofSupportsRevision({
     status: sourceProof.status as string,
     brandedPdfGeneratedAt: (preflight?.generated_at as string | null) ?? null,
+    hasGeneratedCustomerProof: await proofHasGeneratedCustomerArtifact(
+      adminClient,
+      sourceProofId
+    ),
   });
 
   if (!sourceSupportsRevision) {
