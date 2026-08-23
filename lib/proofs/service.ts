@@ -36,6 +36,9 @@ import {
 import { resolveCustomerProofDownloadFile } from "@/lib/proofs/download-file";
 import {
   buildProofReference,
+  buildProofRevisionContext,
+  canCreateRevisedProof,
+  getCurrentProofInLineage,
   getInProgressProof,
   hasBlockingInProgressRevision,
   isRevisableProofStatus,
@@ -836,9 +839,38 @@ export async function createRevisedJobProof(
     throw new ProofError(existingError.message, 500);
   }
 
-  const lineageProofs = (existingProofs ?? []).filter(
+  const allProofs = existingProofs ?? [];
+  const lineageProofs = allProofs.filter(
     (proof) => proof.proof_lineage_id === proofLineageId
   );
+  const revisionContext = buildProofRevisionContext({
+    id: sourceProofId,
+    status: sourceProof.status as JobProofView["status"],
+    proof_lineage_id: proofLineageId,
+    version_number: sourceProof.version_number as number,
+    brandedPdfGeneratedAt: (preflight?.generated_at as string | null) ?? null,
+    files: [],
+  });
+  revisionContext.hasGeneratedCustomerProof = await proofHasGeneratedCustomerArtifact(
+    adminClient,
+    sourceProofId
+  );
+
+  if (!canCreateRevisedProof(revisionContext, allProofs)) {
+    const latest = getCurrentProofInLineage(lineageProofs);
+    if (latest && latest.id !== sourceProofId) {
+      throw new ProofError(
+        `Create a revision from the current proof in this series (v${latest.version_number}) instead of v${sourceProof.version_number}.`,
+        409
+      );
+    }
+
+    throw new ProofError(
+      "This proof version cannot be revised right now. Finish or cancel any in-progress version in this series first.",
+      409
+    );
+  }
+
   if (
     hasBlockingInProgressRevision(lineageProofs, {
       id: sourceProofId,

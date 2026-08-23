@@ -9,7 +9,8 @@ import {
   type ProofFileLocationType,
 } from "@/lib/proofs/constants";
 import { PROOF_UPLOAD_MAX_BYTES_LABEL } from "@/lib/proofs/file-validation";
-import { getSourceArtworkFile, hasGeneratedCustomerProof } from "@/lib/proofs/proof-files";
+import { getSourceArtworkFile } from "@/lib/proofs/proof-files";
+import { proofAttachmentIsEditable, revisionCreatesNewImmutableVersion } from "@/lib/proofs/versioning";
 import type { JobProofFileView, JobProofView } from "@/lib/proofs/types";
 
 type DropboxListFile = {
@@ -86,10 +87,12 @@ export function ProofFileAttachmentPanel({
 
   const proofFile = getSourceArtworkFile(proof.files);
   const completeJobFiles = jobFiles.filter((file) => file.upload_status === "complete");
-  const hasGeneratedCustomerPdf = hasGeneratedCustomerProof(proof.files);
-  const canEditAttachment =
-    ["draft", "internal_review", "ready_to_send"].includes(proof.status) &&
-    !hasGeneratedCustomerPdf;
+  const canEditAttachment = proofAttachmentIsEditable(proof);
+  const attachmentLockedForRevision =
+    !canEditAttachment &&
+    Boolean(proofFile) &&
+    (revisionCreatesNewImmutableVersion(proof.status) ||
+      Boolean(proof.brandedPdfGeneratedAt));
 
   async function loadDropboxFiles(mode: "working_file" | "proofs_folder") {
     if (!dropboxLinked) {
@@ -248,6 +251,11 @@ export function ProofFileAttachmentPanel({
                 Remove attachment
               </Button>
             </div>
+          ) : attachmentLockedForRevision ? (
+            <p className="pt-1 text-xs text-muted-foreground">
+              This version already has a generated customer proof or has passed internal send
+              readiness. Use Create revised proof to start the next version with new artwork.
+            </p>
           ) : null}
         </dl>
       ) : (

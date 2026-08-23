@@ -211,26 +211,9 @@ export function getLineageRevisionSourceProof<
     return null;
   }
 
-  const revisionContext = {
-    id: currentInLineage.id,
-    status: currentInLineage.status,
-    proof_lineage_id: currentInLineage.proof_lineage_id,
-    version_number: currentInLineage.version_number,
-    brandedPdfGeneratedAt: currentInLineage.brandedPdfGeneratedAt,
-    hasGeneratedCustomerProof: hasGeneratedCustomerProofForRevision(currentInLineage),
-  };
+  const revisionContext = buildProofRevisionContext(currentInLineage);
 
   return canCreateRevisedProof(revisionContext, proofs) ? currentInLineage : null;
-}
-
-function hasGeneratedCustomerProofForRevision(
-  proof: Pick<JobProofView, "files" | "brandedPdfGeneratedAt">
-) {
-  if (proof.brandedPdfGeneratedAt) {
-    return true;
-  }
-
-  return proof.files.some((file) => file.file_role === "customer_proof" && file.dropbox_path);
 }
 
 export function revisionCreatesNewImmutableVersion(status: string) {
@@ -241,6 +224,59 @@ export function revisionCreatesNewImmutableVersion(status: string) {
     "approved",
     "changes_requested",
   ].includes(status);
+}
+
+export function proofHasGeneratedCustomerArtifactView(
+  proof: Pick<JobProofView, "files" | "brandedPdfGeneratedAt">
+) {
+  if (proof.brandedPdfGeneratedAt) {
+    return true;
+  }
+
+  return proof.files.some(
+    (file) => file.file_role === "customer_proof" && Boolean(file.dropbox_path)
+  );
+}
+
+/** Whether staff can attach, replace, or remove source artwork on this proof version. */
+export function proofAttachmentIsEditable(
+  proof: Pick<JobProofView, "status" | "files" | "brandedPdfGeneratedAt">
+) {
+  if (!["draft", "internal_review", "ready_to_send"].includes(proof.status)) {
+    return false;
+  }
+
+  return !proofHasGeneratedCustomerArtifactView(proof);
+}
+
+export function buildProofRevisionContext(
+  proof: Pick<
+    JobProofView,
+    "id" | "status" | "proof_lineage_id" | "version_number" | "brandedPdfGeneratedAt" | "files"
+  >
+) {
+  return {
+    id: proof.id,
+    status: proof.status,
+    proof_lineage_id: proof.proof_lineage_id,
+    version_number: proof.version_number,
+    brandedPdfGeneratedAt: proof.brandedPdfGeneratedAt,
+    hasGeneratedCustomerProof: proofHasGeneratedCustomerArtifactView(proof),
+  };
+}
+
+export function canReviseCurrentProofInLineage<
+  T extends Pick<
+    JobProofView,
+    | "id"
+    | "status"
+    | "proof_lineage_id"
+    | "version_number"
+    | "brandedPdfGeneratedAt"
+    | "files"
+  >,
+>(currentProof: T, proofs: T[]) {
+  return canCreateRevisedProof(buildProofRevisionContext(currentProof), proofs);
 }
 
 export function formatProofHistoryEntry(

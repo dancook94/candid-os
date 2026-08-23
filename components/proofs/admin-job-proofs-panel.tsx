@@ -20,11 +20,12 @@ import {
 } from "@/lib/proofs/constants";
 import { deriveAggregateJobProofWorkflow } from "@/lib/proofs/gates";
 import {
+  canReviseCurrentProofInLineage,
   formatLineageManifestSummary,
   formatProofHistoryEntry,
   getCurrentProofInLineage,
-  getLineageRevisionSourceProof,
   groupProofsByLineage,
+  proofAttachmentIsEditable,
   proofReferenceMatchesVersion,
   revisionCreatesNewImmutableVersion,
 } from "@/lib/proofs/versioning";
@@ -351,16 +352,6 @@ export function AdminJobProofsPanel({
           </Button>
         ) : null}
 
-        {proof.status === "ready_to_send" ? (
-          <Button
-            type="button"
-            disabled={pending || !canSendBrandedProof(proof)}
-            onClick={() => proofAction(proof.id, "send")}
-          >
-            Send to customer
-          </Button>
-        ) : null}
-
         {requiresGeneratedCustomerProof(proof) && !canSendBrandedProof(proof) ? (
           <p className="text-xs text-amber-800">
             Generate the branded customer proof PDF before marking ready or sending.
@@ -584,7 +575,9 @@ export function AdminJobProofsPanel({
             const lineageId = lineageProofs[0]?.proof_lineage_id ?? lineageProofs[0]?.id ?? "";
             const currentProof = getCurrentProofInLineage(lineageProofs);
             const previousProofs = lineageProofs.filter((proof) => proof.id !== currentProof?.id);
-            const revisionSource = getLineageRevisionSourceProof(lineageProofs, proofs);
+            const canReviseCurrentProof = currentProof
+              ? canReviseCurrentProofInLineage(currentProof, proofs)
+              : false;
             const lineageSummary = formatLineageManifestSummary(
               lineageProofs[0]?.manifestItems ?? []
             );
@@ -652,10 +645,19 @@ export function AdminJobProofsPanel({
                           variant="outline"
                           onClick={() => viewProofPdf(currentProof.id)}
                         >
-                          View proof
+                          View generated proof
                         </Button>
                       ) : null}
-                      {revisionSource?.id === currentProof.id ? (
+                      {currentProof.status === "ready_to_send" ? (
+                        <Button
+                          type="button"
+                          disabled={pending || !canSendBrandedProof(currentProof)}
+                          onClick={() => proofAction(currentProof.id, "send")}
+                        >
+                          Send to customer
+                        </Button>
+                      ) : null}
+                      {canReviseCurrentProof ? (
                         <Button
                           type="button"
                           variant="outline"
@@ -667,7 +669,7 @@ export function AdminJobProofsPanel({
                       ) : null}
                     </div>
 
-                    {revisionSource?.id === currentProof.id ? (
+                    {canReviseCurrentProof ? (
                       <p className="text-xs text-muted-foreground">
                         {revisionCreatesNewImmutableVersion(currentProof.status)
                           ? `Creates v${currentProof.version_number + 1} as a new draft. v${currentProof.version_number} and its files stay unchanged until the new version is sent.`

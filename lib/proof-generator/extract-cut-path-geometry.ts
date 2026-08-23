@@ -27,13 +27,20 @@ export type CutPathGeometry = {
 };
 
 export type CutPathExtractionDiagnostic = {
+  cutPathName: string;
+  /** @deprecated Use cutPathName */
   separationName: string;
   pageIndex: number;
   pageLocated: boolean;
   contentStreamCount: number;
   formXObjectsVisited: number;
   colorSpaceAliases: Record<string, string>;
+  ocgNamesFound: string[];
+  ocgFound: boolean;
+  markedContentSectionsFound: number;
   separationOperatorsSeen: number;
+  ocgPaintedPathsFound: number;
+  separationPaintedPathsFound: number;
   paintedPathsFound: number;
   fallbackStreamsScanned: number;
   failureStage: string;
@@ -66,6 +73,7 @@ type ParsedPdfObject = {
 type ResourceMaps = {
   colorSpaceMap: Map<string, string>;
   xObjectMap: Map<string, string>;
+  propertiesMap: Map<string, string>;
 };
 
 type InterpretLimits = {
@@ -81,6 +89,9 @@ type InterpretCounters = {
   pathsCollected: number;
   operatorsProcessed: number;
   separationOperatorsSeen: number;
+  markedContentSections: number;
+  ocgPaintedPaths: number;
+  separationPaintedPaths: number;
 };
 
 const IDENTITY_MATRIX: Matrix = [1, 0, 0, 1, 0, 0];
@@ -119,8 +130,143 @@ function normalizeSeparationName(name: string) {
   return name.trim().replace(/^\//, "").toLowerCase();
 }
 
-function separationNamesMatch(left: string, right: string) {
+function cutPathNamesMatch(left: string, right: string) {
   return normalizeSeparationName(left) === normalizeSeparationName(right);
+}
+
+/** @deprecated Use cutPathNamesMatch */
+function separationNamesMatch(left: string, right: string) {
+  return cutPathNamesMatch(left, right);
+}
+
+function parseOcgNameFromHeader(header: string): string | null {
+  const parenMatch = header.match(/\/Name\s*\(([^)]+)\)/);
+  if (parenMatch?.[1]) {
+    return parenMatch[1];
+  }
+
+  const slashMatch = header.match(/\/Name\s*\/([A-Za-z0-9#_+-]+)/i);
+  return slashMatch?.[1] ?? null;
+}
+
+function buildGlobalOcgRegistry(objects: Map<string, ParsedPdfObject>) {
+  const map = new Map<string, string>();
+
+  for (const [key, object] of objects.entries()) {
+    if (/\/Type\s*\/OCG\b/.test(object.header)) {
+      const name = parseOcgNameFromHeader(object.header);
+      if (name) {
+        map.set(key, name);
+      }
+    }
+  }
+
+  return map;
+}
+
+function parsePropertiesDictionary(
+  dictionaryText: string,
+  objects: Map<string, ParsedPdfObject>,
+  map: Map<string, string>
+) {
+  const propertiesIndex = dictionaryText.indexOf("/Properties");
+  if (propertiesIndex < 0) {
+    return;
+  }
+
+  const dictStart = dictionaryText.indexOf("<<", propertiesIndex);
+  if (dictStart < 0) {
+    return;
+  }
+
+  const propertiesDict = extractBalancedDictionary(dictionaryText, dictStart);
+  if (!propertiesDict) {
+    return;
+  }
+
+  const inner = propertiesDict.slice(2, -2);
+  let index = 0;
+
+  while (index < inner.length) {
+    while (index < inner.length && /\s/.test(inner[index])) {
+      index += 1;
+    }
+    if (inner[index] !== "/") {
+      break;
+    }
+
+    index += 1;
+    let alias = "";
+    while (index < inner.length && !/[\s[\]/]/.test(inner[index])) {
+      alias += inner[index];
+      index += 1;
+    }
+
+    while (index < inner.length && /\s/.test(inner[index])) {
+      index += 1;
+    }
+
+    if (!alias) {
+      continue;
+    }
+
+    const refMatch = inner.slice(index).match(/^(\d+\s+\d+\s+R)/);
+    if (refMatch?.[1]) {
+      const parts = refMatch[1].match(/(\d+)\s+(\d+)\s+R/);
+      if (parts) {
+        map.set(alias, objectKey(Number.parseInt(parts[1], 10), Number.parseInt(parts[2], 10)));
+      }
+      index += refMatch[1].length;
+      continue;
+    }
+
+    if (inner[index] === "<" && inner[index + 1] === "<") {
+      const nested = extractBalancedDictionary(inner, index);
+      if (nested) {
+        const name = parseOcgNameFromHeader(nested);
+        if (name) {
+          map.set(alias, name);
+        }
+        index += nested.length;
+      }
+    }
+  }
+}
+
+function resolvePropertyToOcgName(
+  propertyName: string,
+  resources: ResourceMaps,
+  objects: Map<string, ParsedPdfObject>,
+  ocgRegistry: Map<string, string>
+): string | null {
+  const raw = propertyName.replace(/^\//, "");
+
+  for (const name of ocgRegistry.values()) {
+    if (cutPathNamesMatch(name, raw)) {
+      return name;
+    }
+  }
+
+  const mapped = resources.propertiesMap.get(raw);
+  if (!mapped) {
+    return cutPathNamesMatch(raw, raw) ? raw : null;
+  }
+
+  const fromRegistry = ocgRegistry.get(mapped);
+  if (fromRegistry) {
+    return fromRegistry;
+  }
+
+  if (!/^\d+ \d+$/.test(mapped)) {
+    return mapped;
+  }
+
+  const object = objects.get(mapped);
+  if (!object) {
+    return null;
+  }
+
+  return parseOcgNameFromHeader(object.header);
 }
 
 function parseNumber(value: string) {
@@ -475,6 +621,7 @@ function mergeResourceMaps(base: ResourceMaps, overlay: ResourceMaps): ResourceM
   return {
     colorSpaceMap: new Map([...base.colorSpaceMap, ...overlay.colorSpaceMap]),
     xObjectMap: new Map([...base.xObjectMap, ...overlay.xObjectMap]),
+    propertiesMap: new Map([...base.propertiesMap, ...overlay.propertiesMap]),
   };
 }
 
@@ -486,13 +633,15 @@ function resolveResourcesMaps(
 ): ResourceMaps {
   const colorSpaceMap = new Map(globalColorSpaces);
   const xObjectMap = new Map<string, string>();
+  const propertiesMap = new Map<string, string>();
 
   if (!resourcesHeader.trim()) {
-    return { colorSpaceMap, xObjectMap };
+    return { colorSpaceMap, xObjectMap, propertiesMap };
   }
 
   const inlineDict = resourcesHeader.match(/<<[\s\S]*>>/)?.[0] ?? resourcesHeader;
   parseColorSpaceDictionary(inlineDict, objects, colorSpaceMap);
+  parsePropertiesDictionary(inlineDict, objects, propertiesMap);
 
   const xObjectIndex = inlineDict.indexOf("/XObject");
   if (xObjectIndex >= 0) {
@@ -516,12 +665,12 @@ function resolveResourcesMaps(
       const object = objects.get(key);
       if (object) {
         const nested = resolveResourcesMaps(object.header, objects, globalColorSpaces, visited);
-        return mergeResourceMaps({ colorSpaceMap, xObjectMap }, nested);
+        return mergeResourceMaps({ colorSpaceMap, xObjectMap, propertiesMap }, nested);
       }
     }
   }
 
-  return { colorSpaceMap, xObjectMap };
+  return { colorSpaceMap, xObjectMap, propertiesMap };
 }
 
 function findPageObjectHeaders(buffer: Buffer): string[] {
@@ -570,6 +719,7 @@ function resolvePageResources(
   let maps: ResourceMaps = {
     colorSpaceMap: new Map(globalColorSpaces),
     xObjectMap: new Map<string, string>(),
+    propertiesMap: new Map<string, string>(),
   };
 
   const indirectRef = pageHeader.match(/\/Resources\s+(\d+)\s+(\d+)\s+R/);
@@ -855,9 +1005,10 @@ function applySeparationOperandsToState(
 
 async function interpretContentStream(
   content: string,
-  targetSeparation: string,
+  targetCutPathName: string,
   resources: ResourceMaps,
   objects: Map<string, ParsedPdfObject>,
+  ocgRegistry: Map<string, string>,
   initialMatrix: Matrix,
   collected: CutPathSubpath[],
   counters: InterpretCounters,
@@ -871,6 +1022,7 @@ async function interpretContentStream(
   const tokens = tokenizeContentStream(content);
   const operands: string[] = [];
   const stateStack: GraphicsState[] = [];
+  const ocgContextStack: boolean[] = [];
   let state: GraphicsState = {
     ctm: initialMatrix,
     strokeColorSpace: null,
@@ -879,6 +1031,16 @@ async function interpretContentStream(
     fillUsesTarget: false,
   };
   let currentPath: CutPathPathCommand[] = [];
+
+  function activeInTargetOcg() {
+    return ocgContextStack.some(Boolean);
+  }
+
+  function pushOcgContext(propertyOrTag: string) {
+    const ocgName = resolvePropertyToOcgName(propertyOrTag, resources, objects, ocgRegistry);
+    ocgContextStack.push(Boolean(ocgName && cutPathNamesMatch(ocgName, targetCutPathName)));
+    counters.markedContentSections += 1;
+  }
 
   for (const token of tokens) {
     counters.operatorsProcessed += 1;
@@ -926,7 +1088,7 @@ async function interpretContentStream(
 
     if (operator === "CS" && operands.length >= 1) {
       state.strokeColorSpace = resolveColorSpaceName(operands.at(-1) ?? "", resources.colorSpaceMap);
-      updateTargetFlags(state, targetSeparation);
+      updateTargetFlags(state, targetCutPathName);
       if (state.strokeUsesTarget) {
         counters.separationOperatorsSeen += 1;
       }
@@ -936,7 +1098,7 @@ async function interpretContentStream(
 
     if (operator === "cs" && operands.length >= 1) {
       state.fillColorSpace = resolveColorSpaceName(operands.at(-1) ?? "", resources.colorSpaceMap);
-      updateTargetFlags(state, targetSeparation);
+      updateTargetFlags(state, targetCutPathName);
       if (state.fillUsesTarget) {
         counters.separationOperatorsSeen += 1;
       }
@@ -945,10 +1107,35 @@ async function interpretContentStream(
     }
 
     if (["SC", "SCN", "sc", "scn"].includes(operator)) {
-      applySeparationOperandsToState(state, operator, operands, targetSeparation);
+      applySeparationOperandsToState(state, operator, operands, targetCutPathName);
       if (state.strokeUsesTarget || state.fillUsesTarget) {
         counters.separationOperatorsSeen += 1;
       }
+      operands.length = 0;
+      continue;
+    }
+
+    if (operator === "BDC") {
+      const ocIndex = operands.findIndex((operand) => operand === "/OC" || operand === "OC");
+      if (ocIndex >= 0 && ocIndex + 1 < operands.length) {
+        pushOcgContext(operands[ocIndex + 1]);
+      } else if (operands.length >= 1) {
+        pushOcgContext(operands.at(-1) ?? "");
+      } else {
+        ocgContextStack.push(false);
+      }
+      operands.length = 0;
+      continue;
+    }
+
+    if (operator === "BMC") {
+      pushOcgContext(operands.at(-1) ?? "");
+      operands.length = 0;
+      continue;
+    }
+
+    if (operator === "EMC") {
+      ocgContextStack.pop();
       operands.length = 0;
       continue;
     }
@@ -966,9 +1153,17 @@ async function interpretContentStream(
     }
 
     if (PATH_PAINT_OPERATORS.has(operator)) {
-      if (paintModeUsesTarget(operator, state) && currentPath.length > 0) {
+      const usesSeparation = paintModeUsesTarget(operator, state);
+      const usesOcg = activeInTargetOcg();
+      if ((usesSeparation || usesOcg) && currentPath.length > 0) {
         collected.push([...currentPath]);
         counters.pathsCollected += 1;
+        if (usesOcg) {
+          counters.ocgPaintedPaths += 1;
+        }
+        if (usesSeparation) {
+          counters.separationPaintedPaths += 1;
+        }
       }
       currentPath = [];
       operands.length = 0;
@@ -997,9 +1192,10 @@ async function interpretContentStream(
 
           await interpretContentStream(
             nestedContent,
-            targetSeparation,
+            targetCutPathName,
             mergedResources,
             objects,
+            ocgRegistry,
             formMatrix,
             collected,
             counters,
@@ -1027,8 +1223,9 @@ async function interpretContentStream(
 async function parseObjectStreamForCutPath(
   objectKeyName: string,
   objects: Map<string, ParsedPdfObject>,
-  targetSeparation: string,
+  targetCutPathName: string,
   resources: ResourceMaps,
+  ocgRegistry: Map<string, string>,
   initialMatrix: Matrix,
   collected: CutPathSubpath[],
   counters: InterpretCounters,
@@ -1043,9 +1240,10 @@ async function parseObjectStreamForCutPath(
   const content = decompressStream(object.header, object.stream).toString("latin1");
   await interpretContentStream(
     content,
-    targetSeparation,
+    targetCutPathName,
     resources,
     objects,
+    ocgRegistry,
     initialMatrix,
     collected,
     counters,
@@ -1057,14 +1255,15 @@ async function parseObjectStreamForCutPath(
 async function fallbackScanDecompressedStreams(
   buffer: Buffer,
   objects: Map<string, ParsedPdfObject>,
-  targetSeparation: string,
+  targetCutPathName: string,
   globalColorSpaces: Map<string, string>,
+  ocgRegistry: Map<string, string>,
   collected: CutPathSubpath[],
   counters: InterpretCounters,
   limits: InterpretLimits
 ) {
   let scanned = 0;
-  const targetPattern = new RegExp(normalizeSeparationName(targetSeparation), "i");
+  const targetPattern = new RegExp(normalizeSeparationName(targetCutPathName), "i");
   const visitedForms = new Set<string>();
   const seenContent = new Set<string>();
 
@@ -1075,11 +1274,20 @@ async function fallbackScanDecompressedStreams(
     }
     seenContent.add(content);
 
-    if (!targetPattern.test(content)) {
+    const hasSeparationEvidence = targetPattern.test(content);
+    const hasOcgEvidence =
+      /\/OC\s/.test(content) ||
+      /\b(BDC|BMC|EMC)\b/.test(content) ||
+      /\/Type\s*\/OCG/.test(header);
+
+    if (!hasSeparationEvidence && !hasOcgEvidence) {
       return;
     }
 
-    if (!/(^|\s)(CS|cs|SCN|SC|scn|sc)(\s|$)/.test(content)) {
+    if (
+      !hasOcgEvidence &&
+      !/(^|\s)(CS|cs|SCN|SC|scn|sc)(\s|$)/.test(content)
+    ) {
       return;
     }
 
@@ -1087,9 +1295,10 @@ async function fallbackScanDecompressedStreams(
     const resources = resolveResourcesMaps(header, objects, globalColorSpaces);
     await interpretContentStream(
       content,
-      targetSeparation,
+      targetCutPathName,
       resources,
       objects,
+      ocgRegistry,
       IDENTITY_MATRIX,
       collected,
       counters,
@@ -1130,23 +1339,32 @@ async function fallbackScanDecompressedStreams(
 }
 
 function buildDiagnosticBase(
-  separationName: string,
+  cutPathName: string,
   pageIndex: number,
-  resources: ResourceMaps
+  resources: ResourceMaps,
+  ocgRegistry: Map<string, string>
 ): CutPathExtractionDiagnostic {
   const colorSpaceAliases: Record<string, string> = {};
   for (const [alias, name] of resources.colorSpaceMap.entries()) {
     colorSpaceAliases[alias] = name;
   }
 
+  const ocgNames = [...new Set(ocgRegistry.values())];
+
   return {
-    separationName,
+    cutPathName,
+    separationName: cutPathName,
     pageIndex,
     pageLocated: false,
     contentStreamCount: 0,
     formXObjectsVisited: 0,
     colorSpaceAliases,
+    ocgNamesFound: ocgNames,
+    ocgFound: ocgNames.some((name) => cutPathNamesMatch(name, cutPathName)),
+    markedContentSectionsFound: 0,
     separationOperatorsSeen: 0,
+    ocgPaintedPathsFound: 0,
+    separationPaintedPathsFound: 0,
     paintedPathsFound: 0,
     fallbackStreamsScanned: 0,
     failureStage: "init",
@@ -1158,32 +1376,49 @@ export function formatCutPathExtractionFailureReason(diagnostic: CutPathExtracti
     return null;
   }
 
+  const cutPathLabel = diagnostic.cutPathName || diagnostic.separationName;
+
   if (!diagnostic.pageLocated) {
-    return "CutContour separation detected, but the PDF page structure could not be resolved for vector extraction.";
+    return `${cutPathLabel} detected, but the PDF page structure could not be resolved for vector extraction.`;
   }
 
   if (diagnostic.contentStreamCount === 0) {
-    return "CutContour separation detected, but no page content streams could be located.";
+    return `${cutPathLabel} detected, but no page content streams could be located.`;
   }
 
   const aliasValues = Object.values(diagnostic.colorSpaceAliases);
-  const hasSeparationAlias = aliasValues.some((name) =>
-    separationNamesMatch(name, diagnostic.separationName)
-  );
+  const hasSeparationAlias = aliasValues.some((name) => cutPathNamesMatch(name, cutPathLabel));
 
-  if (!hasSeparationAlias && diagnostic.separationOperatorsSeen === 0) {
-    return "CutContour separation detected, but no color-space alias for CutContour was resolved in page or Form resources.";
+  if (diagnostic.ocgFound && diagnostic.markedContentSectionsFound === 0 && !hasSeparationAlias) {
+    return `${cutPathLabel} Optional Content Group found, but no marked-content sections (/OC … BDC/EMC) were resolved in page or Form content streams.`;
   }
 
-  if (diagnostic.separationOperatorsSeen === 0) {
-    return "CutContour separation detected, but no painted vector paths using that separation could be resolved.";
+  if (
+    diagnostic.ocgFound &&
+    diagnostic.markedContentSectionsFound > 0 &&
+    diagnostic.ocgPaintedPathsFound === 0 &&
+    !hasSeparationAlias
+  ) {
+    return `${cutPathLabel} OCG marked-content sections were found (${diagnostic.markedContentSectionsFound}), but no vector paths were painted inside that layer.`;
+  }
+
+  if (!hasSeparationAlias && diagnostic.separationOperatorsSeen === 0 && !diagnostic.ocgFound) {
+    return `${cutPathLabel} detected, but no matching separation color space or Optional Content Group could be resolved in page or Form resources.`;
+  }
+
+  if (!hasSeparationAlias && diagnostic.separationOperatorsSeen === 0 && diagnostic.ocgFound) {
+    return `${cutPathLabel} OCG found with ${diagnostic.markedContentSectionsFound} marked-content section(s), but no painted vector paths could be reconstructed inside that layer.`;
+  }
+
+  if (diagnostic.separationOperatorsSeen === 0 && diagnostic.ocgPaintedPathsFound === 0) {
+    return `${cutPathLabel} detected, but no painted vector paths using that separation or OCG layer could be resolved.`;
   }
 
   if (diagnostic.paintedPathsFound === 0) {
-    return "CutContour separation operators were found, but no stroke/fill path geometry could be reconstructed.";
+    return `${cutPathLabel} operators were found, but no stroke/fill path geometry could be reconstructed.`;
   }
 
-  return "CutContour separation detected, but no painted vector paths using that separation could be resolved.";
+  return `${cutPathLabel} detected, but no painted vector paths could be resolved.`;
 }
 
 export async function extractCutPathGeometry(
@@ -1193,21 +1428,24 @@ export async function extractCutPathGeometry(
   options?: { debugLabel?: string }
 ): Promise<CutPathExtractionResult> {
   const limits = DEFAULT_LIMITS;
+  const cutPathName = separationName;
 
   if (!buffer.length) {
-    const diagnostic = buildDiagnosticBase(separationName, pageIndex, {
+    const diagnostic = buildDiagnosticBase(cutPathName, pageIndex, {
       colorSpaceMap: new Map(),
       xObjectMap: new Map(),
-    });
+      propertiesMap: new Map(),
+    }, new Map());
     diagnostic.failureStage = "empty_buffer";
     return { ok: false, reason: "Empty artwork buffer.", diagnostic };
   }
 
   if (!buffer.subarray(0, 5).toString("ascii").startsWith("%PDF")) {
-    const diagnostic = buildDiagnosticBase(separationName, pageIndex, {
+    const diagnostic = buildDiagnosticBase(cutPathName, pageIndex, {
       colorSpaceMap: new Map(),
       xObjectMap: new Map(),
-    });
+      propertiesMap: new Map(),
+    }, new Map());
     diagnostic.failureStage = "not_pdf";
     return { ok: false, reason: "Artwork is not a PDF.", diagnostic };
   }
@@ -1218,10 +1456,11 @@ export async function extractCutPathGeometry(
   try {
     const document = await PDFDocument.load(buffer, { ignoreEncryption: true });
     if (document.getPageCount() <= pageIndex) {
-      const diagnostic = buildDiagnosticBase(separationName, pageIndex, {
+      const diagnostic = buildDiagnosticBase(cutPathName, pageIndex, {
         colorSpaceMap: new Map(),
         xObjectMap: new Map(),
-      });
+        propertiesMap: new Map(),
+      }, new Map());
       diagnostic.failureStage = "missing_page";
       return { ok: false, reason: "PDF does not contain a renderable page.", diagnostic };
     }
@@ -1232,17 +1471,19 @@ export async function extractCutPathGeometry(
     mediaBox = { x: box.x, y: box.y, width: size.width, height: size.height };
     rotation = page.getRotation().angle;
   } catch {
-    const diagnostic = buildDiagnosticBase(separationName, pageIndex, {
+    const diagnostic = buildDiagnosticBase(cutPathName, pageIndex, {
       colorSpaceMap: new Map(),
       xObjectMap: new Map(),
-    });
+      propertiesMap: new Map(),
+    }, new Map());
     diagnostic.failureStage = "page_metrics";
     return { ok: false, reason: "Unable to read PDF page dimensions.", diagnostic };
   }
 
   const objects = parsePdfObjects(buffer);
   const globalColorSpaces = buildGlobalColorSpaceRegistry(objects);
-  globalColorSpaces.set(separationName, separationName);
+  globalColorSpaces.set(cutPathName, cutPathName);
+  const ocgRegistry = buildGlobalOcgRegistry(objects);
 
   const pages = findPageObjectHeaders(buffer);
   const pageHeader = pages[pageIndex];
@@ -1250,9 +1491,13 @@ export async function extractCutPathGeometry(
 
   const resources = pageHeader
     ? resolvePageResources(pageHeader, pagesHeader, objects, globalColorSpaces)
-    : { colorSpaceMap: globalColorSpaces, xObjectMap: new Map<string, string>() };
+    : {
+        colorSpaceMap: globalColorSpaces,
+        xObjectMap: new Map<string, string>(),
+        propertiesMap: new Map<string, string>(),
+      };
 
-  const diagnostic = buildDiagnosticBase(separationName, pageIndex, resources);
+  const diagnostic = buildDiagnosticBase(cutPathName, pageIndex, resources, ocgRegistry);
   diagnostic.pageLocated = Boolean(pageHeader);
 
   if (!pageHeader) {
@@ -1273,6 +1518,9 @@ export async function extractCutPathGeometry(
     pathsCollected: 0,
     operatorsProcessed: 0,
     separationOperatorsSeen: 0,
+    markedContentSections: 0,
+    ocgPaintedPaths: 0,
+    separationPaintedPaths: 0,
   };
   const visitedForms = new Set<string>();
 
@@ -1280,8 +1528,9 @@ export async function extractCutPathGeometry(
     await parseObjectStreamForCutPath(
       contentRef,
       objects,
-      separationName,
+      cutPathName,
       resources,
+      ocgRegistry,
       IDENTITY_MATRIX,
       collected,
       counters,
@@ -1295,8 +1544,9 @@ export async function extractCutPathGeometry(
     diagnostic.fallbackStreamsScanned = await fallbackScanDecompressedStreams(
       buffer,
       objects,
-      separationName,
+      cutPathName,
       globalColorSpaces,
+      ocgRegistry,
       collected,
       counters,
       limits
@@ -1305,6 +1555,9 @@ export async function extractCutPathGeometry(
 
   diagnostic.formXObjectsVisited = counters.formsVisited;
   diagnostic.separationOperatorsSeen = counters.separationOperatorsSeen;
+  diagnostic.markedContentSectionsFound = counters.markedContentSections;
+  diagnostic.ocgPaintedPathsFound = counters.ocgPaintedPaths;
+  diagnostic.separationPaintedPathsFound = counters.separationPaintedPaths;
   diagnostic.paintedPathsFound = collected.length;
 
   logProofGeneratorDebug("cut_path_geometry_extract", {
@@ -1318,7 +1571,7 @@ export async function extractCutPathGeometry(
       : diagnostic.failureStage;
     const reason =
       formatCutPathExtractionFailureReason(diagnostic) ??
-      `No vector geometry found for separation ${separationName}.`;
+      `No vector geometry found for ${cutPathName}.`;
     return { ok: false, reason, diagnostic };
   }
 

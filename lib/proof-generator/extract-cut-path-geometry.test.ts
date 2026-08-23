@@ -5,11 +5,13 @@ import {
   computeArtworkPreviewPlacement,
   mapPdfPointToPreview,
 } from "@/lib/proof-generator/cut-path-overlay";
-import { buildCutPathTestPdfBuffer } from "@/lib/proof-generator/cut-path-test-pdfs";
 import {
+  buildCutPathTestPdfBuffer,
   buildIllustratorFormXObjectCutPathPdfBuffer,
   buildIllustratorInlineSeparationCutPathPdfBuffer,
   buildIllustratorNestedFormCutPathPdfBuffer,
+  buildOcgCutPathPdfBuffer,
+  buildOcgFormXObjectCutPathPdfBuffer,
 } from "@/lib/proof-generator/cut-path-test-pdfs";
 import {
   extractCutPathGeometry,
@@ -100,6 +102,39 @@ describe("extractCutPathGeometry", () => {
     assert.equal(result.ok, true);
   });
 
+  it("extracts geometry from CutContour Optional Content Group marked content", async () => {
+    const buffer = buildOcgCutPathPdfBuffer({ shape: "rectangle" });
+    const result = await extractCutPathGeometry(buffer, "CutContour", 0);
+
+    assert.equal(result.ok, true);
+    if (!result.ok) {
+      return;
+    }
+
+    assert.ok(result.diagnostic.ocgFound);
+    assert.ok(result.diagnostic.markedContentSectionsFound >= 1);
+    assert.ok(result.diagnostic.ocgPaintedPathsFound >= 1);
+    assert.ok(result.geometry.subpaths.length >= 1);
+  });
+
+  it("extracts OCG geometry from flate-compressed marked content", async () => {
+    const buffer = buildOcgCutPathPdfBuffer({ shape: "irregular", compress: true });
+    const result = await extractCutPathGeometry(buffer, "CutContour", 0);
+
+    assert.equal(result.ok, true);
+  });
+
+  it("extracts OCG geometry from Form XObject content", async () => {
+    const buffer = buildOcgFormXObjectCutPathPdfBuffer({ shape: "rectangle" });
+    const result = await extractCutPathGeometry(buffer, "CutContour", 0);
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.ok(result.diagnostic.formXObjectsVisited >= 1);
+      assert.ok(result.geometry.subpaths.length >= 1);
+    }
+  });
+
   it("returns actionable internal diagnostics when geometry is missing", async () => {
     const buffer = buildCutPathTestPdfBuffer({ shape: "rectangle", includeCutPath: false });
     const result = await extractCutPathGeometry(buffer, "CutContour", 0);
@@ -108,7 +143,7 @@ describe("extractCutPathGeometry", () => {
     if (!result.ok) {
       assert.match(
         formatCutPathExtractionFailureReason(result.diagnostic) ?? "",
-        /CutContour separation detected/i
+        /CutContour detected/i
       );
     }
   });

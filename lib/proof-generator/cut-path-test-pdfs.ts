@@ -144,6 +144,81 @@ export function buildIllustratorInlineSeparationCutPathPdfBuffer(input?: { shape
   ]);
 }
 
+/** PDF where cut path lives in a CutContour Optional Content Group (BDC/EMC), not Separation. */
+export function buildOcgCutPathPdfBuffer(input?: {
+  shape?: CutPathShape;
+  compress?: boolean;
+}) {
+  const shape = input?.shape ?? "rectangle";
+  const compress = input?.compress ?? false;
+  const pathOps =
+    shape === "rectangle"
+      ? "50 50 100 100 re S"
+      : shape === "circle"
+        ? "150 200 m 200 150 200 100 150 100 c 100 150 100 200 150 200 c h S"
+        : "40 40 m 180 60 l 160 180 l 70 150 l 40 90 l h S";
+  const contentStream = `q /OC /MC0 BDC q ${pathOps} Q EMC Q`;
+  const streamBytes = Buffer.from(contentStream, "latin1");
+  const compressed = compress ? deflateSync(streamBytes) : streamBytes;
+  const length = compressed.length;
+  const filter = compress ? "/Filter/FlateDecode" : "";
+
+  const prefix = [
+    "%PDF-1.5",
+    "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+    "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj",
+    "5 0 obj<</Type/OCG/Name(CutContour)>>endobj",
+    "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R/Resources<</Properties<</MC0 5 0 R>>>>>>endobj",
+    `4 0 obj<</Length ${length}${filter}>>stream\n`,
+  ].join("\n");
+
+  const suffix = ["endstream", "endobj", "trailer<</Size 6/Root 1 0 R>>", "%%EOF"].join("\n");
+
+  return Buffer.concat([
+    Buffer.from(prefix, "latin1"),
+    compressed,
+    Buffer.from(`\n${suffix}`, "latin1"),
+  ]);
+}
+
+/** CutContour OCG path inside a Form XObject; page invokes /Fm0 Do */
+export function buildOcgFormXObjectCutPathPdfBuffer(input?: { shape?: CutPathShape }) {
+  const shape = input?.shape ?? "rectangle";
+  const pathOps =
+    shape === "rectangle"
+      ? "50 50 100 100 re S"
+      : "40 40 m 180 60 l 160 180 l 70 150 l 40 90 l h S";
+  const formStream = `q /OC /MC0 BDC q ${pathOps} Q EMC Q`;
+  const formBytes = Buffer.from(formStream, "latin1");
+  const compressedForm = deflateSync(formBytes);
+  const pageStream = "q 1 0 0 1 0 0 cm /Fm0 Do Q";
+  const pageBytes = Buffer.from(pageStream, "latin1");
+  const compressedPage = deflateSync(pageBytes);
+
+  return Buffer.concat([
+    Buffer.from(
+      [
+        "%PDF-1.5",
+        "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+        "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj",
+        "5 0 obj<</Type/OCG/Name(CutContour)>>endobj",
+        "7 0 obj<</Properties<</MC0 5 0 R>>/XObject<</Fm0 8 0 R>>>>endobj",
+        "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Resources 7 0 R/Contents 4 0 R>>endobj",
+        `4 0 obj<</Length ${compressedPage.length}/Filter/FlateDecode>>stream\n`,
+      ].join("\n"),
+      "latin1"
+    ),
+    compressedPage,
+    Buffer.from("\nendstream\nendobj\n", "latin1"),
+    Buffer.from(
+      `8 0 obj<</Subtype/Form/FormType 1/BoundingBox[0 0 200 200]/Matrix[1 0 0 1 0 0]/Resources<</Properties<</MC0 5 0 R>>>>/Length ${compressedForm.length}/Filter/FlateDecode>>stream\n`,
+      "latin1"
+    ),
+    compressedForm,
+    Buffer.from("\nendstream\nendobj\ntrailer<</Size 9/Root 1 0 R>>\n%%EOF\n", "latin1"),
+  ]);
+}
+
 /** Illustrator-like PDF: nested Form XObjects */
 export function buildIllustratorNestedFormCutPathPdfBuffer() {
   const inner = "q /Cs0 CS 1 SC 60 60 80 80 re S Q";

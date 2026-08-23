@@ -5,6 +5,7 @@ import { buildCustomerProofPdfFileName } from "@/lib/proofs/dropbox";
 import {
   buildProofReference,
   canCreateRevisedProof,
+  canReviseCurrentProofInLineage,
   formatProofHistoryEntry,
   getCurrentProofInLineage,
   getCurrentProofRecord,
@@ -13,6 +14,7 @@ import {
   highestProofVersionInLineage,
   manifestItemSetsMatch,
   nextProofVersionInLineage,
+  proofAttachmentIsEditable,
   proofSupportsRevision,
 } from "@/lib/proofs/versioning";
 
@@ -258,6 +260,74 @@ describe("canCreateRevisedProof", () => {
           },
         ]
       ),
+      true
+    );
+  });
+});
+
+describe("proofAttachmentIsEditable", () => {
+  it("allows draft proofs without a generated customer PDF", () => {
+    assert.equal(
+      proofAttachmentIsEditable({
+        status: "draft",
+        brandedPdfGeneratedAt: null,
+        files: [],
+      }),
+      true
+    );
+  });
+
+  it("blocks ready_to_send proofs once a customer PDF exists", () => {
+    assert.equal(
+      proofAttachmentIsEditable({
+        status: "ready_to_send",
+        brandedPdfGeneratedAt: "2026-01-01",
+        files: [],
+      }),
+      false
+    );
+  });
+
+  it("blocks sent proofs even when files are present", () => {
+    assert.equal(
+      proofAttachmentIsEditable({
+        status: "sent",
+        brandedPdfGeneratedAt: "2026-01-01",
+        files: [
+          {
+            file_role: "source_artwork",
+            dropbox_path: "/proofs/source.pdf",
+          } as never,
+        ],
+      }),
+      false
+    );
+  });
+});
+
+describe("canReviseCurrentProofInLineage", () => {
+  it("allows revision from the current ready_to_send proof", () => {
+    const proof = {
+      id: "1",
+      status: "ready_to_send",
+      proof_lineage_id: "lineage-a",
+      version_number: 5,
+      brandedPdfGeneratedAt: "2026-01-01",
+      files: [{ file_role: "customer_proof", dropbox_path: "/proofs/v5.pdf" } as never],
+    };
+
+    assert.equal(
+      canReviseCurrentProofInLineage(proof, [
+        proof,
+        {
+          id: "0",
+          status: "superseded",
+          proof_lineage_id: "lineage-a",
+          version_number: 4,
+          brandedPdfGeneratedAt: "2026-01-01",
+          files: [],
+        },
+      ]),
       true
     );
   });
