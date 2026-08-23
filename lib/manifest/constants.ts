@@ -79,6 +79,7 @@ export const MANIFEST_ACTIVITY_TYPES = {
   productionManifestCreated: "production_manifest_created",
   productionItemAdded: "production_item_added",
   productionItemCancelled: "production_item_cancelled",
+  productionItemReinstated: "production_item_reinstated",
   productionItemMarkedNoCharge: "production_item_marked_no_charge",
   productionItemReclassified: "production_item_reclassified",
 } as const;

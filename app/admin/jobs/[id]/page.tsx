@@ -25,7 +25,7 @@ import { getAdminArtworkSourceLabel } from "@/lib/jobs/artwork-source";
 import { isDropboxConfigured } from "@/lib/dropbox/client";
 import { getJobProductionReadiness, loadManifestItemsForJob, reconcileProductionManifestForJob } from "@/lib/manifest/service";
 import { loadAdminJobProofingContext } from "@/lib/proofs/loaders";
-import { mapManifestItemToProofSelectable } from "@/lib/proofs/manifest-items";
+import { loadProofSelectableManifestItems } from "@/lib/proofs/manifest-items";
 import { loadJobFileManifestLinks } from "@/lib/proofs/service";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -94,16 +94,12 @@ export default async function AdminJobDetailPage({
   }
 
   const proofSelectableItems = manifestResult.schemaMissing
-    ? { items: [], schemaMissing: true }
-    : {
-        items: manifestResult.items
-          .filter((item) => !item.deleted_at && !item.combined_into_item_id)
-          .filter((item) => item.production_requirement_status === "required")
-          .filter((item) => item.proof_requirement !== "not_applicable")
-          .map(mapManifestItemToProofSelectable)
-          .sort((left, right) => Number(right.isProofRequired) - Number(left.isProofRequired)),
-        schemaMissing: false,
-      };
+    ? {
+        selectableItems: [],
+        disabledItems: [],
+        schemaMissing: true,
+      }
+    : await loadProofSelectableManifestItems(adminClient, id);
 
   const [readiness, proofing, fileManifestLinks] = await Promise.all([
     getJobProductionReadiness(adminClient, id).catch(() => ({
@@ -248,7 +244,8 @@ export default async function AdminJobDetailPage({
             <AdminJobProofsPanel
               jobId={detail.job.id}
               jobReference={detail.job.job_reference}
-              selectableItems={proofSelectableItems.items}
+              selectableItems={proofSelectableItems.selectableItems}
+              disabledProofItems={proofSelectableItems.disabledItems}
               manifestSchemaMissing={proofSelectableItems.schemaMissing}
               dropboxLinked={Boolean(detail.job.dropbox_folder_path)}
               jobFiles={detail.files.map((file) => ({

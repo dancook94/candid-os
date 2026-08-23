@@ -7,6 +7,7 @@ import {
   cancelManifestItemByCustomer,
   duplicateManifestItem,
   reclassifyManifestItem,
+  reinstateManifestItem,
   updateManifestItem,
 } from "@/lib/manifest/service";
 import { updateManifestItemProofRequirement } from "@/lib/manifest/proof-requirement-service";
@@ -143,6 +144,21 @@ export async function PATCH(request: Request) {
       );
 
       revalidatePath(`/admin/jobs/${item.job_id}`);
+      return NextResponse.json({ item });
+    }
+
+    if (action === "reinstate") {
+      const item = await reinstateManifestItem(
+        adminClient,
+        itemId,
+        {
+          note: body.note ? String(body.note) : undefined,
+        },
+        auth.userId
+      );
+
+      revalidatePath(`/admin/jobs/${item.job_id}`);
+      revalidatePath("/admin/production");
       return NextResponse.json({ item });
     }
 

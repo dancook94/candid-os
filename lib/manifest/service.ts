@@ -11,6 +11,11 @@ import {
 import type { ManifestSourceType } from "@/lib/manifest/constants";
 import { calculateProductionReadiness } from "@/lib/manifest/readiness";
 import {
+  buildManifestItemPreCancellationState,
+  defaultReinstateStateForItem,
+  loadManifestItemCancellationSnapshot,
+} from "@/lib/manifest/cancellation-snapshot";
+import {
   defaultProofRequirementForItemName,
   defaultProofRequirementForNewItem,
 } from "@/lib/manifest/proof-requirement";
@@ -21,6 +26,7 @@ import type {
   ManifestItemFormInput,
   ManifestItemRecord,
   ManifestReconcileResult,
+  ReinstateManifestItemInput,
 } from "@/lib/manifest/types";
 import { ProductionError, isMissingManifestSchemaError, isMissingProductionSchemaError } from "@/lib/production/errors";
 import { deriveCustomerSafeStatus } from "@/lib/production/status-sync";
@@ -534,12 +540,14 @@ export async function cancelManifestItemByCustomer(
 
   const job = await loadJob(adminClient, existing.job_id);
   const effectiveAt = input.effectiveAt ?? new Date().toISOString();
+  const preCancellationState = buildManifestItemPreCancellationState(existing);
 
   const { data: item, error } = await adminClient
     .from("production_items")
     .update({
       production_requirement_status: "cancelled",
       billing_status: "cancelled",
+      proof_requirement: "not_applicable",
       customer_change_reason: input.reason.trim(),
       customer_cancelled_at: effectiveAt,
       customer_cancelled_by: actorProfileId,
@@ -562,8 +570,88 @@ export async function cancelManifestItemByCustomer(
     opportunityId: job.opportunity_id,
     contactId: job.contact_id,
     actorProfileId,
-    metadata: { reason: input.reason.trim(), effective_at: effectiveAt },
+    metadata: {
+      reason: input.reason.trim(),
+      effective_at: effectiveAt,
+      pre_cancellation_state: preCancellationState,
+    },
   });
+
+  await syncJobProofRequiredFromManifest(adminClient, job.id);
+
+  return item as ManifestItemRecord;
+}
+
+export async function reinstateManifestItem(
+  adminClient: SupabaseClient,
+  itemId: string,
+  input: ReinstateManifestItemInput,
+  actorProfileId: string
+) {
+  const { data: existing, error: loadError } = await adminClient
+    .from("production_items")
+    .select(MANIFEST_ITEM_SELECT)
+    .eq("id", itemId)
+    .is("deleted_at", null)
+    .maybeSingle();
+
+  if (loadError) {
+    throw new ProductionError(loadError.message, 500);
+  }
+
+  if (!existing) {
+    throw new ProductionError("Manifest item not found.", 404);
+  }
+
+  if (existing.production_requirement_status !== "cancelled") {
+    throw new ProductionError("Only cancelled manifest items can be reinstated.", 409);
+  }
+
+  const job = await loadJob(adminClient, existing.job_id);
+  const snapshot =
+    (await loadManifestItemCancellationSnapshot(adminClient, itemId)) ??
+    defaultReinstateStateForItem(existing);
+
+  const { data: item, error } = await adminClient
+    .from("production_items")
+    .update({
+      production_requirement_status: snapshot.production_requirement_status,
+      billing_status: snapshot.billing_status,
+      production_status: snapshot.production_status,
+      proof_requirement: snapshot.proof_requirement,
+      customer_cancelled_at: null,
+      customer_cancelled_by: null,
+      customer_change_reason: null,
+    })
+    .eq("id", itemId)
+    .select(MANIFEST_ITEM_SELECT)
+    .single();
+
+  if (error || !item) {
+    throw new ProductionError(error?.message ?? "Unable to reinstate manifest item.", 500);
+  }
+
+  const note = input.note?.trim() || null;
+
+  await logManifestActivity(adminClient, {
+    activityType: MANIFEST_ACTIVITY_TYPES.productionItemReinstated,
+    description: `Production manifest item "${existing.item_name}" reinstated on ${job.job_reference}.`,
+    companyId: job.company_id,
+    quoteId: job.quote_id,
+    jobId: job.id,
+    productionItemId: itemId,
+    opportunityId: job.opportunity_id,
+    contactId: job.contact_id,
+    actorProfileId,
+    metadata: {
+      note,
+      restored_state: snapshot,
+      cancellation_reason: existing.customer_change_reason,
+      cancelled_at: existing.customer_cancelled_at,
+    },
+  });
+
+  await syncJobProofRequiredFromManifest(adminClient, job.id);
 
   return item as ManifestItemRecord;
 }

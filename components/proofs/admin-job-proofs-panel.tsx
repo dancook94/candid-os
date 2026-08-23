@@ -42,6 +42,7 @@ type AdminJobProofsPanelProps = {
   jobId: string;
   jobReference: string;
   selectableItems: ProofSelectableManifestItem[];
+  disabledProofItems?: ProofSelectableManifestItem[];
   manifestSchemaMissing?: boolean;
   dropboxLinked: boolean;
   jobFiles: Array<{ id: string; file_name: string; upload_status: string }>;
@@ -89,6 +90,7 @@ export function AdminJobProofsPanel({
   jobId,
   jobReference,
   selectableItems,
+  disabledProofItems = [],
   manifestSchemaMissing,
   dropboxLinked,
   jobFiles,
@@ -770,86 +772,122 @@ export function AdminJobProofsPanel({
                 Production manifest schema is not available. Apply the production manifest
                 migration before linking proofs to quoted items.
               </p>
-            ) : selectableItems.length === 0 ? (
+            ) : selectableItems.length === 0 && disabledProofItems.length === 0 ? (
               <p className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
                 No production manifest items were found for this job. Items are created from
                 the accepted quote in the production manifest. Check the manifest section
                 above or ensure this job has an accepted quote version.
               </p>
             ) : (
-              <div className="grid gap-3 md:grid-cols-2">
-                {[...selectableItems]
-                  .sort((left, right) => Number(right.isProofRequired) - Number(left.isProofRequired))
-                  .map((item) => {
-                  const selected = selectedItemIds.includes(item.id);
-                  return (
-                    <label
-                      key={item.id}
-                      className={`block cursor-pointer rounded-lg border p-3 transition-colors ${
-                        selected
-                          ? "border-[var(--candid-yellow)] bg-[var(--candid-yellow)]/10"
-                          : "border-border hover:border-muted-foreground/40"
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <input
-                          type="checkbox"
-                          className="mt-1"
-                          checked={selected}
-                          onChange={(event) => {
-                            setSelectedItemIds((current) =>
-                              event.target.checked
-                                ? [...current, item.id]
-                                : current.filter((id) => id !== item.id)
-                            );
-                          }}
-                        />
-                        <div className="min-w-0 space-y-1 text-sm">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-medium text-neutral-950">
-                              {item.itemReference ? `${item.itemReference} · ` : ""}
-                              {item.itemName}
-                            </p>
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
-                                item.isProofRequired
-                                  ? "bg-amber-100 text-amber-900"
-                                  : "bg-muted text-muted-foreground"
-                              }`}
-                            >
-                              {item.proofRequirementLabel}
-                            </span>
-                          </div>
-                          {item.description ? (
-                            <p className="text-muted-foreground">{item.description}</p>
-                          ) : null}
-                          <dl className="grid gap-1 text-muted-foreground">
-                            {item.quantity != null ? (
-                              <div>
-                                <span className="font-medium text-neutral-700">Quantity: </span>
-                                {item.quantity}
-                              </div>
-                            ) : null}
-                            {item.finishedSize ? (
-                              <div>
-                                <span className="font-medium text-neutral-700">Size: </span>
-                                {item.finishedSize}
-                              </div>
-                            ) : null}
-                            {item.materialSpec ? (
-                              <div>
-                                <span className="font-medium text-neutral-700">
-                                  Material/spec:{" "}
+              <div className="space-y-4">
+                {selectableItems.length === 0 ? (
+                  <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                    No manifest items currently require proof. Mark items as proof required in
+                    the production manifest before creating a new proof.
+                  </p>
+                ) : (
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {selectableItems.map((item) => {
+                      const selected = selectedItemIds.includes(item.id);
+                      return (
+                        <label
+                          key={item.id}
+                          className={`block cursor-pointer rounded-lg border p-3 transition-colors ${
+                            selected
+                              ? "border-[var(--candid-yellow)] bg-[var(--candid-yellow)]/10"
+                              : "border-border hover:border-muted-foreground/40"
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <input
+                              type="checkbox"
+                              className="mt-1"
+                              checked={selected}
+                              onChange={(event) => {
+                                setSelectedItemIds((current) =>
+                                  event.target.checked
+                                    ? [...current, item.id]
+                                    : current.filter((id) => id !== item.id)
+                                );
+                              }}
+                            />
+                            <div className="min-w-0 space-y-1 text-sm">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="font-medium text-neutral-950">
+                                  {item.itemReference ? `${item.itemReference} · ` : ""}
+                                  {item.itemName}
+                                </p>
+                                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-900">
+                                  {item.proofRequirementLabel}
                                 </span>
-                                {item.materialSpec}
                               </div>
-                            ) : null}
-                          </dl>
+                              {item.description ? (
+                                <p className="text-muted-foreground">{item.description}</p>
+                              ) : null}
+                              <dl className="grid gap-1 text-muted-foreground">
+                                {item.quantity != null ? (
+                                  <div>
+                                    <span className="font-medium text-neutral-700">Quantity: </span>
+                                    {item.quantity}
+                                  </div>
+                                ) : null}
+                                {item.finishedSize ? (
+                                  <div>
+                                    <span className="font-medium text-neutral-700">Size: </span>
+                                    {item.finishedSize}
+                                  </div>
+                                ) : null}
+                                {item.materialSpec ? (
+                                  <div>
+                                    <span className="font-medium text-neutral-700">
+                                      Material/spec:{" "}
+                                    </span>
+                                    {item.materialSpec}
+                                  </div>
+                                ) : null}
+                              </dl>
+                            </div>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {disabledProofItems.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-muted-foreground">
+                      Not available for new proofs
+                    </p>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      {disabledProofItems.map((item) => (
+                        <div
+                          key={item.id}
+                          aria-disabled="true"
+                          className="rounded-lg border border-dashed border-border bg-muted/20 p-3 opacity-80"
+                        >
+                          <div className="flex items-start gap-3">
+                            <input type="checkbox" className="mt-1" disabled checked={false} />
+                            <div className="min-w-0 space-y-1 text-sm">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="font-medium text-neutral-700">
+                                  {item.itemReference ? `${item.itemReference} · ` : ""}
+                                  {item.itemName}
+                                </p>
+                                <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                                  {item.disabledReason ?? item.proofRequirementLabel}
+                                </span>
+                              </div>
+                              {item.description ? (
+                                <p className="text-muted-foreground">{item.description}</p>
+                              ) : null}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </label>
-                  );
-                })}
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )}
           </div>

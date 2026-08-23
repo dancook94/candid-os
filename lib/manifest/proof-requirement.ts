@@ -1,4 +1,7 @@
-import { isLikelyNonPrintLine } from "@/lib/manifest/constants";
+import {
+  isLikelyNonPrintLine,
+  PRODUCTION_REQUIREMENT_STATUS_LABELS,
+} from "@/lib/manifest/constants";
 import type { ManifestItemRecord } from "@/lib/manifest/types";
 import { getCurrentProofInLineage } from "@/lib/proofs/versioning";
 
@@ -141,6 +144,113 @@ export function isItemProofRequired(
   }
 
   return normalizeProofRequirement(item.proof_requirement ?? null) === "required";
+}
+
+/** Active manifest items that may be linked when creating a new proof. */
+export function isProofCreatableManifestItem(
+  item: Pick<
+    ManifestItemRecord,
+    | "proof_requirement"
+    | "deleted_at"
+    | "combined_into_item_id"
+    | "production_requirement_status"
+  >
+) {
+  return isItemProofRequired(item);
+}
+
+export function getProofCreatableManifestItems(items: ManifestItemRecord[]) {
+  return items.filter(isProofCreatableManifestItem);
+}
+
+export function getProofSelectionDisabledReason(
+  item: Pick<
+    ManifestItemRecord,
+    | "proof_requirement"
+    | "deleted_at"
+    | "combined_into_item_id"
+    | "production_requirement_status"
+  >
+) {
+  if (item.deleted_at) {
+    return "Archived";
+  }
+
+  if (item.combined_into_item_id) {
+    return "Combined into another item";
+  }
+
+  if (item.production_requirement_status === "cancelled") {
+    return "Cancelled";
+  }
+
+  if (item.production_requirement_status !== "required") {
+    const label =
+      PRODUCTION_REQUIREMENT_STATUS_LABELS[
+        item.production_requirement_status as keyof typeof PRODUCTION_REQUIREMENT_STATUS_LABELS
+      ];
+    return label ?? "Not active for proofing";
+  }
+
+  const requirement = normalizeProofRequirement(item.proof_requirement ?? null);
+
+  if (requirement === "not_required") {
+    return "Proof not required";
+  }
+
+  if (requirement === "not_applicable") {
+    return "Not applicable";
+  }
+
+  if (requirement === "pending") {
+    return "Awaiting proof decision";
+  }
+
+  return "Not selectable for proof creation";
+}
+
+export function partitionProofManifestItems(items: ManifestItemRecord[]) {
+  const visible = items.filter((item) => !item.deleted_at && !item.combined_into_item_id);
+  const selectableItems = visible.filter(isProofCreatableManifestItem);
+  const disabledItems = visible.filter((item) => !isProofCreatableManifestItem(item));
+
+  return { selectableItems, disabledItems };
+}
+
+export function validateProofCreatableManifestItemSelection(
+  items: ManifestItemRecord[],
+  selectedIds: string[]
+) {
+  if (!selectedIds.length) {
+    return { ok: false as const, message: "Select at least one manifest item." };
+  }
+
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+  const invalidReferences: string[] = [];
+
+  for (const itemId of selectedIds) {
+    const item = itemsById.get(itemId);
+
+    if (!item) {
+      invalidReferences.push(itemId);
+      continue;
+    }
+
+    if (!isProofCreatableManifestItem(item)) {
+      invalidReferences.push(item.item_reference ?? item.item_name);
+    }
+  }
+
+  if (invalidReferences.length) {
+    return {
+      ok: false as const,
+      message:
+        "Only active manifest items with proof required can be linked to a new proof. " +
+        `Not eligible: ${invalidReferences.join(", ")}.`,
+    };
+  }
+
+  return { ok: true as const };
 }
 
 export function isItemProofRequirementSatisfied(

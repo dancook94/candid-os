@@ -5,7 +5,14 @@ import {
   buildManifestItemProofCoverage,
   getManifestItemProofStatus,
   isManifestItemProofApproved,
+  isProofCreatableManifestItem,
+  partitionProofManifestItems,
+  validateProofCreatableManifestItemSelection,
 } from "@/lib/manifest/proof-requirement";
+import {
+  buildManifestItemPreCancellationState,
+  defaultReinstateStateForItem,
+} from "@/lib/manifest/cancellation-snapshot";
 import type { ManifestItemRecord } from "@/lib/manifest/types";
 
 function makeItem(
@@ -198,5 +205,90 @@ describe("item-level proof requirements", () => {
 
     const coverage = buildManifestItemProofCoverage(items, [], []);
     assert.equal(coverage.requiredCount, 1);
+  });
+
+  it("scenario A: not required items cannot be selected for new proofs", () => {
+    const item = makeItem({
+      id: "item-1",
+      item_name: "Repeat Dibond",
+      proof_requirement: "not_required",
+    });
+
+    assert.equal(isProofCreatableManifestItem(item), false);
+
+    const { selectableItems, disabledItems } = partitionProofManifestItems([item]);
+    assert.equal(selectableItems.length, 0);
+    assert.equal(disabledItems.length, 1);
+
+    const validation = validateProofCreatableManifestItemSelection([item], [item.id]);
+    assert.equal(validation.ok, false);
+  });
+
+  it("scenario B: switching back to required makes item proof-creatable", () => {
+    const item = makeItem({
+      id: "item-1",
+      item_name: "Repeat Dibond",
+      proof_requirement: "required",
+    });
+
+    assert.equal(isProofCreatableManifestItem(item), true);
+
+    const validation = validateProofCreatableManifestItemSelection([item], [item.id]);
+    assert.equal(validation.ok, true);
+  });
+
+  it("scenario C: cancelled items are excluded from proof creation selection", () => {
+    const item = makeItem({
+      id: "item-1",
+      item_name: "Foamex",
+      proof_requirement: "not_applicable",
+      production_requirement_status: "cancelled",
+    });
+
+    assert.equal(isProofCreatableManifestItem(item), false);
+    assert.equal(
+      validateProofCreatableManifestItemSelection([item], [item.id]).ok,
+      false
+    );
+  });
+
+  it("scenario D: cancellation snapshot preserves state for reinstatement", () => {
+    const item = makeItem({
+      id: "item-1",
+      item_name: "Foamex",
+      proof_requirement: "required",
+      billing_status: "billable",
+      production_status: "artwork",
+      production_requirement_status: "required",
+    });
+
+    const snapshot = buildManifestItemPreCancellationState(item);
+    assert.deepEqual(snapshot, {
+      production_requirement_status: "required",
+      billing_status: "billable",
+      production_status: "artwork",
+      proof_requirement: "required",
+    });
+
+    const fallback = defaultReinstateStateForItem({
+      item_name: "Foamex",
+      production_status: "artwork",
+    });
+    assert.equal(fallback.production_requirement_status, "required");
+    assert.equal(fallback.billing_status, "billable");
+    assert.equal(fallback.proof_requirement, "required");
+  });
+
+  it("scenario E: multi-item proof rejects mixed required and not required items", () => {
+    const items = [
+      makeItem({ id: "item-1", item_name: "Foamex", proof_requirement: "required" }),
+      makeItem({ id: "item-2", item_name: "Repeat", proof_requirement: "not_required" }),
+    ];
+
+    const validation = validateProofCreatableManifestItemSelection(items, [
+      "item-1",
+      "item-2",
+    ]);
+    assert.equal(validation.ok, false);
   });
 });

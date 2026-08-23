@@ -43,6 +43,56 @@ function SourceBadge({ sourceType }: { sourceType: string }) {
   );
 }
 
+function ReinstateDialog({
+  open,
+  onClose,
+  onConfirm,
+  isSubmitting,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onConfirm: (note: string) => void;
+  isSubmitting: boolean;
+}) {
+  const [note, setNote] = useState("");
+
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="portal-surface w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-lg">
+        <h3 className="text-lg font-semibold">Reinstate this cancelled item?</h3>
+        <p className="mt-2 text-sm text-muted-foreground">
+          The item will return to active production and proof requirements using its
+          pre-cancellation settings.
+        </p>
+        <div className="mt-4 space-y-2">
+          <Label htmlFor="reinstateNote">Reason for reinstatement (optional)</Label>
+          <Textarea
+            id="reinstateNote"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            placeholder="Optional admin note"
+          />
+        </div>
+        <div className="mt-5 flex gap-3">
+          <Button
+            type="button"
+            disabled={isSubmitting}
+            onClick={() => onConfirm(note.trim())}
+          >
+            Reinstate item
+          </Button>
+          <Button type="button" variant="outline" onClick={onClose} disabled={isSubmitting}>
+            Close
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CancelDialog({
   open,
   onClose,
@@ -103,6 +153,7 @@ export function ProductionManifestPanel({
   const [formOpen, setFormOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<ManifestItemRecord | undefined>();
   const [cancelItem, setCancelItem] = useState<ManifestItemRecord | undefined>();
+  const [reinstateItem, setReinstateItem] = useState<ManifestItemRecord | undefined>();
   const [actionError, setActionError] = useState("");
   const [actionMessage, setActionMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -459,59 +510,77 @@ export function ProductionManifestPanel({
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
-                  {isProofableManifestItem(item) ? (
+                  {isCancelled ? (
                     <>
+                      <span className="inline-flex items-center rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+                        Cancelled by customer
+                      </span>
                       <Button
                         type="button"
                         size="sm"
-                        variant={proofRequirement === "required" ? "default" : "outline"}
                         disabled={busy}
-                        onClick={() => void setProofRequirement(item.id, "required")}
+                        onClick={() => setReinstateItem(item)}
                       >
-                        Require proof
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant={proofRequirement === "not_required" ? "default" : "outline"}
-                        disabled={busy}
-                        onClick={() => void setProofRequirement(item.id, "not_required")}
-                      >
-                        No proof required
+                        Reinstate item
                       </Button>
                     </>
-                  ) : proofRequirement === "not_applicable" ? (
-                    <span className="inline-flex items-center rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
-                      Proof not applicable
-                    </span>
-                  ) : null}
-                  <Button type="button" size="sm" variant="outline" onClick={() => { setEditingItem(item); setFormOpen(true); }}>
-                    Edit
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void runAction(item.id, "duplicate")}>
-                    Duplicate
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setCancelItem(item)}>
-                    Cancel by customer
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void runAction(item.id, "mark_not_required")}>
-                    Not required
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void runAction(item.id, "mark_external")}>
-                    External
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void runAction(item.id, "mark_manual_production")}>
-                    Manual production
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void runAction(item.id, "mark_no_charge_reprint")}>
-                    No-charge reprint
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void runAction(item.id, item.requires_printfactory ? "no_printfactory" : "requires_printfactory")}>
-                    {item.requires_printfactory ? "Remove PrintFactory req." : "Requires PrintFactory"}
-                  </Button>
-                  <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void runAction(item.id, "archive")}>
-                    Archive
-                  </Button>
+                  ) : (
+                    <>
+                      {isProofableManifestItem(item) ? (
+                        <>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={proofRequirement === "required" ? "default" : "outline"}
+                            disabled={busy}
+                            onClick={() => void setProofRequirement(item.id, "required")}
+                          >
+                            Require proof
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={proofRequirement === "not_required" ? "default" : "outline"}
+                            disabled={busy}
+                            onClick={() => void setProofRequirement(item.id, "not_required")}
+                          >
+                            No proof required
+                          </Button>
+                        </>
+                      ) : proofRequirement === "not_applicable" ? (
+                        <span className="inline-flex items-center rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+                          Proof not applicable
+                        </span>
+                      ) : null}
+                      <Button type="button" size="sm" variant="outline" onClick={() => { setEditingItem(item); setFormOpen(true); }}>
+                        Edit
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void runAction(item.id, "duplicate")}>
+                        Duplicate
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => setCancelItem(item)}>
+                        Cancel by customer
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void runAction(item.id, "mark_not_required")}>
+                        Not required
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void runAction(item.id, "mark_external")}>
+                        External
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void runAction(item.id, "mark_manual_production")}>
+                        Manual production
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void runAction(item.id, "mark_no_charge_reprint")}>
+                        No-charge reprint
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void runAction(item.id, item.requires_printfactory ? "no_printfactory" : "requires_printfactory")}>
+                        {item.requires_printfactory ? "Remove PrintFactory req." : "Requires PrintFactory"}
+                      </Button>
+                      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void runAction(item.id, "archive")}>
+                        Archive
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             );
@@ -536,6 +605,18 @@ export function ProductionManifestPanel({
           if (!cancelItem) return;
           void runAction(cancelItem.id, "cancel_customer", { reason }).then(() =>
             setCancelItem(undefined)
+          );
+        }}
+      />
+
+      <ReinstateDialog
+        open={Boolean(reinstateItem)}
+        onClose={() => setReinstateItem(undefined)}
+        isSubmitting={busy}
+        onConfirm={(note) => {
+          if (!reinstateItem) return;
+          void runAction(reinstateItem.id, "reinstate", note ? { note } : {}).then(() =>
+            setReinstateItem(undefined)
           );
         }}
       />

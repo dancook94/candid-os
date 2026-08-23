@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { validateProofCreatableManifestItemSelection } from "@/lib/manifest/proof-requirement";
+import { loadManifestItemsForProofContext } from "@/lib/manifest/proof-requirement-service";
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
 import { resolveJobProofRequired } from "@/lib/notifications/artwork-copy";
 import { ProofError, isMissingProofSchemaError } from "@/lib/proofs/errors";
@@ -652,6 +654,16 @@ export async function createJobProof(
 
   if (!input.productionItemIds.length) {
     throw new ProofError("Select at least one manifest item.", 400);
+  }
+
+  const manifestContext = await loadManifestItemsForProofContext(adminClient, jobId);
+  const selectionValidation = validateProofCreatableManifestItemSelection(
+    manifestContext.items,
+    input.productionItemIds
+  );
+
+  if (!selectionValidation.ok) {
+    throw new ProofError(selectionValidation.message, 400);
   }
 
   const manifestItems = await loadManifestItemsByIds(

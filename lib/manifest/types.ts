@@ -83,3 +83,7 @@ export type CancelManifestItemInput = {
   reason: string;
   effectiveAt?: string;
 };
+
+export type ReinstateManifestItemInput = {
+  note?: string;
+};

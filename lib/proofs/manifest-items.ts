@@ -1,5 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  getProofSelectionDisabledReason,
+  partitionProofManifestItems,
+  PROOF_REQUIREMENT_LABELS,
+  type ProofRequirement,
+} from "@/lib/manifest/proof-requirement";
 import type { ManifestItemRecord } from "@/lib/manifest/types";
 import {
   loadManifestItemsForJob,
@@ -17,10 +23,12 @@ export type ProofSelectableManifestItem = {
   proofRequirement: string | null;
   proofRequirementLabel: string;
   isProofRequired: boolean;
+  disabledReason?: string;
 };
 
 export function mapManifestItemToProofSelectable(
-  item: ManifestItemRecord
+  item: ManifestItemRecord,
+  options?: { disabledReason?: string }
 ): ProofSelectableManifestItem {
   const finishedSize =
     item.width_mm != null && item.height_mm != null
@@ -32,16 +40,11 @@ export function mapManifestItemToProofSelectable(
   );
 
   const proofRequirement = item.proof_requirement ?? null;
+  const normalizedRequirement = proofRequirement as ProofRequirement | null;
   const proofRequirementLabel =
-    proofRequirement === "required"
-      ? "Required proof"
-      : proofRequirement === "not_required"
-        ? "No proof required"
-        : proofRequirement === "not_applicable"
-          ? "Not applicable"
-          : proofRequirement === "pending"
-            ? "Awaiting decision"
-            : "Proof optional";
+    normalizedRequirement && normalizedRequirement in PROOF_REQUIREMENT_LABELS
+      ? PROOF_REQUIREMENT_LABELS[normalizedRequirement]
+      : options?.disabledReason ?? "Not selectable";
 
   return {
     id: item.id,
@@ -54,14 +57,8 @@ export function mapManifestItemToProofSelectable(
     proofRequirement,
     proofRequirementLabel,
     isProofRequired: proofRequirement === "required",
+    disabledReason: options?.disabledReason,
   };
-}
-
-function filterSelectableManifestItems(items: ManifestItemRecord[]) {
-  return items
-    .filter((item) => !item.deleted_at && !item.combined_into_item_id)
-    .filter((item) => item.production_requirement_status === "required")
-    .filter((item) => item.proof_requirement !== "not_applicable");
 }
 
 /** Loads production manifest items for proof linking, reconciling from quote when empty. */
@@ -73,7 +70,8 @@ export async function loadProofSelectableManifestItems(
 
   if (manifestResult.schemaMissing) {
     return {
-      items: [] as ProofSelectableManifestItem[],
+      selectableItems: [] as ProofSelectableManifestItem[],
+      disabledItems: [] as ProofSelectableManifestItem[],
       schemaMissing: true,
       manifestReconciled: false,
     };
@@ -87,9 +85,14 @@ export async function loadProofSelectableManifestItems(
     manifestReconciled = true;
   }
 
+  const { selectableItems, disabledItems } = partitionProofManifestItems(manifestResult.items);
+
   return {
-    items: filterSelectableManifestItems(manifestResult.items).map(
-      mapManifestItemToProofSelectable
+    selectableItems: selectableItems.map((item) => mapManifestItemToProofSelectable(item)),
+    disabledItems: disabledItems.map((item) =>
+      mapManifestItemToProofSelectable(item, {
+        disabledReason: getProofSelectionDisabledReason(item),
+      })
     ),
     schemaMissing: false,
     manifestReconciled,
