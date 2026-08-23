@@ -231,6 +231,7 @@ export function ProductionBoard({ initialData }: ProductionBoardProps) {
       ) : null}
 
       <DndContext
+        id="legacy-production-board"
         sensors={sensors}
         collisionDetection={closestCorners}
         onDragStart={handleDragStart}

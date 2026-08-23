@@ -272,6 +272,7 @@ export function PipelineBoard({ initialData }: PipelineBoardProps) {
       ) : null}
 
       <DndContext
+        id="crm-pipeline-board"
         sensors={sensors}
         collisionDetection={closestCorners}
         onDragStart={handleDragStart}

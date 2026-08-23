@@ -231,6 +231,7 @@ export function JobProductionBoard({ initialData }: JobProductionBoardProps) {
       ) : null}
 
       <DndContext
+        id="job-production-board"
         sensors={sensors}
         collisionDetection={closestCorners}
         onDragStart={handleDragStart}
