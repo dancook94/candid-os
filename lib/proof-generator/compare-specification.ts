@@ -86,12 +86,14 @@ export function compareArtworkToQuotedSize(input: {
   quotedHeightMm: number | null;
   detectedWidthMm: number | null;
   detectedHeightMm: number | null;
+  finishedSizeSource?: "trim_box" | "art_box" | "crop_marks" | "crop_box" | "media_box" | null;
 }): SizeComparisonResult {
   const {
     quotedWidthMm,
     quotedHeightMm,
     detectedWidthMm,
     detectedHeightMm,
+    finishedSizeSource = null,
   } = input;
 
   const base: SizeComparisonResult = {
@@ -151,12 +153,12 @@ export function compareArtworkToQuotedSize(input: {
   const scaleMatch = directMatch ?? rotatedMatch;
 
   if (scaleMatch) {
-    const finishedSizeLabel = `${quotedWidthMm} x ${quotedHeightMm} mm`;
-    const artworkSizeLabel = `${detectedWidthMm} x ${detectedHeightMm} mm`;
-
-    const message = scaleMatch.rotationMatches
-      ? `Artwork supplied at ${scaleMatch.matchedScaleLabel} scale with orientation rotated. Finished size: ${finishedSizeLabel}. Artwork size: ${artworkSizeLabel}. Scale: ${scaleMatch.matchedScaleLabel}.`
-      : `Artwork supplied at ${scaleMatch.matchedScaleLabel} scale. Finished size: ${finishedSizeLabel}. Artwork size: ${artworkSizeLabel}. Scale: ${scaleMatch.matchedScaleLabel}.`;
+    const message =
+      scaleMatch.matchedScale === 1
+        ? "Finished artwork size matches quoted specification."
+        : scaleMatch.rotationMatches
+          ? `Artwork supplied at ${scaleMatch.matchedScaleLabel} scale with orientation rotated.`
+          : `Artwork supplied at ${scaleMatch.matchedScaleLabel} scale.`;
 
     return {
       quotedWidthMm,
@@ -221,7 +223,10 @@ export function compareArtworkToQuotedSize(input: {
       expectedFinishedHeightMm: null,
       artworkResolutionDpi: null,
       effectiveResolutionDpi: null,
-      message: `Artwork proportions do not match quoted finished size. Width scale: ${widthScaleLabel}. Height scale: ${heightScaleLabel}.`,
+      message:
+        finishedSizeSource === "media_box"
+          ? "Finished size could not be reliably determined."
+          : `Artwork proportions do not match quoted finished size. Width scale: ${widthScaleLabel}. Height scale: ${heightScaleLabel}.`,
     };
   }
 
@@ -249,10 +254,12 @@ export function compareArtworkToQuotedSize(input: {
     artworkResolutionDpi: null,
     effectiveResolutionDpi: null,
     message: aspectOk
-      ? `Aspect ratio matches quoted specification, but artwork scale (${formatScalePercentLabel(
+      ? `Artwork dimensions do not correspond to quoted specification. Detected scale ${formatScalePercentLabel(
           (directWidthScale + directHeightScale) / 2
-        )}) does not match common production scales.`
-      : "Artwork size does not match quoted specification.",
+        )} is not a common production scale.`
+      : finishedSizeSource === "media_box"
+        ? "Finished size could not be reliably determined."
+        : "Artwork dimensions do not correspond to quoted specification.",
   };
 }
 

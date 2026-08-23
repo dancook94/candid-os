@@ -102,7 +102,8 @@ function buildSizeComparison(input: {
   quotedItems: QuotedSpecificationItem[];
 }): SizeComparisonResult | null {
   const primaryQuoted = input.quotedItems[0] ?? null;
-  const pageSize = input.metadata.pageSize.value;
+  const finishedSize =
+    input.metadata.finishedSize?.value ?? input.metadata.trimBox.value ?? input.metadata.pageSize.value;
 
   if (!primaryQuoted) {
     return null;
@@ -111,21 +112,22 @@ function buildSizeComparison(input: {
   const comparison = compareArtworkToQuotedSize({
     quotedWidthMm: primaryQuoted.quotedWidthMm,
     quotedHeightMm: primaryQuoted.quotedHeightMm,
-    detectedWidthMm: pageSize?.widthMm ?? null,
-    detectedHeightMm: pageSize?.heightMm ?? null,
+    detectedWidthMm: finishedSize?.widthMm ?? null,
+    detectedHeightMm: finishedSize?.heightMm ?? null,
+    finishedSizeSource: input.metadata.finishedSizeSource?.value ?? null,
   });
 
   const pixels = resolveRasterPixels(input.metadata);
 
-  if (!pixels || pageSize == null) {
+  if (!pixels || finishedSize == null) {
     return comparison;
   }
 
   return enrichSizeComparisonWithResolution(comparison, {
     widthPx: pixels.widthPx,
     heightPx: pixels.heightPx,
-    artworkWidthMm: pageSize.widthMm,
-    artworkHeightMm: pageSize.heightMm,
+    artworkWidthMm: finishedSize.widthMm,
+    artworkHeightMm: finishedSize.heightMm,
     embeddedDpi: pixels.embeddedDpi,
   });
 }
@@ -139,29 +141,31 @@ function buildBasePreflightChecks(input: {
   const checks: PreflightCheck[] = [];
   const primaryQuoted = quotedItems[0] ?? null;
   const pageSize = metadata.pageSize.value;
+  const finishedSize = metadata.finishedSize?.value ?? metadata.trimBox.value ?? pageSize;
+  const finishedSizeSource = metadata.finishedSizeSource?.value ?? null;
 
   if (sizeComparison && primaryQuoted) {
     checks.push({
       key: "size_scale",
       label: "Size / scale",
       status: sizeComparison.comparisonStatus,
-      detectedValue: pageSize
-        ? `${pageSize.widthMm} x ${pageSize.heightMm} mm`
+      detectedValue: finishedSize
+        ? `${finishedSize.widthMm} x ${finishedSize.heightMm} mm`
         : null,
       expectedValue:
         primaryQuoted.quotedWidthMm != null && primaryQuoted.quotedHeightMm != null
           ? `${primaryQuoted.quotedWidthMm} x ${primaryQuoted.quotedHeightMm} mm`
           : null,
       message: sizeComparison.message,
-      confidence: pageSize ? metadata.pageSize.confidence : "low",
+      confidence: finishedSize ? metadata.finishedSize?.confidence ?? metadata.pageSize.confidence : "low",
     });
 
     checks.push({
       key: "aspect_ratio",
       label: "Aspect ratio",
       status: sizeComparison.aspectRatioMatches ? "pass" : "manual_review",
-      detectedValue: pageSize
-        ? `${pageSize.widthMm}:${pageSize.heightMm}`
+      detectedValue: finishedSize
+        ? `${finishedSize.widthMm}:${finishedSize.heightMm}`
         : null,
       expectedValue:
         primaryQuoted.quotedWidthMm != null && primaryQuoted.quotedHeightMm != null
@@ -170,7 +174,7 @@ function buildBasePreflightChecks(input: {
       message: sizeComparison.aspectRatioMatches
         ? "Aspect ratio matches quoted specification."
         : "Aspect ratio does not match quoted specification.",
-      confidence: pageSize ? metadata.pageSize.confidence : "low",
+      confidence: finishedSize ? metadata.finishedSize?.confidence ?? metadata.pageSize.confidence : "low",
     });
 
     if (sizeComparison.rotationMatches) {
@@ -254,7 +258,21 @@ function buildBasePreflightChecks(input: {
 
   const trimBox = metadata.trimBox.value;
   const bleedBoxValue = metadata.bleedBox.value;
-  const bleedAllowance = computeBleedAllowanceMm(trimBox, bleedBoxValue);
+  const bleedAllowance =
+    metadata.bleedAllowanceMm?.value ??
+    computeBleedAllowanceMm(trimBox, bleedBoxValue);
+
+  if (finishedSizeSource === "media_box" && !metadata.trimBox.value) {
+    checks.push({
+      key: "finished_size_resolution",
+      label: "Finished size resolution",
+      status: "manual_review",
+      detectedValue: finishedSize ? formatDimensionsLabel(finishedSize) : null,
+      expectedValue: null,
+      message: "Finished size could not be reliably determined.",
+      confidence: "low",
+    });
+  }
 
   if (bleedBoxValue) {
     checks.push({
@@ -314,15 +332,15 @@ function buildBasePreflightChecks(input: {
     const rasterImages = metadata.rasterImages.value;
     if (
       rasterImages.length > 0 &&
-      pageSize &&
+      finishedSize &&
       sizeComparison?.matchedScale
     ) {
       const primary = rasterImages[0];
       const effectiveDpi = computeEffectiveDpi({
         widthPx: primary.widthPx,
         heightPx: primary.heightPx,
-        artworkWidthMm: pageSize.widthMm,
-        artworkHeightMm: pageSize.heightMm,
+        artworkWidthMm: finishedSize.widthMm,
+        artworkHeightMm: finishedSize.heightMm,
         finishedScale: sizeComparison.matchedScale,
       });
 

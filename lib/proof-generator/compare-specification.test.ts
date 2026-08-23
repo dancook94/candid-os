@@ -21,7 +21,7 @@ describe("compareArtworkToQuotedSize", () => {
     assert.equal(result.comparisonStatus, "pass");
     assert.equal(result.aspectRatioMatches, true);
     assert.equal(result.rotationMatches, false);
-    assert.match(result.message, /100%/);
+    assert.match(result.message, /Finished artwork size matches quoted specification/);
   });
 
   it("matches 50% scale", () => {

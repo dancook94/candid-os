@@ -68,6 +68,17 @@ export async function analyseImageBuffer(
     trimBox: { value: null, confidence: "low", source: "n/a" },
     bleedBox: { value: null, confidence: "low", source: "n/a" },
     artBox: { value: null, confidence: "low", source: "n/a" },
+    finishedSize: {
+      value: pageSize,
+      confidence: pageSize ? "medium" : "low",
+      source: "image_metadata",
+    },
+    finishedSizeSource: {
+      value: pageSize ? ("media_box" as const) : null,
+      confidence: pageSize ? "medium" : "low",
+      source: "image_metadata",
+    },
+    bleedAllowanceMm: { value: null, confidence: "low", source: "n/a" },
     colourMode: { value: colourMode, confidence: "medium", source: "sharp" },
     cmykPresent: {
       value: colourMode === "CMYK",

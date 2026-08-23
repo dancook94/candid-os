@@ -7,6 +7,7 @@ import {
   drawCutPathOverlayLegend,
 } from "@/lib/proof-generator/cut-path-overlay";
 import { extractCutPathGeometry, cutPathGeometryHasContent } from "@/lib/proof-generator/extract-cut-path-geometry";
+import { createCustomerPreviewPdfBuffer } from "@/lib/proof-generator/suppress-cut-path-preview";
 import {
   PROOF_PDF_MARGIN,
   PROOF_PDF_PAGE_HEIGHT,
@@ -96,7 +97,20 @@ export async function generateCustomerProofPdf(input: {
     const previewBoxHeight = Math.max(260, y - 8 - previewBoxBottom);
     const previewBoxWidth = contentWidth();
 
-    const preview = await embedArtworkPreview(doc, input.sourceBuffer, input.sourceFileName);
+    const overlayRequestedInitial = Boolean(
+      input.preflight.productionFeatures.showCutPathOnProof &&
+        input.preflight.productionFeatures.confirmedCutPath
+    );
+    const previewSource = overlayRequestedInitial
+      ? createCustomerPreviewPdfBuffer(
+          input.sourceBuffer,
+          input.preflight.productionFeatures.confirmedCutPath ?? null
+        )
+      : { buffer: input.sourceBuffer, originalCutPathSuppressed: false, method: "none" as const };
+
+    const preview = await embedArtworkPreview(doc, input.sourceBuffer, input.sourceFileName, {
+      previewBuffer: previewSource.buffer,
+    });
 
     logProofGeneratorDebug("artwork_preview_embedded", {
       sourceFileName: input.sourceFileName,
@@ -138,6 +152,7 @@ export async function generateCustomerProofPdf(input: {
       features.showCutPathOnProof && features.confirmedCutPath && preview.kind === "page"
     );
     features.cutPathOverlayRequested = overlayRequested;
+    features.originalCutPathSuppressed = previewSource.originalCutPathSuppressed;
 
     if (overlayRequested && features.confirmedCutPath) {
       const confirmedCutPath = features.confirmedCutPath;
@@ -170,6 +185,8 @@ export async function generateCustomerProofPdf(input: {
         extracted: extraction.ok,
         geometryAvailable: cutPathOverlayGeometryAvailable,
         rendered: cutPathOverlayRendered,
+        originalCutPathSuppressed: previewSource.originalCutPathSuppressed,
+        previewSuppressionMethod: previewSource.method,
       });
     }
 

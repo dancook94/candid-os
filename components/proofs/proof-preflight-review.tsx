@@ -10,6 +10,8 @@ import {
   confidenceLabel,
   formatCandidateSourceLabel,
 } from "@/lib/proof-generator/production-features";
+import { formatDimensionsLabel } from "@/lib/proof-generator/analyse-pdf";
+import { formatFinishedSizeSourceLabel } from "@/lib/proof-generator/resolve-pdf-geometry";
 import type {
   PreflightCheck,
   PreflightOperatorConfirmation,
@@ -201,6 +203,70 @@ export function ProofPreflightReview({
       <div className="grid gap-4 md:grid-cols-2">
         <Section title="Artwork specification">
           <CheckList checks={artworkChecks} />
+          {preflight.metadata.inputType === "pdf" ||
+          preflight.metadata.inputType === "ai_pdf_compatible" ? (
+            <details className="mt-3 rounded-md border border-border p-3 text-sm">
+              <summary className="cursor-pointer font-medium">PDF geometry</summary>
+              <dl className="mt-2 space-y-1 text-muted-foreground">
+                <div>
+                  <dt className="font-medium text-foreground">MediaBox</dt>
+                  <dd>{formatDimensionsLabel(preflight.metadata.mediaBox.value)}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-foreground">CropBox</dt>
+                  <dd>{formatDimensionsLabel(preflight.metadata.cropBox.value)}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-foreground">BleedBox</dt>
+                  <dd>{formatDimensionsLabel(preflight.metadata.bleedBox.value)}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-foreground">TrimBox</dt>
+                  <dd>{formatDimensionsLabel(preflight.metadata.trimBox.value)}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-foreground">Resolved finished size</dt>
+                  <dd>{formatDimensionsLabel(preflight.metadata.finishedSize?.value ?? null)}</dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-foreground">Resolution method</dt>
+                  <dd>
+                    {formatFinishedSizeSourceLabel(
+                      preflight.metadata.finishedSizeSource?.value ?? null
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt className="font-medium text-foreground">Confidence</dt>
+                  <dd>
+                    {preflight.metadata.finishedSize?.confidence
+                      ? confidenceLabel(preflight.metadata.finishedSize.confidence)
+                      : "Unknown"}
+                  </dd>
+                </div>
+                {preflight.productionFeatures.originalCutPathSuppressed != null ? (
+                  <div>
+                    <dt className="font-medium text-foreground">
+                      Original CutContour suppressed in proof preview
+                    </dt>
+                    <dd>
+                      {preflight.productionFeatures.originalCutPathSuppressed ? "Yes" : "No"}
+                    </dd>
+                  </div>
+                ) : null}
+                {preflight.productionFeatures.cutPathOverlayRendered != null ? (
+                  <div>
+                    <dt className="font-medium text-foreground">Customer overlay</dt>
+                    <dd>
+                      {preflight.productionFeatures.cutPathOverlayRendered
+                        ? "Rendered"
+                        : "Not rendered"}
+                    </dd>
+                  </div>
+                ) : null}
+              </dl>
+            </details>
+          ) : null}
         </Section>
 
         <Section title="Production features">

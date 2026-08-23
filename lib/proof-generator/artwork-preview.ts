@@ -20,19 +20,22 @@ export type ArtworkPreview =
 export async function embedArtworkPreview(
   targetDoc: PDFDocument,
   sourceBuffer: Buffer,
-  fileName: string
+  fileName: string,
+  options?: { previewBuffer?: Buffer }
 ): Promise<ArtworkPreview> {
-  const detectedKind = assertValidSourceArtworkBuffer(sourceBuffer, fileName);
+  const previewBuffer = options?.previewBuffer ?? sourceBuffer;
+  const detectedKind = assertValidSourceArtworkBuffer(previewBuffer, fileName);
 
   logProofGeneratorDebug("artwork_preview_start", {
     fileName,
     detectedKind,
     byteLength: sourceBuffer.length,
+    previewByteLength: previewBuffer.length,
   });
 
   if (detectedKind === "pdf") {
     try {
-      const [embeddedPage] = await targetDoc.embedPdf(sourceBuffer, [0]);
+      const [embeddedPage] = await targetDoc.embedPdf(previewBuffer, [0]);
       if (!embeddedPage) {
         throw new Error("PDF artwork did not contain a renderable first page.");
       }

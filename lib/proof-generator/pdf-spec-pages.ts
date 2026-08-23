@@ -18,9 +18,10 @@ import {
 } from "@/lib/proof-generator/pdf-layout";
 import {
   PDF_NOT_SPECIFIED,
-  formatBleedMetadataLabel,
+  formatBleedAllowanceLabel,
   formatCustomerSpotColoursLabel,
   formatEffectiveResolutionLabel,
+  formatFinishedSizeDetectionLabel,
   formatPdfDimensionsLabel,
   formatPdfDimensionsFromBox,
   formatProductionFeaturesForCustomerProof,
@@ -157,8 +158,12 @@ export function renderSpecificationPages(
 
   const primaryItem = preflight.quotedItems[0] ?? null;
   const pageSize = preflight.metadata.pageSize.value;
+  const finishedSize =
+    preflight.metadata.finishedSize?.value ??
+    preflight.metadata.trimBox.value ??
+    pageSize;
   const sizeComparison = preflight.sizeComparison;
-  const bleedCheck = preflight.checks.find((check) => check.key === "bleed_box");
+  const bleedAllowanceMm = preflight.metadata.bleedAllowanceMm?.value ?? null;
 
   const quotedRows = [
     {
@@ -181,7 +186,22 @@ export function renderSpecificationPages(
   ];
 
   const suppliedRows = [
-    { label: "Detected size", value: formatPdfDimensionsFromBox(pageSize) },
+    {
+      label: "Finished / trim size",
+      value: formatPdfDimensionsFromBox(finishedSize),
+    },
+    {
+      label: "Page size",
+      value: formatPdfDimensionsFromBox(pageSize),
+    },
+    {
+      label: "Bleed",
+      value: formatBleedAllowanceLabel(bleedAllowanceMm),
+    },
+    {
+      label: "Size detection",
+      value: formatFinishedSizeDetectionLabel(preflight.metadata),
+    },
     { label: "Scale", value: formatProofScaleLabel(sizeComparison?.matchedScaleLabel ?? null) },
     {
       label: "Page count",
@@ -198,7 +218,6 @@ export function renderSpecificationPages(
       label: "Effective resolution",
       value: formatEffectiveResolutionLabel(sizeComparison),
     },
-    { label: "Bleed metadata", value: formatBleedMetadataLabel(bleedCheck) },
     { label: "Spot colours", value: formatCustomerSpotColoursLabel(preflight) },
   ];
 

@@ -1,4 +1,5 @@
 import type { PdfBoxDimensions } from "@/lib/proof-generator/types";
+import { formatFinishedSizeSourceLabel } from "@/lib/proof-generator/resolve-pdf-geometry";
 import type { DetectedArtworkMetadata, PreflightCheck, PreflightResult, SizeComparisonResult } from "@/lib/proof-generator/types";
 
 /** Legacy placeholder retained for joins that still expect a dash. */
@@ -193,6 +194,22 @@ export function formatCustomerFontLabel(preflight: PreflightResult): string {
   }
 
   return "Could not be determined";
+}
+
+export function formatBleedAllowanceLabel(
+  bleedAllowanceMm: number | null | undefined
+): string {
+  if (bleedAllowanceMm == null || bleedAllowanceMm <= 0) {
+    return PDF_NOT_DETECTED;
+  }
+
+  return sanitizePdfText(`${bleedAllowanceMm} mm each side`);
+}
+
+export function formatFinishedSizeDetectionLabel(
+  metadata: DetectedArtworkMetadata
+): string {
+  return sanitizePdfText(formatFinishedSizeSourceLabel(metadata.finishedSizeSource?.value));
 }
 
 export function formatBleedMetadataLabel(check: PreflightCheck | undefined): string {

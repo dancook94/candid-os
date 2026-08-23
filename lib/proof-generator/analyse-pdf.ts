@@ -1,6 +1,10 @@
 import { PDFDocument } from "pdf-lib";
 
 import { PT_TO_MM } from "@/lib/proof-generator/constants";
+import {
+  enrichMetadataWithResolvedGeometry,
+  extractPdfBoxRects,
+} from "@/lib/proof-generator/resolve-pdf-geometry";
 import { scanPdfContent } from "@/lib/proof-generator/scan-pdf-content";
 import type {
   DetectedArtworkMetadata,
@@ -178,7 +182,25 @@ export async function analysePdfBuffer(
     );
   }
 
-  return {
+  const boxRects = extractPdfBoxRects(buffer);
+  const firstMediaBox = boxRects.find((box) => box.name === "MediaBox")?.rect ?? null;
+  const resolvedMediaBox =
+    firstMediaBox != null
+      ? detected(
+          {
+            widthPt: firstMediaBox.widthPt,
+            heightPt: firstMediaBox.heightPt,
+            widthMm: firstMediaBox.widthMm,
+            heightMm: firstMediaBox.heightMm,
+          },
+          "high",
+          "pdf_box_scan"
+        )
+      : mediaBox.value
+        ? mediaBox
+        : pageSize;
+
+  const baseMetadata: DetectedArtworkMetadata = {
     fileName,
     fileSizeBytes: buffer.length,
     mimeType,
@@ -188,11 +210,14 @@ export async function analysePdfBuffer(
     pdfVersion,
     pageSize,
     orientation,
-    mediaBox: mediaBox.value ? mediaBox : pageSize,
+    mediaBox: resolvedMediaBox,
     cropBox: pickBox(boxes, "CropBox"),
     trimBox: pickBox(boxes, "TrimBox"),
     bleedBox: pickBox(boxes, "BleedBox"),
     artBox: pickBox(boxes, "ArtBox"),
+    finishedSize: detected(null, "low", "pending"),
+    finishedSizeSource: detected(null, "low", "pending"),
+    bleedAllowanceMm: detected(null, "low", "pending"),
     colourMode: detected(colourMode, modes.length ? "medium" : "low", "pdf_content_scan"),
     cmykPresent: detected(scan.cmykPresent, "medium", "pdf_content_scan"),
     rgbPresent: detected(scan.rgbPresent, "medium", "pdf_content_scan"),
@@ -207,6 +232,8 @@ export async function analysePdfBuffer(
     imageWidthPx: detected(null, "low", "n/a"),
     imageHeightPx: detected(null, "low", "n/a"),
   };
+
+  return enrichMetadataWithResolvedGeometry(baseMetadata, buffer);
 }
 
 export function formatDimensionsLabel(dimensions: PdfBoxDimensions | null) {

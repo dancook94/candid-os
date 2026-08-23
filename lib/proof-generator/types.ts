@@ -49,6 +49,11 @@ export type DetectedArtworkMetadata = {
   trimBox: DetectedValue<PdfBoxDimensions | null>;
   bleedBox: DetectedValue<PdfBoxDimensions | null>;
   artBox: DetectedValue<PdfBoxDimensions | null>;
+  finishedSize: DetectedValue<PdfBoxDimensions | null>;
+  finishedSizeSource: DetectedValue<
+    "trim_box" | "art_box" | "crop_marks" | "crop_box" | "media_box" | null
+  >;
+  bleedAllowanceMm: DetectedValue<number | null>;
   colourMode: DetectedValue<
     "CMYK" | "RGB" | "Mixed" | "Grayscale" | "Unknown" | null
   >;
@@ -112,6 +117,7 @@ export type ProductionFeaturesResult = {
   cutPathOverlayRequested?: boolean;
   cutPathOverlayGeometryAvailable?: boolean;
   cutPathOverlayRendered?: boolean;
+  originalCutPathSuppressed?: boolean;
   confirmedCutPath?: ConfirmedProductionFeature | null;
   noCutLineRequired?: boolean;
   cutPathRequiredNotDetected?: boolean;

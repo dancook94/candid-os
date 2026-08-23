@@ -52,6 +52,13 @@ function buildPreflight(overrides?: Partial<PreflightResult>): PreflightResult {
       trimBox: { value: null, confidence: "low", source: "n/a" },
       bleedBox: { value: null, confidence: "low", source: "n/a" },
       artBox: { value: null, confidence: "low", source: "n/a" },
+      finishedSize: {
+        value: { widthPt: 0, heightPt: 0, widthMm: 1200, heightMm: 800 },
+        confidence: "high",
+        source: "image",
+      },
+      finishedSizeSource: { value: "media_box", confidence: "high", source: "image" },
+      bleedAllowanceMm: { value: null, confidence: "low", source: "n/a" },
       colourMode: { value: "RGB", confidence: "high", source: "image" },
       cmykPresent: { value: false, confidence: "high", source: "image" },
       rgbPresent: { value: true, confidence: "high", source: "image" },

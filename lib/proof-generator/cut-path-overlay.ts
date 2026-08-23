@@ -285,7 +285,7 @@ export function drawCutPathOverlayLegend(
   x: number,
   y: number
 ) {
-  const label = sanitizePdfText("Cut path — does not print");
+  const label = sanitizePdfText("Cut line — does not print");
   page.drawLine({
     start: { x, y: y + 4 },
     end: { x: x + 22, y: y + 4 },

@@ -219,6 +219,33 @@ export function buildOcgFormXObjectCutPathPdfBuffer(input?: { shape?: CutPathSha
   ]);
 }
 
+/** PDF with MediaBox bleed area and TrimBox finished size (500 x 500 mm trim in ~523.28 mm page). */
+export function buildTrimBoxTestPdfBuffer() {
+  const pageWidthMm = 523.28;
+  const trimWidthMm = 500;
+  const pageWidth = (pageWidthMm / 25.4) * 72;
+  const trimWidth = (trimWidthMm / 25.4) * 72;
+  const trimInset = (pageWidth - trimWidth) / 2;
+  const pageHeight = pageWidth;
+  const trimHeight = trimWidth;
+  const artworkStream = "q 0.9 0.9 0.9 rg 0 0 200 200 re f Q";
+  const streamBytes = Buffer.from(artworkStream, "latin1");
+
+  const prefix = [
+    "%PDF-1.4",
+    "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+    "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj",
+    `3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${pageWidth} ${pageHeight}]/CropBox[0 0 ${pageWidth} ${pageHeight}]/BleedBox[0 0 ${pageWidth} ${pageHeight}]/TrimBox[${trimInset} ${trimInset} ${trimInset + trimWidth} ${trimInset + trimHeight}]/Contents 4 0 R>>endobj`,
+    `4 0 obj<</Length ${streamBytes.length}>>stream\n`,
+  ].join("\n");
+
+  return Buffer.concat([
+    Buffer.from(prefix, "latin1"),
+    streamBytes,
+    Buffer.from("\nendstream\nendobj\ntrailer<</Size 5/Root 1 0 R>>\n%%EOF\n", "latin1"),
+  ]);
+}
+
 /** Illustrator-like PDF: nested Form XObjects */
 export function buildIllustratorNestedFormCutPathPdfBuffer() {
   const inner = "q /Cs0 CS 1 SC 60 60 80 80 re S Q";
