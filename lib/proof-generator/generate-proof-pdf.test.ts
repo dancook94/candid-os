@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import { generateCustomerProofPdf } from "@/lib/proof-generator/generate-proof-pdf";
 import type { PreflightResult } from "@/lib/proof-generator/types";
+import { PDFDocument } from "pdf-lib";
 
 const MINIMAL_PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -142,5 +143,52 @@ describe("generateCustomerProofPdf", () => {
 
     assert.ok(pdf.byteLength > 1000);
     assert.equal(pdf.subarray(0, 4).toString("ascii"), "%PDF");
+  });
+
+  it("supports additional specification pages for long preflight results", async () => {
+    const checks = Array.from({ length: 24 }, (_, index) => ({
+      key: `check_${index}`,
+      label: `Check ${index + 1}`,
+      status: "warning" as const,
+      detectedValue: "Value",
+      expectedValue: null,
+      message: `Detailed review message ${index + 1} for customer approval workflow with additional wrapped content to increase card height.`,
+      confidence: "medium" as const,
+    }));
+
+    const pdf = await generateCustomerProofPdf({
+      jobReference: "J-4",
+      projectName: "Long Preflight Job",
+      proofReference: "J-4 Proof v1",
+      versionNumber: 1,
+      preflight: buildPreflight({
+        checks,
+        productionFeatures: {
+          cutPathCandidates: [],
+          whiteInkCandidates: [],
+          layers: [],
+          spotColourGroups: { productionSeparations: ["CutContour"], otherSpotColours: [] },
+          expectsCutPath: false,
+          cutPathOverlayAvailable: false,
+          confirmedCutPath: {
+            name: "CutContour",
+            sourceType: "separation",
+            confirmedAt: "2026-01-01T00:00:00.000Z",
+            confirmedByProfileId: "user-1",
+          },
+        },
+        fonts: {
+          status: "live_fonts_detected",
+          names: ["OTUBJQ+MyriadPro-Regular"],
+          confidence: "medium",
+          message: "Live fonts detected",
+        },
+      }),
+      sourceBuffer: MINIMAL_PNG,
+      sourceFileName: "proof.png",
+    });
+
+    const document = await PDFDocument.load(pdf);
+    assert.ok(document.getPageCount() >= 3);
   });
 });

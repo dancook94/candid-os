@@ -7,50 +7,30 @@ import {
   PROOF_PDF_PAGE_HEIGHT,
   PROOF_PDF_PAGE_WIDTH,
 } from "@/lib/proof-generator/pdf-brand";
-import { buildCustomerProofPdfFileName } from "@/lib/proofs/dropbox";
 import {
-  drawApprovalDisclaimer,
   drawApprovalFooterBar,
   drawArtworkPreviewFrame,
   drawCustomerMessagePanel,
   drawMetaGrid,
-  drawPreflightSectionCard,
   drawProofHeroTitle,
   drawProofPageHeader,
   drawProofVersionSubtitle,
-  drawSpecificationSectionCard,
   embedCandidLogo,
   estimateWrappedLineCount,
 } from "@/lib/proof-generator/pdf-layout";
 import {
-  PDF_NOT_SPECIFIED,
-  formatBleedMetadataLabel,
-  formatEffectiveResolutionLabel,
-  formatPdfDimensionsLabel,
-  formatPdfDimensionsFromBox,
-  formatProofFieldValue,
-  formatProofQuantity,
-  formatProofScaleLabel,
-  formatProductionFeaturesForCustomerProof,
-  formatSpotColoursLabel,
-  joinPdfParts,
-} from "@/lib/proof-generator/pdf-text";
+  renderSpecificationPages,
+  updateProofPageIndicators,
+} from "@/lib/proof-generator/pdf-spec-pages";
+import { PDF_NOT_SPECIFIED, joinPdfParts } from "@/lib/proof-generator/pdf-text";
 import type { PreflightResult } from "@/lib/proof-generator/types";
+import { buildCustomerProofPdfFileName } from "@/lib/proofs/dropbox";
 
-const TOTAL_PAGES = 2;
 const FOOTER_BAR_HEIGHT = 34;
 const FOOTER_GAP = 8;
 
 function contentWidth() {
   return PROOF_PDF_PAGE_WIDTH - PROOF_PDF_MARGIN * 2;
-}
-
-function leftColumnWidth() {
-  return Math.floor(contentWidth() * 0.52);
-}
-
-function rightColumnWidth() {
-  return contentWidth() - leftColumnWidth() - 16;
 }
 
 export async function generateCustomerProofPdf(input: {
@@ -77,12 +57,9 @@ export async function generateCustomerProofPdf(input: {
 
     const primaryItem = input.preflight.quotedItems[0] ?? null;
     const customerMessage = input.customerMessage?.trim() ?? "";
-    const pageSize = input.preflight.metadata.pageSize.value;
-    const sizeComparison = input.preflight.sizeComparison;
-    const bleedCheck = input.preflight.checks.find((check) => check.key === "bleed_box");
 
     const page1 = doc.addPage([PROOF_PDF_PAGE_WIDTH, PROOF_PDF_PAGE_HEIGHT]);
-    const page1Header = drawProofPageHeader(page1, fonts, logo, 1, TOTAL_PAGES);
+    const page1Header = drawProofPageHeader(page1, fonts, logo, 1, 1);
     let y = drawProofHeroTitle(page1, fonts, page1Header.dividerY);
     y = drawProofVersionSubtitle(page1, fonts, y, input.versionNumber);
 
@@ -161,113 +138,9 @@ export async function generateCustomerProofPdf(input: {
       "Candid Creative"
     );
 
-    const leftX = PROOF_PDF_MARGIN;
-    const leftWidth = leftColumnWidth();
-    const rightX = PROOF_PDF_MARGIN + leftWidth + 16;
-    const rightWidth = rightColumnWidth();
+    renderSpecificationPages(doc, fonts, logo, input.preflight);
 
-    const page2 = doc.addPage([PROOF_PDF_PAGE_WIDTH, PROOF_PDF_PAGE_HEIGHT]);
-    const page2Header = drawProofPageHeader(page2, fonts, logo, 2, TOTAL_PAGES);
-    const contentStartY = page2Header.contentStartY;
-
-    const quotedRows = [
-      {
-        label: "Finished size",
-        value:
-          primaryItem?.quotedWidthMm != null && primaryItem?.quotedHeightMm != null
-            ? formatPdfDimensionsLabel(primaryItem.quotedWidthMm, primaryItem.quotedHeightMm)
-            : PDF_NOT_SPECIFIED,
-      },
-      { label: "Quantity", value: formatProofQuantity(primaryItem?.quantity ?? null) },
-      { label: "Material", value: formatProofFieldValue(primaryItem?.material ?? null) },
-      {
-        label: "Print specification",
-        value: formatProofFieldValue(primaryItem?.printSpecification ?? null),
-      },
-      {
-        label: "Sides / finishing",
-        value: joinPdfParts([primaryItem?.sides, primaryItem?.finishing]),
-      },
-    ];
-
-    const suppliedRows = [
-      { label: "Detected size", value: formatPdfDimensionsFromBox(pageSize) },
-      { label: "Scale", value: formatProofScaleLabel(sizeComparison?.matchedScaleLabel ?? null) },
-      {
-        label: "Page count",
-        value:
-          input.preflight.metadata.pageCount != null
-            ? String(input.preflight.metadata.pageCount)
-            : PDF_NOT_SPECIFIED,
-      },
-      {
-        label: "Colour mode",
-        value: formatProofFieldValue(input.preflight.metadata.colourMode.value ?? null),
-      },
-      {
-        label: "Effective resolution",
-        value: formatEffectiveResolutionLabel(sizeComparison),
-      },
-      { label: "Bleed metadata", value: formatBleedMetadataLabel(bleedCheck) },
-      { label: "Spot colours", value: formatSpotColoursLabel(input.preflight.metadata) },
-    ];
-
-    let leftY = contentStartY;
-    leftY = drawSpecificationSectionCard(page2, fonts, {
-      title: "Quoted specification",
-      x: leftX,
-      y: leftY,
-      width: leftWidth,
-      rows: quotedRows,
-    });
-
-    drawSpecificationSectionCard(page2, fonts, {
-      title: "Artwork supplied",
-      x: leftX,
-      y: leftY,
-      width: leftWidth,
-      rows: suppliedRows,
-    });
-
-    const preflightChecks = input.preflight.checks.filter((check) => check.status !== "info");
-
-    drawPreflightSectionCard(page2, fonts, {
-      title: "Automated preflight",
-      x: rightX,
-      y: contentStartY,
-      width: rightWidth,
-      checks: preflightChecks.slice(0, 5),
-    });
-
-    const productionFeatureRows = formatProductionFeaturesForCustomerProof(input.preflight);
-    if (productionFeatureRows.length > 0) {
-      drawSpecificationSectionCard(page2, fonts, {
-        title: "Production features",
-        x: rightX,
-        y: contentStartY - 190,
-        width: rightWidth,
-        rows: productionFeatureRows,
-      });
-    }
-
-    const disclaimer =
-      "Please check all wording, spelling, positioning, dimensions and visual content carefully.\n\nApproval confirms that the artwork shown in this proof is authorised to proceed to production.\n\nColours shown on screen may vary from the final printed result.";
-
-    drawApprovalDisclaimer(
-      page2,
-      fonts,
-      disclaimer,
-      PROOF_PDF_MARGIN,
-      PROOF_PDF_MARGIN + FOOTER_BAR_HEIGHT + 88,
-      contentWidth()
-    );
-
-    drawApprovalFooterBar(
-      page2,
-      fonts,
-      "Please review this proof carefully before approval.",
-      "Candid Creative"
-    );
+    updateProofPageIndicators(doc.getPages(), fonts, 1);
 
     const bytes = await doc.save();
     return Buffer.from(bytes);

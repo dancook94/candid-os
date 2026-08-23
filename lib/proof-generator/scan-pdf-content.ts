@@ -283,16 +283,21 @@ function scanMissingLinkHints(text: string) {
   return [...hints];
 }
 
+function isIgnoredSeparationName(name: string) {
+  const normalized = name.trim().toLowerCase();
+  return ["all", "none", "default", "cmyk", "rgb", "gray", "grey"].includes(normalized);
+}
+
 export function scanPdfContent(buffer: Buffer): PdfContentScan {
   const text = buffer.toString("latin1");
   const layers = scanLayersAndOcgs(text);
-  const separations = scanSeparations(text);
+  const separations = scanSeparations(text).filter((name) => !isIgnoredSeparationName(name));
   const spotColourNames = uniqueNames([
     ...separations,
     ...layers
       .filter((layer) => layer.sourceType === "spot_colour")
       .map((layer) => layer.name),
-  ]);
+  ]).filter((name) => !isIgnoredSeparationName(name));
   const fonts = scanFonts(text);
 
   return {

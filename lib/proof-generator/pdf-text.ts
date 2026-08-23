@@ -145,7 +145,9 @@ export function formatEffectiveResolutionLabel(
 }
 
 export function formatSpotColoursLabel(metadata: DetectedArtworkMetadata): string {
-  const names = metadata.spotColourNames.value;
+  const names = metadata.spotColourNames.value.filter(
+    (name) => !isCustomerSpotColourNoise(name)
+  );
   const confidence = metadata.spotColourNames.confidence;
 
   if (names.length > 0) {
@@ -157,6 +159,40 @@ export function formatSpotColoursLabel(metadata: DetectedArtworkMetadata): strin
   }
 
   return PDF_NOT_DETECTED;
+}
+
+function isCustomerSpotColourNoise(name: string) {
+  const normalized = name.trim().toLowerCase();
+  return ["all", "none", "default", "cmyk", "rgb", "gray", "grey"].includes(normalized);
+}
+
+export function formatCustomerSpotColoursLabel(preflight: PreflightResult): string {
+  const names = preflight.productionFeatures.spotColourGroups.otherSpotColours.filter(
+    (name) => !isCustomerSpotColourNoise(name)
+  );
+
+  if (names.length > 0) {
+    return sanitizePdfText(names.join(", "));
+  }
+
+  return PDF_NONE_DETECTED;
+}
+
+export function formatCustomerFontLabel(preflight: PreflightResult): string {
+  if (preflight.fonts.status === "all_outlined") {
+    return "No live fonts detected";
+  }
+
+  if (preflight.fonts.status === "live_fonts_detected") {
+    const needsReview = preflight.checks.some(
+      (check) => check.key === "live_fonts" && check.status === "warning"
+    );
+    return needsReview
+      ? "Live text detected — Candid review required"
+      : "Live text detected";
+  }
+
+  return "Could not be determined";
 }
 
 export function formatBleedMetadataLabel(check: PreflightCheck | undefined): string {
@@ -213,29 +249,34 @@ export function formatProductionFeaturesForCustomerProof(preflight: PreflightRes
     });
   }
 
-  if (preflight.fonts.status === "all_outlined") {
-    rows.push({ label: "Fonts", value: "No live fonts detected" });
-  } else if (preflight.fonts.status === "live_fonts_detected") {
+  const productionSeparations = features.spotColourGroups.productionSeparations.filter(
+    (name) =>
+      name !== features.confirmedCutPath?.name && name !== features.confirmedWhiteInk?.name
+  );
+
+  if (productionSeparations.length > 0) {
     rows.push({
-      label: "Fonts",
-      value: sanitizePdfText(preflight.fonts.names.slice(0, 3).join(", ") || "Live fonts detected"),
+      label: "Production separations",
+      value: sanitizePdfText(productionSeparations.join(", ")),
     });
+  }
+
+  if (
+    preflight.fonts.status === "all_outlined" ||
+    preflight.fonts.status === "live_fonts_detected" ||
+    preflight.fonts.status === "unknown"
+  ) {
+    rows.push({ label: "Fonts", value: formatCustomerFontLabel(preflight) });
   }
 
   if (preflight.images.linkStatus === "embedded") {
     rows.push({ label: "Images", value: "Embedded" });
   } else if (preflight.images.linkStatus === "missing_links_detected") {
     rows.push({ label: "Images", value: "Missing linked artwork detected" });
-  }
-
-  if (
-    features.showCutPathOnProof &&
-    features.confirmedCutPath &&
-    !features.cutPathOverlayAvailable
-  ) {
+  } else if (preflight.images.count > 0) {
     rows.push({
-      label: "Cut path preview",
-      value: `Cut path confirmed: ${features.confirmedCutPath.name}. Visual overlay unavailable.`,
+      label: "Images",
+      value: `${preflight.images.count} embedded image${preflight.images.count === 1 ? "" : "s"}`,
     });
   }
 

@@ -493,6 +493,42 @@ function estimateSpecificationRowsHeight(
   return height;
 }
 
+export function estimateSpecificationSectionCardHeight(
+  rows: Array<{ label: string; value: string }>,
+  width: number,
+  fonts: ProofPdfFonts
+) {
+  const padding = 12;
+  const titleBlock = 22;
+  const rowsHeight = estimateSpecificationRowsHeight(rows, width - padding * 2, fonts);
+  return padding + titleBlock + rowsHeight + padding + 12;
+}
+
+function estimatePreflightChecksHeight(
+  checks: PreflightCheck[],
+  width: number,
+  fonts: ProofPdfFonts
+) {
+  let checksHeight = 0;
+
+  for (const check of checks) {
+    const messageLines = estimateWrappedLineCount(check.message, width - 24, fonts.regular, 8);
+    checksHeight += 34 + messageLines * 10 + 8;
+  }
+
+  return checksHeight;
+}
+
+export function estimatePreflightSectionCardHeight(
+  checks: PreflightCheck[],
+  width: number,
+  fonts: ProofPdfFonts
+) {
+  const padding = 12;
+  const checksHeight = estimatePreflightChecksHeight(checks, width - padding * 2, fonts);
+  return padding + 22 + checksHeight + padding + 12;
+}
+
 export function drawSpecificationSectionCard(
   page: PDFPage,
   fonts: ProofPdfFonts,
