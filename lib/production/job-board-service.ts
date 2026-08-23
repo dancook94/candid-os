@@ -218,15 +218,23 @@ export async function fetchJobProductionBoard(
       };
       const coverage = proofContext?.coverage ?? {
         proofRequired: true,
+        proofRequiredItemIds: new Set<string>(),
+        satisfiedItemIds: new Set<string>(),
+        pendingDecisionItemIds: new Set<string>(),
         coveredItemIds: new Set<string>(),
         hasWholeJobApprovedCoverage: false,
+        requiredCount: 0,
+        satisfiedCount: 0,
+        pendingDecisionCount: 0,
       };
 
       const readiness = calculateProductionReadiness(items as never[], {
         hasOverride: Boolean(job.ready_to_print_override_at),
         proofCoverage: coverage,
         proofStatus: proofState.status,
-        proofStatusLabel: proofState.label,
+        proofStatusLabel: proofContext?.boardLabel ?? proofState.label,
+        proofs: proofContext?.proofs ?? [],
+        proofLinks: proofContext?.proofLinks ?? [],
       });
 
       const rippedCount = items.filter(
@@ -282,7 +290,7 @@ export async function fetchJobProductionBoard(
         assigned_staff_name: assignedItem?.assigned_to_profile_id
           ? profileNameById.get(assignedItem.assigned_to_profile_id as string) ?? null
           : null,
-        proof_status_label: proofState.label,
+        proof_status_label: proofContext?.boardLabel ?? proofState.label,
         proof_status: proofState.status,
         proof_status_badge: mapCustomerProofStatusToBadge(proofState.status),
         readiness_unresolved_details: readiness.unresolvedDetails ?? [],

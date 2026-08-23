@@ -14,6 +14,9 @@ export type ProofSelectableManifestItem = {
   quantity: number | null;
   finishedSize: string | null;
   materialSpec: string | null;
+  proofRequirement: string | null;
+  proofRequirementLabel: string;
+  isProofRequired: boolean;
 };
 
 export function mapManifestItemToProofSelectable(
@@ -28,6 +31,18 @@ export function mapManifestItemToProofSelectable(
     (value) => Boolean(value?.trim())
   );
 
+  const proofRequirement = item.proof_requirement ?? null;
+  const proofRequirementLabel =
+    proofRequirement === "required"
+      ? "Required proof"
+      : proofRequirement === "not_required"
+        ? "No proof required"
+        : proofRequirement === "not_applicable"
+          ? "Not applicable"
+          : proofRequirement === "pending"
+            ? "Awaiting decision"
+            : "Proof optional";
+
   return {
     id: item.id,
     itemReference: item.item_reference,
@@ -36,11 +51,17 @@ export function mapManifestItemToProofSelectable(
     quantity: item.quantity,
     finishedSize,
     materialSpec: materialParts.length ? materialParts.join(" · ") : null,
+    proofRequirement,
+    proofRequirementLabel,
+    isProofRequired: proofRequirement === "required",
   };
 }
 
 function filterSelectableManifestItems(items: ManifestItemRecord[]) {
-  return items.filter((item) => !item.deleted_at && !item.combined_into_item_id);
+  return items
+    .filter((item) => !item.deleted_at && !item.combined_into_item_id)
+    .filter((item) => item.production_requirement_status === "required")
+    .filter((item) => item.proof_requirement !== "not_applicable");
 }
 
 /** Loads production manifest items for proof linking, reconciling from quote when empty. */

@@ -1,23 +1,43 @@
 import { isActiveRequiredItem } from "@/lib/manifest/readiness";
+import {
+  buildManifestItemProofCoverage,
+  findUncoveredProofRequiredItemReferences,
+  isManifestItemProofApproved,
+  type ManifestItemProofCoverage,
+} from "@/lib/manifest/proof-requirement";
 import type { ManifestItemRecord } from "@/lib/manifest/types";
+import type { ProofRecordForItemCoverage } from "@/lib/manifest/proof-requirement";
 
-export type ProofCoverageContext = {
-  proofRequired: boolean;
-  coveredItemIds: Set<string>;
-  /** Approved proof exists with no explicit manifest links — covers all active items. */
-  hasWholeJobApprovedCoverage: boolean;
-};
+export type ProofCoverageContext = ManifestItemProofCoverage;
 
 export function buildProofCoverageContext(
   proofRequired: boolean,
   approvedProofIds: string[],
-  links: Array<{ proof_id: string; production_item_id: string }>
+  links: Array<{ proof_id: string; production_item_id: string }>,
+  options?: {
+    manifestItems?: ManifestItemRecord[];
+    proofs?: ProofRecordForItemCoverage[];
+  }
 ): ProofCoverageContext {
+  if (options?.manifestItems?.length) {
+    return buildManifestItemProofCoverage(
+      options.manifestItems,
+      options.proofs ?? [],
+      links
+    );
+  }
+
   if (!proofRequired) {
     return {
       proofRequired: false,
+      proofRequiredItemIds: new Set(),
+      satisfiedItemIds: new Set(),
+      pendingDecisionItemIds: new Set(),
       coveredItemIds: new Set(),
       hasWholeJobApprovedCoverage: true,
+      requiredCount: 0,
+      satisfiedCount: 0,
+      pendingDecisionCount: 0,
     };
   }
 
@@ -34,16 +54,35 @@ export function buildProofCoverageContext(
     approvedProofIds.length > 0 && coveredItemIds.size === 0;
 
   return {
-    proofRequired,
+    proofRequired: true,
+    proofRequiredItemIds: coveredItemIds,
+    satisfiedItemIds: coveredItemIds,
+    pendingDecisionItemIds: new Set(),
     coveredItemIds,
     hasWholeJobApprovedCoverage,
+    requiredCount: coveredItemIds.size,
+    satisfiedCount: coveredItemIds.size,
+    pendingDecisionCount: 0,
   };
 }
 
 export function isManifestItemProofSatisfied(
-  itemId: string,
-  coverage: ProofCoverageContext
+  item: Pick<
+    ManifestItemRecord,
+    | "id"
+    | "proof_requirement"
+    | "deleted_at"
+    | "combined_into_item_id"
+    | "production_requirement_status"
+  >,
+  coverage: ProofCoverageContext,
+  proofs: ProofRecordForItemCoverage[] = [],
+  links: Array<{ proof_id: string; production_item_id: string }> = []
 ) {
+  if (proofs.length > 0 || item.proof_requirement) {
+    return isManifestItemProofApproved(item, proofs, links);
+  }
+
   if (!coverage.proofRequired) {
     return true;
   }
@@ -52,13 +91,17 @@ export function isManifestItemProofSatisfied(
     return true;
   }
 
-  return coverage.coveredItemIds.has(itemId);
+  return coverage.coveredItemIds.has(item.id);
 }
 
 export function findUncoveredRequiredItemReferences(
   manifestItems: ManifestItemRecord[],
   coverage: ProofCoverageContext
 ) {
+  if (coverage.proofRequiredItemIds.size > 0 || coverage.pendingDecisionCount > 0) {
+    return findUncoveredProofRequiredItemReferences(manifestItems, coverage);
+  }
+
   if (!coverage.proofRequired || coverage.hasWholeJobApprovedCoverage) {
     return [];
   }

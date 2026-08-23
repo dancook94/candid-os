@@ -98,7 +98,10 @@ export default async function AdminJobDetailPage({
     : {
         items: manifestResult.items
           .filter((item) => !item.deleted_at && !item.combined_into_item_id)
-          .map(mapManifestItemToProofSelectable),
+          .filter((item) => item.production_requirement_status === "required")
+          .filter((item) => item.proof_requirement !== "not_applicable")
+          .map(mapManifestItemToProofSelectable)
+          .sort((left, right) => Number(right.isProofRequired) - Number(left.isProofRequired)),
         schemaMissing: false,
       };
 
@@ -230,6 +233,10 @@ export default async function AdminJobDetailPage({
               jobId={detail.job.id}
               items={manifestResult.items}
               readiness={readiness}
+              proofRequirementsConfirmed={Boolean(
+                (detail.job as { proof_requirements_confirmed_at?: string | null })
+                  .proof_requirements_confirmed_at
+              )}
               schemaMissing={manifestResult.schemaMissing}
               manifestMigrationMissing={manifestResult.manifestMigrationMissing}
             />

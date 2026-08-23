@@ -1,4 +1,12 @@
 import type { ProductionRequirementStatus } from "@/lib/manifest/constants";
+import {
+  getManifestItemProofStatus,
+  isItemProofRequired,
+  isManifestItemProofApproved,
+  MANIFEST_ITEM_PROOF_STATUS_LABELS,
+  type ManifestItemProofStatus,
+  type ProofRecordForItemCoverage,
+} from "@/lib/manifest/proof-requirement";
 import type { ManifestItemRecord } from "@/lib/manifest/types";
 import type { CustomerProofStatus } from "@/lib/proofs/customer-state";
 import {
@@ -16,6 +24,9 @@ export type ProductionReadinessSummary = {
   proofStatusLabel?: string;
   unresolvedRequirements?: string[];
   unresolvedDetails?: string[];
+  proofRequiredItemCount?: number;
+  proofSatisfiedItemCount?: number;
+  proofPendingDecisionCount?: number;
 };
 
 const SATISFIED_REQUIREMENT_STATUSES: ProductionRequirementStatus[] = [
@@ -75,6 +86,10 @@ const PROOF_BLOCKER_LABELS: Record<CustomerProofStatus, string> = {
   approved: "proof approved",
 };
 
+function mapItemProofStatusToBlocker(status: ManifestItemProofStatus) {
+  return MANIFEST_ITEM_PROOF_STATUS_LABELS[status].toLowerCase();
+}
+
 export function getManifestItemProductionBlockers(
   item: Pick<
     ManifestItemRecord,
@@ -82,13 +97,16 @@ export function getManifestItemProductionBlockers(
     | "item_reference"
     | "item_name"
     | "production_requirement_status"
+    | "proof_requirement"
     | "requires_printfactory"
     | "printfactory_satisfied"
     | "deleted_at"
     | "combined_into_item_id"
   >,
   coverage: ProofCoverageContext,
-  proofStatus: CustomerProofStatus = "preparing"
+  proofStatus: CustomerProofStatus = "preparing",
+  proofs: ProofRecordForItemCoverage[] = [],
+  links: Array<{ proof_id: string; production_item_id: string }> = []
 ) {
   if (!isActiveRequiredItem(item)) {
     return [];
@@ -100,7 +118,12 @@ export function getManifestItemProductionBlockers(
 
   const blockers: string[] = [];
 
-  if (!isManifestItemProofSatisfied(item.id, coverage)) {
+  if (proofs.length > 0 || item.proof_requirement) {
+    const itemProofStatus = getManifestItemProofStatus(item, proofs, links);
+    if (!isManifestItemProofApproved(item, proofs, links)) {
+      blockers.push(mapItemProofStatusToBlocker(itemProofStatus));
+    }
+  } else if (!isManifestItemProofSatisfied(item, coverage)) {
     blockers.push(PROOF_BLOCKER_LABELS[proofStatus] ?? "awaiting proof");
   }
 
@@ -116,12 +139,15 @@ export function isManifestItemProductionReady(
     ManifestItemRecord,
     | "id"
     | "production_requirement_status"
+    | "proof_requirement"
     | "requires_printfactory"
     | "printfactory_satisfied"
     | "deleted_at"
     | "combined_into_item_id"
   >,
-  coverage: ProofCoverageContext
+  coverage: ProofCoverageContext,
+  proofs: ProofRecordForItemCoverage[] = [],
+  links: Array<{ proof_id: string; production_item_id: string }> = []
 ) {
   if (isRequirementSatisfied(item)) {
     return true;
@@ -131,7 +157,10 @@ export function isManifestItemProductionReady(
     return true;
   }
 
-  const proofOk = isManifestItemProofSatisfied(item.id, coverage);
+  const proofOk =
+    proofs.length > 0 || item.proof_requirement
+      ? isManifestItemProofApproved(item, proofs, links)
+      : isManifestItemProofSatisfied(item, coverage);
   const printFactoryOk = !item.requires_printfactory || item.printfactory_satisfied;
 
   return proofOk && printFactoryOk;
@@ -145,12 +174,19 @@ export function calculateProductionReadiness(
     proofStatusLabel?: string;
     proofCoverage?: ProofCoverageContext;
     proofStatus?: CustomerProofStatus;
+    proofs?: ProofRecordForItemCoverage[];
+    proofLinks?: Array<{ proof_id: string; production_item_id: string }>;
   } = {}
 ): ProductionReadinessSummary {
   const activeRequired = items.filter(isActiveRequiredItem);
   const satisfied = options.proofCoverage
     ? activeRequired.filter((item) =>
-        isManifestItemProductionReady(item, options.proofCoverage!)
+        isManifestItemProductionReady(
+          item,
+          options.proofCoverage!,
+          options.proofs ?? [],
+          options.proofLinks ?? []
+        )
       )
     : activeRequired.filter(isRequirementSatisfied);
   const activeRequiredCount = activeRequired.length;
@@ -161,14 +197,21 @@ export function calculateProductionReadiness(
     satisfiedCount === activeRequiredCount;
 
   const proofGateSatisfied = options.proofCoverage
-    ? true
+    ? (options.proofCoverage.pendingDecisionCount ?? 0) === 0 &&
+      (options.proofCoverage.requiredCount === 0 ||
+        options.proofCoverage.satisfiedCount === options.proofCoverage.requiredCount)
     : options.proofGateSatisfied !== false;
 
   const isReady = productionReady && proofGateSatisfied;
 
   const unresolvedItems = activeRequired.filter((item) =>
     options.proofCoverage
-      ? !isManifestItemProductionReady(item, options.proofCoverage)
+      ? !isManifestItemProductionReady(
+          item,
+          options.proofCoverage,
+          options.proofs ?? [],
+          options.proofLinks ?? []
+        )
       : !isRequirementSatisfied(item)
   );
 
@@ -182,7 +225,9 @@ export function calculateProductionReadiness(
       ? getManifestItemProductionBlockers(
           item,
           options.proofCoverage,
-          options.proofStatus
+          options.proofStatus,
+          options.proofs ?? [],
+          options.proofLinks ?? []
         )
       : ["production requirement outstanding"];
 
@@ -208,5 +253,8 @@ export function calculateProductionReadiness(
     unresolvedRequirements,
     unresolvedDetails,
     label,
+    proofRequiredItemCount: options.proofCoverage?.requiredCount,
+    proofSatisfiedItemCount: options.proofCoverage?.satisfiedCount,
+    proofPendingDecisionCount: options.proofCoverage?.pendingDecisionCount,
   };
 }

@@ -9,6 +9,7 @@ import {
   reclassifyManifestItem,
   updateManifestItem,
 } from "@/lib/manifest/service";
+import { updateManifestItemProofRequirement } from "@/lib/manifest/proof-requirement-service";
 import type { ManifestItemFormInput } from "@/lib/manifest/types";
 import type { ManifestSourceType } from "@/lib/manifest/constants";
 import { ProductionError } from "@/lib/production/errors";
@@ -159,8 +160,28 @@ export async function PATCH(request: Request) {
       action === "combine" ||
       action === "archive" ||
       action === "requires_printfactory" ||
-      action === "no_printfactory"
+      action === "no_printfactory" ||
+      action === "set_proof_requirement"
     ) {
+      if (action === "set_proof_requirement") {
+        const proofRequirement = body.proofRequirement ? String(body.proofRequirement) : "";
+        if (!proofRequirement) {
+          return NextResponse.json(
+            { error: "proofRequirement is required." },
+            { status: 400 }
+          );
+        }
+
+        const item = await updateManifestItemProofRequirement(adminClient, {
+          itemId,
+          proofRequirement,
+          actorProfileId: auth.userId,
+        });
+
+        revalidatePath(`/admin/jobs/${item.job_id}`);
+        return NextResponse.json({ item });
+      }
+
       const item = await reclassifyManifestItem(
         adminClient,
         itemId,

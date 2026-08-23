@@ -174,21 +174,30 @@ export async function refreshJobProductionReadiness(
 ) {
   const job = await loadJob(adminClient, jobId);
   const { items } = await loadManifestItemsForJob(adminClient, jobId);
-  const { proofState, coverage } = await loadJobProofCoverageContext(adminClient, jobId);
-
-  const proofGate = {
-    proofRequired: coverage.proofRequired,
-    proofApproved: proofState.status === "approved",
-    proofBlocked: proofState.status !== "approved" && coverage.proofRequired,
-    proofStatusLabel: proofState.label,
-  };
+  const { proofState, coverage, proofs, proofLinks } = await loadJobProofCoverageContext(
+    adminClient,
+    jobId
+  );
 
   const readiness = calculateProductionReadiness(items, {
     hasOverride: Boolean(job.ready_to_print_override_at),
     proofCoverage: coverage,
     proofStatus: proofState.status,
     proofStatusLabel: proofState.label,
+    proofs,
+    proofLinks,
   });
+
+  const proofGate = {
+    proofRequired: coverage.proofRequired,
+    proofApproved:
+      coverage.requiredCount === 0 ||
+      coverage.satisfiedCount === coverage.requiredCount,
+    proofBlocked:
+      coverage.pendingDecisionCount > 0 ||
+      (coverage.requiredCount > 0 && coverage.satisfiedCount < coverage.requiredCount),
+    proofStatusLabel: proofState.label,
+  };
 
   if (!readiness.isReady) {
     return { readiness, movedToReadyToPrint: false, proofGate };

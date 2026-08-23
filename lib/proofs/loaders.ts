@@ -1,6 +1,8 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { ManifestItemRecord } from "@/lib/manifest/types";
+import { loadManifestItemsForProofContext } from "@/lib/manifest/proof-requirement-service";
 import {
   deriveCustomerProofState,
   isJobProofRequired,
@@ -12,15 +14,21 @@ import {
   buildProofCoverageContext,
   type ProofCoverageContext,
 } from "@/lib/proofs/coverage";
+import { deriveJobProofSummary } from "@/lib/proofs/job-proof-summary";
 import { loadJobProofRequirement, loadProofsForJob } from "@/lib/proofs/service";
+import type { ProofRecordForItemCoverage } from "@/lib/manifest/proof-requirement";
 
 export type ProductionBoardProofContext = {
   proofState: CustomerProofState;
   proofRequired: boolean;
   coverage: ProofCoverageContext;
+  boardLabel: string;
+  manifestItems: ManifestItemRecord[];
+  proofs: ProofRecordForItemCoverage[];
+  proofLinks: Array<{ proof_id: string; production_item_id: string }>;
 };
 
-async function loadProofManifestLinksByProofId(
+async function loadAllProofManifestLinks(
   adminClient: SupabaseClient,
   proofIds: string[]
 ) {
@@ -40,6 +48,76 @@ async function loadProofManifestLinksByProofId(
   return (data ?? []) as Array<{ proof_id: string; production_item_id: string }>;
 }
 
+function mapProofRows(proofs: Array<Record<string, unknown>>) {
+  return proofs.map((proof) => ({
+    id: proof.id as string,
+    job_id: proof.job_id as string,
+    proof_lineage_id: proof.proof_lineage_id as string,
+    proof_reference: proof.proof_reference as string,
+    version_number: proof.version_number as number,
+    status: proof.status as string,
+    title: proof.title as string,
+    sent_at: (proof.sent_at as string | null) ?? null,
+    changes_requested_comment: (proof.changes_requested_comment as string | null) ?? null,
+    approved_at: (proof.approved_at as string | null) ?? null,
+    customer_message: (proof.customer_message as string | null) ?? null,
+    created_at: proof.created_at as string,
+  }));
+}
+
+async function buildProofContextForJob(
+  adminClient: SupabaseClient,
+  job: {
+    id: string;
+    job_reference: string;
+    project_name: string;
+    proof_required?: boolean | null;
+    proof_requirements_confirmed_at?: string | null;
+  },
+  manifestItems: ManifestItemRecord[],
+  proofs: ProofRecordForItemCoverage[],
+  links: Array<{ proof_id: string; production_item_id: string }>
+): Promise<ProductionBoardProofContext> {
+  const approvedProofIds = proofs
+    .filter((proof) => proof.status === "approved")
+    .map((proof) => proof.id);
+
+  const summary = deriveJobProofSummary({
+    manifestItems,
+    proofs,
+    links,
+    jobId: job.id,
+    jobReference: job.job_reference,
+    projectName: job.project_name,
+    proofRequirementsConfirmedAt: job.proof_requirements_confirmed_at,
+    legacyProofRequired: job.proof_required,
+  });
+
+  const proofState = deriveCustomerProofState({
+    proofRequired: summary.proofRequired,
+    proofs: proofs as CustomerProofSummary[],
+    jobId: job.id,
+    jobReference: job.job_reference,
+    projectName: job.project_name,
+  });
+
+  proofState.label = summary.label;
+  proofState.status = summary.status;
+
+  return {
+    proofRequired: summary.proofRequired,
+    proofState,
+    boardLabel: summary.boardLabel,
+    manifestItems,
+    proofs,
+    proofLinks: links,
+    coverage: buildProofCoverageContext(summary.proofRequired, approvedProofIds, links, {
+      manifestItems,
+      proofs,
+    }),
+  };
+}
+
 export async function loadProductionBoardProofContextsByJobId(
   adminClient: SupabaseClient,
   jobs: Array<{
@@ -47,6 +125,7 @@ export async function loadProductionBoardProofContextsByJobId(
     job_reference: string;
     project_name: string;
     proof_required?: boolean | null;
+    proof_requirements_confirmed_at?: string | null;
   }>
 ) {
   const contexts = new Map<string, ProductionBoardProofContext>();
@@ -57,13 +136,23 @@ export async function loadProductionBoardProofContextsByJobId(
 
   const jobIds = jobs.map((job) => job.id);
 
-  const { data: proofs, error } = await adminClient
-    .from("job_proofs")
-    .select(
-      "id, job_id, proof_lineage_id, proof_reference, version_number, status, title, sent_at, changes_requested_comment, approved_at, customer_message, created_at"
-    )
-    .in("job_id", jobIds)
-    .order("version_number", { ascending: false });
+  const [{ data: proofs, error }, manifestByJob] = await Promise.all([
+    adminClient
+      .from("job_proofs")
+      .select(
+        "id, job_id, proof_lineage_id, proof_reference, version_number, status, title, sent_at, changes_requested_comment, approved_at, customer_message, created_at"
+      )
+      .in("job_id", jobIds)
+      .order("version_number", { ascending: false }),
+    Promise.all(
+      jobIds.map(async (jobId) => {
+        const result = await loadManifestItemsForProofContext(adminClient, jobId);
+        return [jobId, result.items] as const;
+      })
+    ),
+  ]);
+
+  const manifestItemsByJobId = new Map(manifestByJob);
 
   if (error) {
     for (const job of jobs) {
@@ -78,53 +167,37 @@ export async function loadProductionBoardProofContextsByJobId(
           projectName: job.project_name,
         }),
         coverage: buildProofCoverageContext(proofRequired, [], []),
+        boardLabel: proofRequired ? "Proof being prepared" : "Proof: Not required",
+        manifestItems: manifestItemsByJobId.get(job.id) ?? [],
+        proofs: [],
+        proofLinks: [],
       });
     }
 
     return contexts;
   }
 
-  const proofsByJobId = new Map<string, CustomerProofSummary[]>();
-  const approvedProofIds: string[] = [];
+  const proofRows = mapProofRows(proofs ?? []);
+  const proofIds = proofRows.map((proof) => proof.id);
+  const links = await loadAllProofManifestLinks(adminClient, proofIds);
 
-  for (const proof of proofs ?? []) {
-    const jobId = proof.job_id as string;
-    const existing = proofsByJobId.get(jobId) ?? [];
-    existing.push(proof as CustomerProofSummary);
-    proofsByJobId.set(jobId, existing);
-
-    if (proof.status === "approved") {
-      approvedProofIds.push(proof.id as string);
-    }
+  const proofsByJobId = new Map<string, ProofRecordForItemCoverage[]>();
+  for (const proof of proofRows) {
+    const existing = proofsByJobId.get(proof.job_id) ?? [];
+    existing.push(proof);
+    proofsByJobId.set(proof.job_id, existing);
   }
 
-  const links = await loadProofManifestLinksByProofId(adminClient, approvedProofIds);
-  const linksByProofId = links;
-
   for (const job of jobs) {
-    const proofRequired = isJobProofRequired(job);
     const jobProofs = proofsByJobId.get(job.id) ?? [];
-    const jobApprovedProofIds = jobProofs
-      .filter((proof) => proof.status === "approved")
-      .map((proof) => proof.id);
+    const jobProofIds = new Set(jobProofs.map((proof) => proof.id));
+    const jobLinks = links.filter((link) => jobProofIds.has(link.proof_id));
+    const manifestItems = manifestItemsByJobId.get(job.id) ?? [];
 
-    const proofState = deriveCustomerProofState({
-      proofRequired,
-      proofs: jobProofs,
-      jobId: job.id,
-      jobReference: job.job_reference,
-      projectName: job.project_name,
-    });
-
-    contexts.set(job.id, {
-      proofRequired,
-      proofState,
-      coverage: buildProofCoverageContext(
-        proofRequired,
-        jobApprovedProofIds,
-        linksByProofId.filter((link) => jobApprovedProofIds.includes(link.proof_id))
-      ),
-    });
+    contexts.set(
+      job.id,
+      await buildProofContextForJob(adminClient, job, manifestItems, jobProofs, jobLinks)
+    );
   }
 
   return contexts;
@@ -136,11 +209,10 @@ export async function loadJobProofCoverageContext(
 ) {
   const { data: jobRow } = await adminClient
     .from("jobs")
-    .select("job_reference, project_name, proof_required")
+    .select("job_reference, project_name, proof_required, proof_requirements_confirmed_at")
     .eq("id", jobId)
     .maybeSingle();
 
-  const proofRequired = isJobProofRequired(jobRow ?? {});
   const jobReference = (jobRow?.job_reference as string) ?? "";
   const projectName = (jobRow?.project_name as string) ?? "";
 
@@ -152,23 +224,41 @@ export async function loadJobProofCoverageContext(
     .eq("job_id", jobId)
     .order("version_number", { ascending: false });
 
-  const jobProofs = (proofs ?? []) as CustomerProofSummary[];
-  const approvedProofIds = jobProofs
-    .filter((proof) => proof.status === "approved")
-    .map((proof) => proof.id);
+  const proofRows = mapProofRows(proofs ?? []);
+  const links = await loadAllProofManifestLinks(
+    adminClient,
+    proofRows.map((proof) => proof.id)
+  );
+  const { items: manifestItems } = await loadManifestItemsForProofContext(
+    adminClient,
+    jobId
+  );
 
-  const links = await loadProofManifestLinksByProofId(adminClient, approvedProofIds);
+  const context = await buildProofContextForJob(
+    adminClient,
+    {
+      id: jobId,
+      job_reference: jobReference,
+      project_name: projectName,
+      proof_required: jobRow?.proof_required as boolean | null | undefined,
+      proof_requirements_confirmed_at: jobRow?.proof_requirements_confirmed_at as
+        | string
+        | null
+        | undefined,
+    },
+    manifestItems,
+    proofRows,
+    links
+  );
 
   return {
-    proofRequired,
-    proofState: deriveCustomerProofState({
-      proofRequired,
-      proofs: jobProofs,
-      jobId,
-      jobReference,
-      projectName,
-    }),
-    coverage: buildProofCoverageContext(proofRequired, approvedProofIds, links),
+    proofRequired: context.proofRequired,
+    proofState: context.proofState,
+    boardLabel: context.boardLabel,
+    coverage: context.coverage,
+    manifestItems: context.manifestItems,
+    proofs: context.proofs,
+    proofLinks: context.proofLinks,
   };
 }
 
@@ -234,14 +324,15 @@ export async function loadCustomerJobProofingContext(jobId: string) {
   const adminClient = createAdminClient();
 
   try {
-    const [{ data: job }, requirement, proofsResult] = await Promise.all([
+    const [{ data: job }, requirement, proofsResult, coverageContext] = await Promise.all([
       adminClient
         .from("jobs")
-        .select("id, job_reference, project_name")
+        .select("id, job_reference, project_name, proof_requirements_confirmed_at")
         .eq("id", jobId)
         .maybeSingle(),
       loadJobProofRequirement(adminClient, jobId),
       loadProofsForJob(adminClient, jobId, { customerSafe: true }),
+      loadJobProofCoverageContext(adminClient, jobId),
     ]);
 
     const customerProofs = proofsResult.proofs.filter(
@@ -252,17 +343,14 @@ export async function loadCustomerJobProofingContext(jobId: string) {
         proof.status !== "cancelled"
     );
 
-    const proofState = deriveCustomerProofState({
-      proofRequired: requirement.proofRequired,
-      proofs: customerProofs,
-      jobId,
-      jobReference: (job?.job_reference as string) ?? "",
-      projectName: (job?.project_name as string) ?? "",
-    });
+    const proofState = {
+      ...coverageContext.proofState,
+      label: coverageContext.proofState.label,
+    };
 
     return {
       schemaMissing: requirement.schemaMissing || proofsResult.schemaMissing,
-      proofRequired: requirement.proofRequired,
+      proofRequired: coverageContext.proofRequired,
       workflowStatus: requirement.workflowStatus,
       proofs: customerProofs,
       proofState,
@@ -291,6 +379,7 @@ export async function loadCustomerProofStatesByJobId(
     job_reference: string;
     project_name: string;
     proof_required?: boolean | null;
+    proof_requirements_confirmed_at?: string | null;
   }>
 ) {
   const states = new Map<string, CustomerProofState>();
@@ -299,46 +388,17 @@ export async function loadCustomerProofStatesByJobId(
     return states;
   }
 
-  const jobIds = jobs.map((job) => job.id);
-
-  const { data: proofs, error } = await adminClient
-    .from("job_proofs")
-    .select(
-      "id, job_id, proof_lineage_id, proof_reference, version_number, status, title, sent_at, changes_requested_comment, approved_at, customer_message, created_at"
-    )
-    .in("job_id", jobIds)
-    .order("version_number", { ascending: false });
-
-  if (error) {
-    return states;
-  }
-
-  const customerVisibleProofs = (proofs ?? []).filter(
-    (proof) =>
-      !["draft", "internal_review", "ready_to_send", "cancelled"].includes(
-        proof.status as string
-      )
-  );
-  const proofsByJobId = new Map<string, typeof customerVisibleProofs>();
-  for (const proof of customerVisibleProofs) {
-    const existing = proofsByJobId.get(proof.job_id as string) ?? [];
-    existing.push(proof);
-    proofsByJobId.set(proof.job_id as string, existing);
-  }
+  const contexts = await loadProductionBoardProofContextsByJobId(adminClient, jobs);
 
   for (const job of jobs) {
-    const jobProofs = (proofsByJobId.get(job.id) ?? []) as CustomerProofSummary[];
-
-    states.set(
-      job.id,
-      deriveCustomerProofState({
-        proofRequired: isJobProofRequired(job),
-        proofs: jobProofs,
-        jobId: job.id,
-        jobReference: job.job_reference,
-        projectName: job.project_name,
-      })
-    );
+    const context = contexts.get(job.id);
+    states.set(job.id, context?.proofState ?? deriveCustomerProofState({
+      proofRequired: isJobProofRequired(job),
+      proofs: [],
+      jobId: job.id,
+      jobReference: job.job_reference,
+      projectName: job.project_name,
+    }));
   }
 
   return states;
@@ -349,7 +409,7 @@ export async function loadCustomerPendingProofActions(companyId: string) {
 
   const { data: jobs, error } = await adminClient
     .from("jobs")
-    .select("id, job_reference, project_name, proof_required")
+    .select("id, job_reference, project_name, proof_required, proof_requirements_confirmed_at")
     .eq("company_id", companyId)
     .eq("customer_visible", true)
     .eq("proof_required", true);

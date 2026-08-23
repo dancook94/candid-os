@@ -778,7 +778,9 @@ export function AdminJobProofsPanel({
               </p>
             ) : (
               <div className="grid gap-3 md:grid-cols-2">
-                {selectableItems.map((item) => {
+                {[...selectableItems]
+                  .sort((left, right) => Number(right.isProofRequired) - Number(left.isProofRequired))
+                  .map((item) => {
                   const selected = selectedItemIds.includes(item.id);
                   return (
                     <label
@@ -803,10 +805,21 @@ export function AdminJobProofsPanel({
                           }}
                         />
                         <div className="min-w-0 space-y-1 text-sm">
-                          <p className="font-medium text-neutral-950">
-                            {item.itemReference ? `${item.itemReference} · ` : ""}
-                            {item.itemName}
-                          </p>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-medium text-neutral-950">
+                              {item.itemReference ? `${item.itemReference} · ` : ""}
+                              {item.itemName}
+                            </p>
+                            <span
+                              className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
+                                item.isProofRequired
+                                  ? "bg-amber-100 text-amber-900"
+                                  : "bg-muted text-muted-foreground"
+                              }`}
+                            >
+                              {item.proofRequirementLabel}
+                            </span>
+                          </div>
                           {item.description ? (
                             <p className="text-muted-foreground">{item.description}</p>
                           ) : null}

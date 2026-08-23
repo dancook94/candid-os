@@ -10,6 +10,11 @@ import {
 } from "@/lib/manifest/constants";
 import type { ManifestSourceType } from "@/lib/manifest/constants";
 import { calculateProductionReadiness } from "@/lib/manifest/readiness";
+import {
+  defaultProofRequirementForItemName,
+  defaultProofRequirementForNewItem,
+} from "@/lib/manifest/proof-requirement";
+import { syncJobProofRequiredFromManifest } from "@/lib/manifest/proof-requirement-service";
 import { loadJobProofCoverageContext } from "@/lib/proofs/loaders";
 import type {
   CancelManifestItemInput,
@@ -100,6 +105,7 @@ function defaultRequirementForQuoteLine(title: string) {
       production_requirement_status: "not_required" as const,
       requires_printfactory: false,
       billing_status: "billable" as const,
+      proof_requirement: "not_applicable" as const,
     };
   }
 
@@ -107,6 +113,7 @@ function defaultRequirementForQuoteLine(title: string) {
     production_requirement_status: "required" as const,
     requires_printfactory: false,
     billing_status: "billable" as const,
+    proof_requirement: defaultProofRequirementForItemName(title),
   };
 }
 
@@ -345,13 +352,18 @@ export async function getJobProductionReadiness(
 ) {
   const job = await loadJob(adminClient, jobId);
   const { items } = await loadManifestItemsForJob(adminClient, jobId);
-  const { proofState, coverage } = await loadJobProofCoverageContext(adminClient, jobId);
+  const { proofState, coverage, proofs, proofLinks } = await loadJobProofCoverageContext(
+    adminClient,
+    jobId
+  );
 
   return calculateProductionReadiness(items, {
     hasOverride: Boolean(job.ready_to_print_override_at),
     proofCoverage: coverage,
     proofStatus: proofState.status,
     proofStatusLabel: proofState.label,
+    proofs,
+    proofLinks,
   });
 }
 
@@ -375,6 +387,11 @@ export async function addManifestItem(
   );
 
   const productionStatus = input.productionStatus ?? "artwork";
+  const productionRequirementStatus =
+    input.productionRequirementStatus ?? "required";
+  const proofRequirement =
+    input.proofRequirement ??
+    defaultProofRequirementForNewItem(input.itemName.trim(), productionRequirementStatus);
 
   const { data: item, error } = await adminClient
     .from("production_items")
@@ -395,8 +412,8 @@ export async function addManifestItem(
       internal_note: input.internalNote?.trim() || null,
       source_type: sourceType,
       billing_status: billingStatus,
-      production_requirement_status:
-        input.productionRequirementStatus ?? "required",
+      production_requirement_status: productionRequirementStatus,
+      proof_requirement: proofRequirement,
       requires_printfactory: input.requiresPrintfactory ?? false,
       production_status: productionStatus,
       customer_safe_status: deriveCustomerSafeStatus(productionStatus),
@@ -407,6 +424,8 @@ export async function addManifestItem(
   if (error || !item) {
     throw new ProductionError(error?.message ?? "Unable to add manifest item.", 500);
   }
+
+  await syncJobProofRequiredFromManifest(adminClient, jobId);
 
   await logManifestActivity(adminClient, {
     activityType: MANIFEST_ACTIVITY_TYPES.productionItemAdded,
@@ -577,19 +596,23 @@ export async function reclassifyManifestItem(
   switch (action) {
     case "mark_not_required":
       updates.production_requirement_status = "not_required";
+      updates.proof_requirement = "not_applicable";
       break;
     case "mark_external":
       updates.production_requirement_status = "external";
       updates.source_type = "external";
+      updates.proof_requirement = "not_applicable";
       break;
     case "mark_manual_production":
       updates.production_requirement_status = "manual_production";
       updates.printfactory_satisfied = true;
+      updates.proof_requirement = "not_applicable";
       break;
     case "mark_no_charge_reprint":
       updates.source_type = "reprint";
       updates.billing_status = "reprint_no_charge";
       updates.production_requirement_status = "required";
+      updates.proof_requirement = "required";
       break;
     case "combine":
       if (!options?.combineIntoItemId) {
@@ -597,9 +620,11 @@ export async function reclassifyManifestItem(
       }
       updates.production_requirement_status = "combined";
       updates.combined_into_item_id = options.combineIntoItemId;
+      updates.proof_requirement = null;
       break;
     case "archive":
       updates.deleted_at = new Date().toISOString();
+      updates.proof_requirement = null;
       break;
     case "requires_printfactory":
       updates.requires_printfactory = true;
@@ -639,6 +664,8 @@ export async function reclassifyManifestItem(
     actorProfileId,
     metadata: { action, reason: options?.reason ?? null },
   });
+
+  await syncJobProofRequiredFromManifest(adminClient, job.id);
 
   return item as ManifestItemRecord;
 }

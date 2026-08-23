@@ -13,6 +13,13 @@ import {
   MANIFEST_SOURCE_TYPE_LABELS,
   PRODUCTION_REQUIREMENT_STATUS_LABELS,
 } from "@/lib/manifest/constants";
+import {
+  PROOF_REQUIREMENT_LABELS,
+  getManifestItemProofStatus,
+  isProofableManifestItem,
+  MANIFEST_ITEM_PROOF_STATUS_LABELS,
+  type ProofRequirement,
+} from "@/lib/manifest/proof-requirement";
 import type { ProductionReadinessSummary } from "@/lib/manifest/readiness";
 import type { ManifestItemRecord } from "@/lib/manifest/types";
 import { PRODUCTION_STATUS_LABELS } from "@/lib/production/constants";
@@ -22,6 +29,7 @@ type ProductionManifestPanelProps = {
   jobId: string;
   items: ManifestItemRecord[];
   readiness: ProductionReadinessSummary;
+  proofRequirementsConfirmed?: boolean;
   schemaMissing?: boolean;
   manifestMigrationMissing?: boolean;
 };
@@ -88,6 +96,7 @@ export function ProductionManifestPanel({
   jobId,
   items,
   readiness,
+  proofRequirementsConfirmed = true,
   schemaMissing = false,
   manifestMigrationMissing = false,
 }: ProductionManifestPanelProps) {
@@ -192,6 +201,39 @@ export function ProductionManifestPanel({
     }
   }
 
+  async function setProofRequirement(itemId: string, proofRequirement: ProofRequirement) {
+    await runAction(itemId, "set_proof_requirement", { proofRequirement });
+  }
+
+  async function confirmProofRequirements() {
+    setBusy(true);
+    setActionError("");
+
+    try {
+      const response = await fetch(`/api/admin/jobs/${jobId}/proof-requirements/confirm`, {
+        method: "POST",
+      });
+      const result = (await response.json()) as { error?: string };
+
+      if (!response.ok) {
+        throw new Error(result.error ?? "Unable to confirm proof requirements.");
+      }
+
+      setActionMessage("Proof requirements confirmed for all proofable items.");
+      await refreshPage();
+    } catch (error) {
+      setActionError(
+        error instanceof Error ? error.message : "Unable to confirm proof requirements."
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const pendingProofDecisions = items.filter(
+    (item) => item.proof_requirement === "pending" && isProofableManifestItem(item)
+  ).length;
+
   if (schemaMissing) {
     return (
       <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/50 p-4 text-sm text-amber-900">
@@ -233,6 +275,19 @@ export function ProductionManifestPanel({
               <span className="ml-2 text-amber-700">Not ready</span>
             )}
           </p>
+          {readiness.proofRequiredItemCount != null ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              Proof progress: {readiness.proofSatisfiedItemCount ?? 0} of{" "}
+              {readiness.proofRequiredItemCount} required items approved
+            </p>
+          ) : null}
+          {!proofRequirementsConfirmed || pendingProofDecisions > 0 ? (
+            <p className="mt-1 text-sm text-amber-800">
+              {pendingProofDecisions > 0
+                ? `${pendingProofDecisions} proofable item(s) still need a proof requirement decision.`
+                : "Proof requirement selections have not been confirmed for this job."}
+            </p>
+          ) : null}
           {readiness.proofBlocked ? (
             <p className="mt-1 text-sm text-amber-800">
               Ready to Print blocked: {readiness.proofStatusLabel ?? "Proof approval required"}
@@ -276,6 +331,15 @@ export function ProductionManifestPanel({
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={busy || pendingProofDecisions > 0}
+          onClick={() => void confirmProofRequirements()}
+        >
+          All proofable items ready
+        </Button>
         <Button type="button" variant="outline" size="sm" onClick={() => setShowOverride((v) => !v)}>
           Mark ready to print
         </Button>
@@ -323,6 +387,9 @@ export function ProductionManifestPanel({
           {items.map((item) => {
             const isCancelled = item.production_requirement_status === "cancelled";
             const isAdditional = item.source_type !== "quoted";
+
+            const proofRequirement = item.proof_requirement as ProofRequirement | null | undefined;
+            const itemProofStatus = getManifestItemProofStatus(item, [], []);
 
             return (
               <div
@@ -373,6 +440,15 @@ export function ProductionManifestPanel({
                         : "Required"
                       : "Not required"}
                   </p>
+                  <p>
+                    Proof:{" "}
+                    {proofRequirement
+                      ? PROOF_REQUIREMENT_LABELS[proofRequirement]
+                      : "Not set"}
+                  </p>
+                  {proofRequirement === "required" ? (
+                    <p>{MANIFEST_ITEM_PROOF_STATUS_LABELS[itemProofStatus]}</p>
+                  ) : null}
                   {item.material ? <p>Material: {item.material}</p> : null}
                   {item.machine ? <p>Machine: {item.machine}</p> : null}
                   {item.customer_change_reason ? (
@@ -383,6 +459,32 @@ export function ProductionManifestPanel({
                 </div>
 
                 <div className="mt-4 flex flex-wrap gap-2">
+                  {isProofableManifestItem(item) ? (
+                    <>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={proofRequirement === "required" ? "default" : "outline"}
+                        disabled={busy}
+                        onClick={() => void setProofRequirement(item.id, "required")}
+                      >
+                        Require proof
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={proofRequirement === "not_required" ? "default" : "outline"}
+                        disabled={busy}
+                        onClick={() => void setProofRequirement(item.id, "not_required")}
+                      >
+                        No proof required
+                      </Button>
+                    </>
+                  ) : proofRequirement === "not_applicable" ? (
+                    <span className="inline-flex items-center rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
+                      Proof not applicable
+                    </span>
+                  ) : null}
                   <Button type="button" size="sm" variant="outline" onClick={() => { setEditingItem(item); setFormOpen(true); }}>
                     Edit
                   </Button>

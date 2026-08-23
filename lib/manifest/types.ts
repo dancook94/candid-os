@@ -31,6 +31,7 @@ export type ManifestItemRecord = {
   internal_note: string | null;
   production_status: ProductionStatus;
   production_requirement_status: ProductionRequirementStatus;
+  proof_requirement?: string | null;
   billing_status: ManifestBillingStatus;
   source_type: ManifestSourceType;
   customer_change_reason: string | null;
@@ -70,6 +71,7 @@ export type ManifestItemFormInput = {
   widthMm?: number | null;
   heightMm?: number | null;
   productionRequirementStatus?: ProductionRequirementStatus;
+  proofRequirement?: string | null;
   billingStatus?: ManifestBillingStatus;
   sourceType?: ManifestSourceType;
   requiresPrintfactory?: boolean;
