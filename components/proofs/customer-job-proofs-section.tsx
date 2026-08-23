@@ -17,7 +17,7 @@ import {
 } from "@/lib/proofs/customer-state";
 import type { JobProofView } from "@/lib/proofs/types";
 import { getCustomerProofFile } from "@/lib/proofs/proof-files";
-import { getCurrentProofRecord } from "@/lib/proofs/versioning";
+import { getCurrentProofRecord, isLatestActionableProofInLineage } from "@/lib/proofs/versioning";
 
 type CustomerJobProofsSectionProps = {
   jobId: string;
@@ -55,9 +55,6 @@ export function CustomerJobProofsSection({
   const [changeComment, setChangeComment] = useState<Record<string, string>>({});
   const [confirmation, setConfirmation] = useState<Record<string, boolean>>({});
 
-  const latestActionable = proofs.find((proof) =>
-    ["sent", "viewed"].includes(proof.status)
-  );
   const currentProof = getCurrentProofRecord(proofs);
 
   async function markViewed(proofId: string) {
@@ -133,7 +130,7 @@ export function CustomerJobProofsSection({
 
       {proofs.map((proof) => {
         const items = manifestItemsForProofDisplay(proof.manifestItems);
-        const canAction = latestActionable?.id === proof.id;
+        const canAction = isLatestActionableProofInLineage(proof, proofs);
         const isReadOnly =
           proof.status === "superseded" ||
           (["changes_requested", "approved"].includes(proof.status) && !canAction);

@@ -29,7 +29,7 @@ async function loadJobProofRecords(adminClient: SupabaseClient, jobId: string) {
   const { data, error } = await adminClient
     .from("job_proofs")
     .select(
-      "id, job_id, proof_reference, version_number, status, title, sent_at, changes_requested_comment, approved_at, customer_message, created_at"
+      "id, job_id, proof_lineage_id, proof_reference, version_number, status, title, sent_at, changes_requested_comment, approved_at, customer_message, created_at"
     )
     .eq("job_id", jobId)
     .order("version_number", { ascending: false });
@@ -177,41 +177,69 @@ export async function syncJobProofWorkflowStatus(
   adminClient: SupabaseClient,
   jobId: string
 ) {
-  const { data: latestProof, error } = await adminClient
+  const { data: proofs, error } = await adminClient
     .from("job_proofs")
     .select(PROOF_SELECT)
     .eq("job_id", jobId)
     .not("status", "eq", "cancelled")
-    .not("status", "eq", "superseded")
-    .order("version_number", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .not("status", "eq", "superseded");
 
   if (error) {
     return;
   }
 
-  let workflowStatus: ProofWorkflowStatus = "no_proof";
-
-  if (latestProof) {
-    workflowStatus = mapProofStatusToWorkflow(latestProof as JobProofRecord);
-  }
+  const activeProofs = (proofs ?? []) as JobProofRecord[];
+  const primaryProof = pickPrimaryWorkflowProof(activeProofs);
+  const workflowStatus: ProofWorkflowStatus = primaryProof
+    ? mapProofStatusToWorkflow(primaryProof)
+    : "no_proof";
 
   const updates: Record<string, unknown> = {
     proof_workflow_status: workflowStatus,
-    current_proof_id: latestProof?.id ?? null,
+    current_proof_id: primaryProof?.id ?? null,
     updated_at: new Date().toISOString(),
   };
 
-  if (latestProof?.status === "approved") {
-    updates.proof_approved_at = latestProof.approved_at;
-    updates.proof_approved_by_profile_id = latestProof.approved_by_profile_id;
+  if (primaryProof?.status === "approved") {
+    updates.proof_approved_at = primaryProof.approved_at;
+    updates.proof_approved_by_profile_id = primaryProof.approved_by_profile_id;
   } else if (workflowStatus !== "approved") {
     updates.proof_approved_at = null;
     updates.proof_approved_by_profile_id = null;
   }
 
   await adminClient.from("jobs").update(updates).eq("id", jobId);
+}
+
+function pickPrimaryWorkflowProof(proofs: JobProofRecord[]) {
+  if (!proofs.length) {
+    return null;
+  }
+
+  const priority = [
+    "sent",
+    "viewed",
+    "changes_requested",
+    "ready_to_send",
+    "internal_review",
+    "draft",
+    "approved",
+  ] as const;
+
+  for (const status of priority) {
+    const matches = proofs.filter((proof) => proof.status === status);
+    if (matches.length) {
+      return [...matches].sort((left, right) => {
+        if (right.version_number !== left.version_number) {
+          return right.version_number - left.version_number;
+        }
+
+        return right.created_at.localeCompare(left.created_at);
+      })[0];
+    }
+  }
+
+  return proofs[0] ?? null;
 }
 
 function mapProofStatusToWorkflow(proof: JobProofRecord): ProofWorkflowStatus {

@@ -9,7 +9,7 @@ import {
   type ProofFileLocationType,
 } from "@/lib/proofs/constants";
 import { PROOF_UPLOAD_MAX_BYTES_LABEL } from "@/lib/proofs/file-validation";
-import { getSourceArtworkFile } from "@/lib/proofs/proof-files";
+import { getSourceArtworkFile, hasGeneratedCustomerProof } from "@/lib/proofs/proof-files";
 import type { JobProofFileView, JobProofView } from "@/lib/proofs/types";
 
 type DropboxListFile = {
@@ -86,9 +86,10 @@ export function ProofFileAttachmentPanel({
 
   const proofFile = getSourceArtworkFile(proof.files);
   const completeJobFiles = jobFiles.filter((file) => file.upload_status === "complete");
-  const canEditAttachment = ["draft", "internal_review", "ready_to_send"].includes(
-    proof.status
-  );
+  const hasGeneratedCustomerPdf = hasGeneratedCustomerProof(proof.files);
+  const canEditAttachment =
+    ["draft", "internal_review", "ready_to_send"].includes(proof.status) &&
+    !hasGeneratedCustomerPdf;
 
   async function loadDropboxFiles(mode: "working_file" | "proofs_folder") {
     if (!dropboxLinked) {

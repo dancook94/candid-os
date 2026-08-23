@@ -148,7 +148,7 @@ export const PROOF_ACTIVITY_TYPES = {
 } as const;
 
 export const PROOF_SELECT =
-  "id, job_id, company_id, proof_reference, version_number, status, title, artwork_origin, customer_message, internal_note, created_by_profile_id, sent_by_profile_id, sent_at, viewed_at, approved_at, approved_by_profile_id, changes_requested_at, changes_requested_comment, changes_requested_by_profile_id, superseded_at, cancelled_at, internal_review_at, internal_review_by_profile_id, ready_to_send_at, ready_to_send_by_profile_id, created_at, updated_at";
+  "id, job_id, company_id, proof_lineage_id, proof_reference, version_number, status, title, artwork_origin, customer_message, internal_note, created_by_profile_id, sent_by_profile_id, sent_at, viewed_at, approved_at, approved_by_profile_id, changes_requested_at, changes_requested_comment, changes_requested_by_profile_id, superseded_at, cancelled_at, internal_review_at, internal_review_by_profile_id, ready_to_send_at, ready_to_send_by_profile_id, created_at, updated_at";
 
 export const PROOF_FILE_SELECT =
   "id, proof_id, file_role, job_file_id, dropbox_file_id, dropbox_path, dropbox_revision, file_name, mime_type, file_size_bytes, content_hash, preview_dropbox_path, preview_metadata, created_at";

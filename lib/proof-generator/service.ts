@@ -28,7 +28,6 @@ import { revalidateJobPages } from "@/lib/jobs/revalidation";
 import { isPathInProofsFolder } from "@/lib/proofs/dropbox";
 import { buildCustomerProofPdfFileName } from "@/lib/proofs/dropbox";
 import {
-  forkProofForNextGeneration,
   proofHasGeneratedCustomerArtifact,
   uploadProofFileToProofsFolder,
 } from "@/lib/proofs/service";
@@ -358,16 +357,13 @@ export async function generateBrandedPdfForExistingProof(
     manualOverrides?: PreflightManualOverrides;
   }
 ) {
-  let activeProofId = proofId;
-  let proof = await loadMutableProofRecord(adminClient, jobId, proofId);
+  const proof = await loadMutableProofRecord(adminClient, jobId, proofId);
 
   if (await proofHasGeneratedCustomerArtifact(adminClient, proofId)) {
-    proof = await forkProofForNextGeneration(adminClient, {
-      jobId,
-      sourceProofId: proofId,
-      actorProfileId,
-    });
-    activeProofId = proof.id as string;
+    throw new ProofError(
+      "This proof version already has a generated customer PDF. Use Create revised proof to start the next version, then attach artwork and generate again.",
+      409
+    );
   }
 
   const { data: job, error: jobError } = await adminClient
@@ -388,11 +384,11 @@ export async function generateBrandedPdfForExistingProof(
     throw new ProofError("No Dropbox folder is linked to this job yet.", 409);
   }
 
-  const artwork = await loadProofSourceArtwork(adminClient, jobId, activeProofId);
+  const artwork = await loadProofSourceArtwork(adminClient, jobId, proofId);
   const preflightResult = await buildPreflightForSourceArtwork(
     adminClient,
     jobId,
-    activeProofId,
+    proofId,
     artwork
   );
 
@@ -423,11 +419,11 @@ export async function generateBrandedPdfForExistingProof(
     throw new ProofError("Branded proof PDF generation produced an empty file.", 500);
   }
 
-  const productionItemIds = await loadProofProductionItemIds(adminClient, activeProofId);
+  const productionItemIds = await loadProofProductionItemIds(adminClient, proofId);
   const { data: itemLinks } = await adminClient
     .from("job_proof_manifest_items")
     .select("production_item_id, production_items(item_reference)")
-    .eq("proof_id", activeProofId);
+    .eq("proof_id", proofId);
 
   const itemReferences = (itemLinks ?? [])
     .map(
@@ -446,7 +442,7 @@ export async function generateBrandedPdfForExistingProof(
 
   const uploadResult = await uploadProofFileToProofsFolder(adminClient, {
     jobId,
-    proofId: activeProofId,
+    proofId,
     fileName: generatedFileName,
     mimeType: "application/pdf",
     fileBuffer: pdfBuffer.buffer,
@@ -456,7 +452,7 @@ export async function generateBrandedPdfForExistingProof(
   const generatedAt = new Date().toISOString();
 
   await saveProofPreflightRecord(adminClient, {
-    proofId: activeProofId,
+    proofId,
     preflight: preflightResult,
     manualOverrides,
     sourceDropboxPath,
@@ -477,8 +473,7 @@ export async function generateBrandedPdfForExistingProof(
     actorProfileId,
     metadata: {
       job_id: jobId,
-      proof_id: activeProofId,
-      superseded_from_proof_id: activeProofId !== proofId ? proofId : null,
+      proof_id: proofId,
       production_item_ids: productionItemIds,
       overall_status: preflightResult.overallStatus,
       source_dropbox_path: sourceDropboxPath,
@@ -494,8 +489,7 @@ export async function generateBrandedPdfForExistingProof(
   });
 
   return {
-    proofId: activeProofId,
-    supersededProofId: activeProofId !== proofId ? proofId : null,
+    proofId,
     proofReference: proof.proof_reference as string,
     generatedFileName: uploadResult.fileName,
     generatedDropboxPath: uploadResult.dropboxPath,

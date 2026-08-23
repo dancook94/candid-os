@@ -60,7 +60,7 @@ export async function loadProductionBoardProofContextsByJobId(
   const { data: proofs, error } = await adminClient
     .from("job_proofs")
     .select(
-      "id, job_id, proof_reference, version_number, status, title, sent_at, changes_requested_comment, approved_at, customer_message, created_at"
+      "id, job_id, proof_lineage_id, proof_reference, version_number, status, title, sent_at, changes_requested_comment, approved_at, customer_message, created_at"
     )
     .in("job_id", jobIds)
     .order("version_number", { ascending: false });
@@ -147,7 +147,7 @@ export async function loadJobProofCoverageContext(
   const { data: proofs } = await adminClient
     .from("job_proofs")
     .select(
-      "id, job_id, proof_reference, version_number, status, title, sent_at, changes_requested_comment, approved_at, customer_message, created_at"
+      "id, job_id, proof_lineage_id, proof_reference, version_number, status, title, sent_at, changes_requested_comment, approved_at, customer_message, created_at"
     )
     .eq("job_id", jobId)
     .order("version_number", { ascending: false });
@@ -304,7 +304,7 @@ export async function loadCustomerProofStatesByJobId(
   const { data: proofs, error } = await adminClient
     .from("job_proofs")
     .select(
-      "id, job_id, proof_reference, version_number, status, title, sent_at, changes_requested_comment, approved_at, customer_message, created_at"
+      "id, job_id, proof_lineage_id, proof_reference, version_number, status, title, sent_at, changes_requested_comment, approved_at, customer_message, created_at"
     )
     .in("job_id", jobIds)
     .order("version_number", { ascending: false });

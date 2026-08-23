@@ -11,6 +11,7 @@ export type JobProofRecord = {
   id: string;
   job_id: string;
   company_id: string;
+  proof_lineage_id: string;
   proof_reference: string;
   version_number: number;
   status: ProofStatus;

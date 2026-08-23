@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
@@ -32,8 +34,9 @@ import { resolveCustomerProofDownloadFile } from "@/lib/proofs/download-file";
 import {
   buildProofReference,
   getInProgressProof,
-  highestProofVersionForManifestLineage,
   isRevisableProofStatus,
+  manifestItemSetsMatch,
+  proofSupportsRevision,
 } from "@/lib/proofs/versioning";
 import {
   assertProofUploadFile,
@@ -126,14 +129,48 @@ async function loadJobContext(
   return data as JobContext;
 }
 
-export async function nextProofVersionForManifestItems(
+export async function nextProofVersionInLineage(
   adminClient: SupabaseClient,
-  jobId: string,
-  productionItemIds: string[]
+  proofLineageId: string
+) {
+  const { data, error } = await adminClient
+    .from("job_proofs")
+    .select("version_number")
+    .eq("proof_lineage_id", proofLineageId)
+    .order("version_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    throw new ProofError(error.message, 500);
+  }
+
+  return (data?.version_number ?? 0) + 1;
+}
+
+async function loadProofManifestItemIds(
+  adminClient: SupabaseClient,
+  proofId: string
+) {
+  const { data, error } = await adminClient
+    .from("job_proof_manifest_items")
+    .select("production_item_id")
+    .eq("proof_id", proofId);
+
+  if (error) {
+    throw new ProofError(error.message, 500);
+  }
+
+  return (data ?? []).map((link) => link.production_item_id as string);
+}
+
+async function loadJobProofLineageIndex(
+  adminClient: SupabaseClient,
+  jobId: string
 ) {
   const { data: proofs, error } = await adminClient
     .from("job_proofs")
-    .select("id, version_number")
+    .select("id, proof_lineage_id, version_number")
     .eq("job_id", jobId);
 
   if (error) {
@@ -142,7 +179,11 @@ export async function nextProofVersionForManifestItems(
 
   const proofIds = (proofs ?? []).map((proof) => proof.id as string);
   if (!proofIds.length) {
-    return 1;
+    return [] as Array<{
+      proof_lineage_id: string;
+      version_number: number;
+      productionItemIds: string[];
+    }>;
   }
 
   const { data: links, error: linkError } = await adminClient
@@ -162,12 +203,61 @@ export async function nextProofVersionForManifestItems(
     itemsByProofId.set(proofId, items);
   }
 
-  const lineageProofs = (proofs ?? []).map((proof) => ({
-    version_number: proof.version_number as number,
-    productionItemIds: itemsByProofId.get(proof.id as string) ?? [],
-  }));
+  const lineageById = new Map<
+    string,
+    { proof_lineage_id: string; version_number: number; productionItemIds: string[] }
+  >();
 
-  return highestProofVersionForManifestLineage(lineageProofs, productionItemIds) + 1;
+  for (const proof of proofs ?? []) {
+    const proofLineageId = proof.proof_lineage_id as string;
+    if (!lineageById.has(proofLineageId)) {
+      lineageById.set(proofLineageId, {
+        proof_lineage_id: proofLineageId,
+        version_number: proof.version_number as number,
+        productionItemIds: itemsByProofId.get(proof.id as string) ?? [],
+      });
+    } else {
+      const existing = lineageById.get(proofLineageId)!;
+      existing.version_number = Math.max(
+        existing.version_number,
+        proof.version_number as number
+      );
+    }
+  }
+
+  return [...lineageById.values()];
+}
+
+async function findLineageIdForManifestItems(
+  adminClient: SupabaseClient,
+  jobId: string,
+  productionItemIds: string[]
+) {
+  const lineages = await loadJobProofLineageIndex(adminClient, jobId);
+  const match = lineages.find((lineage) =>
+    manifestItemSetsMatch(lineage.productionItemIds, productionItemIds)
+  );
+
+  return match?.proof_lineage_id ?? null;
+}
+
+async function assertNewLineageAvailableForManifestItems(
+  adminClient: SupabaseClient,
+  jobId: string,
+  productionItemIds: string[]
+) {
+  const existingLineageId = await findLineageIdForManifestItems(
+    adminClient,
+    jobId,
+    productionItemIds
+  );
+
+  if (existingLineageId) {
+    throw new ProofError(
+      "A proof already exists for these manifest items. Use Create revised proof to add the next version.",
+      409
+    );
+  }
 }
 
 export async function proofHasGeneratedCustomerArtifact(
@@ -193,146 +283,6 @@ export async function proofHasGeneratedCustomerArtifact(
   }
 
   return Boolean(preflight?.generated_at);
-}
-
-export async function forkProofForNextGeneration(
-  adminClient: SupabaseClient,
-  {
-    jobId,
-    sourceProofId,
-    actorProfileId,
-  }: {
-    jobId: string;
-    sourceProofId: string;
-    actorProfileId: string;
-  }
-) {
-  const job = await loadJobContext(adminClient, jobId);
-  const sourceProof = await loadMutableProof(adminClient, jobId, sourceProofId);
-
-  const { data: manifestLinks, error: linkLoadError } = await adminClient
-    .from("job_proof_manifest_items")
-    .select("production_item_id")
-    .eq("proof_id", sourceProofId);
-
-  if (linkLoadError) {
-    throw new ProofError(linkLoadError.message, 500);
-  }
-
-  const productionItemIds = (manifestLinks ?? []).map(
-    (link) => link.production_item_id as string
-  );
-
-  if (!productionItemIds.length) {
-    throw new ProofError("The source proof has no linked manifest items.", 409);
-  }
-
-  const versionNumber = await nextProofVersionForManifestItems(
-    adminClient,
-    jobId,
-    productionItemIds
-  );
-
-  if (versionNumber <= (sourceProof.version_number as number)) {
-    throw new ProofError(
-      "Unable to determine the next proof version for this manifest item lineage.",
-      409
-    );
-  }
-
-  const sourceArtwork = await loadProofFileRecord(adminClient, sourceProofId, "source_artwork");
-  if (!sourceArtwork?.dropbox_path) {
-    throw new ProofError("Attach revised source artwork before generating the next proof version.", 409);
-  }
-
-  const proofReference = buildProofReference(job.job_reference, versionNumber);
-  const now = new Date().toISOString();
-
-  const { data: proof, error } = await adminClient
-    .from("job_proofs")
-    .insert({
-      job_id: jobId,
-      company_id: job.company_id,
-      proof_reference: proofReference,
-      version_number: versionNumber,
-      status: "draft",
-      title: sourceProof.title,
-      artwork_origin: sourceProof.artwork_origin,
-      customer_message: sourceProof.customer_message,
-      internal_note: sourceProof.internal_note,
-      created_by_profile_id: actorProfileId,
-      updated_at: now,
-    })
-    .select(PROOF_SELECT)
-    .single();
-
-  if (error || !proof) {
-    throw new ProofError(error?.message ?? "Unable to create the next proof version.", 500);
-  }
-
-  const { error: manifestError } = await adminClient.from("job_proof_manifest_items").insert(
-    productionItemIds.map((productionItemId) => ({
-      proof_id: proof.id,
-      production_item_id: productionItemId,
-    }))
-  );
-
-  if (manifestError) {
-    throw new ProofError(manifestError.message, 500);
-  }
-
-  const { error: sourceCopyError } = await adminClient.from("job_proof_files").insert({
-    proof_id: proof.id,
-    file_role: "source_artwork",
-    job_file_id: sourceArtwork.job_file_id,
-    dropbox_file_id: sourceArtwork.dropbox_file_id,
-    dropbox_path: sourceArtwork.dropbox_path,
-    dropbox_revision: sourceArtwork.dropbox_revision,
-    file_name: sourceArtwork.file_name,
-    mime_type: sourceArtwork.mime_type,
-    file_size_bytes: sourceArtwork.file_size_bytes,
-    content_hash: sourceArtwork.content_hash,
-  });
-
-  if (sourceCopyError) {
-    throw new ProofError(sourceCopyError.message, 500);
-  }
-
-  await adminClient
-    .from("job_proofs")
-    .update({
-      status: "superseded",
-      superseded_at: now,
-      updated_at: now,
-    })
-    .eq("id", sourceProofId);
-
-  await syncJobProofWorkflowStatus(adminClient, jobId);
-
-  await logProofActivity(adminClient, {
-    activityType: PROOF_ACTIVITY_TYPES.proofCreated,
-    description: `${proofReference} created as the next version after ${sourceProof.proof_reference}.`,
-    companyId: job.company_id,
-    quoteId: job.quote_id,
-    opportunityId: job.opportunity_id,
-    actorProfileId,
-    metadata: {
-      job_id: jobId,
-      proof_id: proof.id,
-      version_number: versionNumber,
-      superseded_proof_id: sourceProofId,
-      superseded_version_number: sourceProof.version_number,
-      production_item_ids: productionItemIds,
-    },
-  });
-
-  revalidateJobPages({
-    jobId,
-    quoteId: job.quote_id,
-    opportunityId: job.opportunity_id,
-  });
-
-  return proof;
 }
 
 async function loadManifestItemsByIds(
@@ -666,12 +616,14 @@ export async function createJobProof(
     jobId,
     input.productionItemIds
   );
-  const sourceFile = await resolveSourceFileMetadata(adminClient, job, input);
-  const versionNumber = await nextProofVersionForManifestItems(
+  await assertNewLineageAvailableForManifestItems(
     adminClient,
     jobId,
     input.productionItemIds
   );
+  const sourceFile = await resolveSourceFileMetadata(adminClient, job, input);
+  const proofLineageId = randomUUID();
+  const versionNumber = 1;
   const proofReference = buildProofReference(job.job_reference, versionNumber);
   const now = new Date().toISOString();
 
@@ -680,6 +632,7 @@ export async function createJobProof(
     .insert({
       job_id: jobId,
       company_id: job.company_id,
+      proof_lineage_id: proofLineageId,
       proof_reference: proofReference,
       version_number: versionNumber,
       status: "draft",
@@ -740,6 +693,7 @@ export async function createJobProof(
       job_id: jobId,
       proof_id: proof.id,
       version_number: versionNumber,
+      proof_lineage_id: proofLineageId,
       production_item_ids: input.productionItemIds,
     },
   });
@@ -790,42 +744,51 @@ export async function createRevisedJobProof(
     throw new ProofError("Source proof not found.", 404);
   }
 
-  if (!isRevisableProofStatus(sourceProof.status as string)) {
+  const { data: preflight, error: preflightError } = await adminClient
+    .from("job_proof_preflight")
+    .select("generated_at")
+    .eq("proof_id", sourceProofId)
+    .maybeSingle();
+
+  if (preflightError && preflightError.code !== "42703" && preflightError.code !== "42P01") {
+    throw new ProofError(preflightError.message, 500);
+  }
+
+  const sourceSupportsRevision = proofSupportsRevision({
+    status: sourceProof.status as string,
+    brandedPdfGeneratedAt: (preflight?.generated_at as string | null) ?? null,
+  });
+
+  if (!sourceSupportsRevision) {
     throw new ProofError(
-      "Only proofs with changes requested or approved can be revised.",
+      "This proof version cannot be revised yet. Revise from a sent, approved, changes-requested, or already-generated proof version.",
       409
     );
   }
 
+  const proofLineageId = sourceProof.proof_lineage_id as string;
+
   const { data: existingProofs, error: existingError } = await adminClient
     .from("job_proofs")
-    .select("id, status, version_number")
+    .select("id, status, version_number, proof_lineage_id")
     .eq("job_id", jobId);
 
   if (existingError) {
     throw new ProofError(existingError.message, 500);
   }
 
-  const inProgress = getInProgressProof(existingProofs ?? []);
+  const lineageProofs = (existingProofs ?? []).filter(
+    (proof) => proof.proof_lineage_id === proofLineageId
+  );
+  const inProgress = getInProgressProof(lineageProofs);
   if (inProgress) {
     throw new ProofError(
-      `Proof v${inProgress.version_number} is already in progress. Finish that version before creating a revision.`,
+      `Proof v${inProgress.version_number} is already in progress for this proof series. Finish that version before creating a revision.`,
       409
     );
   }
 
-  const { data: manifestLinks, error: linkLoadError } = await adminClient
-    .from("job_proof_manifest_items")
-    .select("production_item_id")
-    .eq("proof_id", sourceProofId);
-
-  if (linkLoadError) {
-    throw new ProofError(linkLoadError.message, 500);
-  }
-
-  const productionItemIds = (manifestLinks ?? []).map(
-    (link) => link.production_item_id as string
-  );
+  const productionItemIds = await loadProofManifestItemIds(adminClient, sourceProofId);
 
   if (!productionItemIds.length) {
     throw new ProofError("The source proof has no linked manifest items.", 409);
@@ -833,11 +796,7 @@ export async function createRevisedJobProof(
 
   await loadManifestItemsByIds(adminClient, jobId, productionItemIds);
 
-  const versionNumber = await nextProofVersionForManifestItems(
-    adminClient,
-    jobId,
-    productionItemIds
-  );
+  const versionNumber = await nextProofVersionInLineage(adminClient, proofLineageId);
   const proofReference = buildProofReference(job.job_reference, versionNumber);
   const now = new Date().toISOString();
 
@@ -846,6 +805,7 @@ export async function createRevisedJobProof(
     .insert({
       job_id: jobId,
       company_id: job.company_id,
+      proof_lineage_id: proofLineageId,
       proof_reference: proofReference,
       version_number: versionNumber,
       status: "draft",
@@ -877,38 +837,6 @@ export async function createRevisedJobProof(
     throw new ProofError(linkError.message, 500);
   }
 
-  const { data: sourceArtwork, error: sourceArtworkError } = await adminClient
-    .from("job_proof_files")
-    .select(PROOF_FILE_SELECT)
-    .eq("proof_id", sourceProofId)
-    .eq("file_role", "source_artwork")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (sourceArtworkError) {
-    throw new ProofError(sourceArtworkError.message, 500);
-  }
-
-  if (sourceArtwork) {
-    const { error: sourceCopyError } = await adminClient.from("job_proof_files").insert({
-      proof_id: proof.id,
-      file_role: "source_artwork",
-      job_file_id: sourceArtwork.job_file_id,
-      dropbox_file_id: sourceArtwork.dropbox_file_id,
-      dropbox_path: sourceArtwork.dropbox_path,
-      dropbox_revision: sourceArtwork.dropbox_revision,
-      file_name: sourceArtwork.file_name,
-      mime_type: sourceArtwork.mime_type,
-      file_size_bytes: sourceArtwork.file_size_bytes,
-      content_hash: sourceArtwork.content_hash,
-    });
-
-    if (sourceCopyError) {
-      throw new ProofError(sourceCopyError.message, 500);
-    }
-  }
-
   await syncJobProofWorkflowStatus(adminClient, jobId);
 
   await logProofActivity(adminClient, {
@@ -921,6 +849,7 @@ export async function createRevisedJobProof(
     metadata: {
       job_id: jobId,
       proof_id: proof.id,
+      proof_lineage_id: proofLineageId,
       version_number: versionNumber,
       revised_from_proof_id: sourceProofId,
       revised_from_version_number: sourceProof.version_number,
@@ -1245,6 +1174,13 @@ export async function attachProofFile(
 
   assertProofStatusAllowsAttachment(proof.status);
 
+  if (await proofHasGeneratedCustomerArtifact(adminClient, proofId)) {
+    throw new ProofError(
+      "This proof version already has a generated customer PDF. Use Create revised proof to start the next version before changing artwork.",
+      409
+    );
+  }
+
   const metadata = await resolveAttachProofFileMetadata(adminClient, job, input);
 
   await upsertProofFileRecord(adminClient, proofId, "source_artwork", metadata);
@@ -1294,6 +1230,13 @@ export async function removeProofFile(
   const proof = await loadMutableProof(adminClient, jobId, proofId);
 
   assertProofStatusAllowsAttachment(proof.status);
+
+  if (await proofHasGeneratedCustomerArtifact(adminClient, proofId)) {
+    throw new ProofError(
+      "This proof version already has a generated customer PDF. Use Create revised proof to start the next version before changing artwork.",
+      409
+    );
+  }
 
   const existing = await loadProofFileRecord(adminClient, proofId, "source_artwork");
   if (!existing?.id) {
@@ -1809,7 +1752,13 @@ export async function sendJobProof(
     })
     .eq("id", proofFile.id);
 
-  await supersedePreviousSentProofs(adminClient, jobId, proofId, now);
+  await supersedePreviousSentProofs(
+    adminClient,
+    jobId,
+    proofId,
+    proof.proof_lineage_id as string,
+    now
+  );
 
   await adminClient
     .from("job_proofs")
@@ -2256,19 +2205,6 @@ async function loadCustomerActionableProof(
   jobId: string,
   proofId: string
 ) {
-  const { data: latestSent, error: latestError } = await adminClient
-    .from("job_proofs")
-    .select("id, version_number")
-    .eq("job_id", jobId)
-    .in("status", ["sent", "viewed", "changes_requested"])
-    .order("version_number", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (latestError) {
-    throw new ProofError(latestError.message, 500);
-  }
-
   const { data, error } = await adminClient
     .from("job_proofs")
     .select(PROOF_SELECT)
@@ -2284,6 +2220,20 @@ async function loadCustomerActionableProof(
     throw new ProofError("This proof cannot be actioned in its current state.", 409);
   }
 
+  const { data: latestSent, error: latestError } = await adminClient
+    .from("job_proofs")
+    .select("id, version_number")
+    .eq("job_id", jobId)
+    .eq("proof_lineage_id", data.proof_lineage_id as string)
+    .in("status", ["sent", "viewed", "changes_requested"])
+    .order("version_number", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (latestError) {
+    throw new ProofError(latestError.message, 500);
+  }
+
   if (latestSent && latestSent.id !== proofId) {
     throw new ProofError("Only the latest sent proof can be approved or changed.", 409);
   }
@@ -2295,12 +2245,14 @@ async function supersedePreviousSentProofs(
   adminClient: SupabaseClient,
   jobId: string,
   currentProofId: string,
+  proofLineageId: string,
   now: string
 ) {
   const { data: previousProofs } = await adminClient
     .from("job_proofs")
     .select("id, proof_reference")
     .eq("job_id", jobId)
+    .eq("proof_lineage_id", proofLineageId)
     .neq("id", currentProofId)
     .in("status", ["sent", "viewed", "changes_requested"]);
 

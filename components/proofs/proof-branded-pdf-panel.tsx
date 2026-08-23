@@ -176,7 +176,7 @@ export function ProofBrandedPdfPanel({
           the Candid Creative branded PDF into 03 Proofs. Source artwork stays in its
           original Dropbox location.
           {hasCustomerProof
-            ? " Generating again creates the next proof version and preserves the previous PDF."
+            ? " This version already has a generated PDF. Use Create revised proof to start the next version with new artwork."
             : ""}
         </p>
       </div>

@@ -1,4 +1,5 @@
 import { resolveJobProofRequired } from "@/lib/notifications/artwork-copy";
+import { getLatestActionableProofsPerLineage } from "@/lib/proofs/versioning";
 import type { JobProofView } from "@/lib/proofs/types";
 
 /** True unless the job is explicitly marked proof_required = false. */
@@ -11,6 +12,7 @@ export type CustomerProofSummary = Pick<
   | "id"
   | "status"
   | "version_number"
+  | "proof_lineage_id"
   | "title"
   | "sent_at"
   | "changes_requested_comment"
@@ -139,9 +141,7 @@ export function deriveCustomerProofState({
     };
   }
 
-  const awaitingApproval = currentProofs.filter((proof) =>
-    ["sent", "viewed"].includes(proof.status)
-  );
+  const awaitingApproval = getLatestActionableProofsPerLineage(currentProofs);
   const changesRequested = currentProofs.filter(
     (proof) => proof.status === "changes_requested"
   );

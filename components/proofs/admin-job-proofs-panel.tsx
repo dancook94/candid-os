@@ -20,8 +20,11 @@ import {
 } from "@/lib/proofs/constants";
 import {
   canCreateRevisedProof,
+  formatLineageManifestSummary,
   formatProofHistoryEntry,
+  getCurrentProofInLineage,
   getCurrentProofRecord,
+  groupProofsByLineage,
 } from "@/lib/proofs/versioning";
 import type { JobProofView } from "@/lib/proofs/types";
 import type { ProofSelectableManifestItem } from "@/lib/proofs/manifest-items";
@@ -227,8 +230,7 @@ export function AdminJobProofsPanel({
   }
 
   const currentProof = getCurrentProofRecord(proofs);
-  const proofHistory = [...proofs].sort((left, right) => right.version_number - left.version_number);
-  const sortedProofs = proofHistory;
+  const lineageGroups = groupProofsByLineage(proofs);
 
   async function createProof() {
     if (!canSaveDraft) {
@@ -410,30 +412,255 @@ export function AdminJobProofsPanel({
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
-      {proofHistory.length > 0 ? (
+      {lineageGroups.length > 0 ? (
         <div className="rounded-lg border border-border bg-muted/10 p-4 space-y-3">
           <div>
-            <p className="text-sm font-semibold">Proof history</p>
-            {currentProof ? (
-              <p className="mt-1 text-sm text-muted-foreground">
-                Current proof — v{currentProof.version_number}
-                {["draft", "internal_review", "ready_to_send"].includes(currentProof.status)
-                  ? ` (${PROOF_STATUS_LABELS[currentProof.status as keyof typeof PROOF_STATUS_LABELS]})`
-                  : ""}
-              </p>
-            ) : null}
+            <p className="text-sm font-semibold">Proof series on this job</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Each manifest item set has its own version history. Use Create revised proof to start v2, v3, and so on.
+            </p>
           </div>
-          <ul className="space-y-1 text-sm">
-            {proofHistory.map((proof) => (
-              <li key={proof.id} className="text-muted-foreground">
-                {formatProofHistoryEntry(
-                  proof,
-                  PROOF_STATUS_LABELS[proof.status as keyof typeof PROOF_STATUS_LABELS] ??
-                    proof.status
-                )}
-              </li>
-            ))}
+          <ul className="space-y-2 text-sm">
+            {lineageGroups.map((lineageProofs) => {
+              const currentInLineage = getCurrentProofInLineage(lineageProofs);
+              return (
+                <li key={lineageProofs[0]?.proof_lineage_id ?? lineageProofs[0]?.id} className="rounded-md border border-border/70 bg-background px-3 py-2">
+                  <p className="font-medium">{lineageProofs[0]?.title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatLineageManifestSummary(lineageProofs[0]?.manifestItems ?? [])}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Current: v{currentInLineage?.version_number ?? "—"}
+                    {currentInLineage
+                      ? ` (${PROOF_STATUS_LABELS[currentInLineage.status as keyof typeof PROOF_STATUS_LABELS] ?? currentInLineage.status})`
+                      : ""}
+                  </p>
+                </li>
+              );
+            })}
           </ul>
+        </div>
+      ) : null}
+
+      {lineageGroups.length > 0 ? (
+        <div className="space-y-8">
+          {lineageGroups.map((lineageProofs) => {
+            const currentInLineage = getCurrentProofInLineage(lineageProofs);
+            const lineageSummary = formatLineageManifestSummary(
+              lineageProofs[0]?.manifestItems ?? []
+            );
+
+            return (
+              <div key={lineageProofs[0]?.proof_lineage_id ?? lineageProofs[0]?.id} className="space-y-4">
+                <div>
+                  <h3 className="font-semibold">{lineageProofs[0]?.title}</h3>
+                  <p className="text-sm text-muted-foreground">{lineageSummary}</p>
+                  {currentInLineage ? (
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Current proof: v{currentInLineage.version_number}
+                    </p>
+                  ) : null}
+                </div>
+
+                {lineageProofs.length > 1 ? (
+                  <div className="rounded-lg border border-border bg-muted/10 p-3">
+                    <p className="text-sm font-medium">Previous versions</p>
+                    <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+                      {lineageProofs
+                        .filter((proof) => proof.id !== currentInLineage?.id)
+                        .map((proof) => (
+                          <li key={proof.id}>
+                            {formatProofHistoryEntry(
+                              proof,
+                              PROOF_STATUS_LABELS[proof.status as keyof typeof PROOF_STATUS_LABELS] ??
+                                proof.status
+                            )}
+                          </li>
+                        ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {lineageProofs.map((proof) => {
+            const isCurrentInLineage = currentInLineage?.id === proof.id;
+            const isEditableDraft = ["draft", "internal_review", "ready_to_send"].includes(
+              proof.status
+            );
+            const isArchived = ["superseded", "cancelled"].includes(proof.status);
+
+            return (
+            <div
+              key={proof.id}
+              className={`rounded-lg border p-4 space-y-3 ${
+                isArchived ? "border-border/70 bg-muted/20 opacity-80" : "border-border"
+              }`}
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="font-medium">{proof.title}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {isCurrentInLineage ? "Current proof: " : "Proof "}
+                    v{proof.version_number}
+                    {isCurrentInLineage
+                      ? ""
+                      : ` — ${PROOF_STATUS_LABELS[proof.status as keyof typeof PROOF_STATUS_LABELS] ?? proof.status}`}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{proof.proof_reference}</p>
+                </div>
+                <StatusBadge
+                  status={mapProofStatusToBadge(proof.status)}
+                  label={PROOF_STATUS_LABELS[proof.status]}
+                />
+              </div>
+
+              <div className="text-sm text-muted-foreground">
+                <p>Source: {PROOF_ARTWORK_ORIGIN_LABELS[proof.artwork_origin]}</p>
+                {proof.sent_at ? (
+                  <p>Sent: {new Date(proof.sent_at).toLocaleString("en-GB")}</p>
+                ) : null}
+                {proof.approved_at ? (
+                  <p>Approved: {new Date(proof.approved_at).toLocaleString("en-GB")}</p>
+                ) : null}
+                {proof.changes_requested_comment ? (
+                  <p>Customer comment: {proof.changes_requested_comment}</p>
+                ) : null}
+              </div>
+
+              {proof.manifestItems.length ? (
+                <ul className="text-sm">
+                  {proof.manifestItems.map((item) => (
+                    <li key={item.id}>
+                      {item.item_reference ? `${item.item_reference} · ` : ""}
+                      {item.item_name}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+
+              {!isEditableDraft ? null : (
+                <>
+              <ProofFileAttachmentPanel
+                jobId={jobId}
+                proof={proof}
+                dropboxLinked={dropboxLinked}
+                jobFiles={jobFiles}
+                pending={pending}
+                onPendingChange={setPending}
+                onError={setError}
+                onRefresh={refreshProofs}
+                forceShowAttach={attachPromptProofId === proof.id}
+                onAttachFormOpened={() => setAttachPromptProofId(null)}
+              />
+
+              <ProofBrandedPdfPanel
+                jobId={jobId}
+                proof={proof}
+                pending={pending}
+                onPendingChange={setPending}
+                onError={setError}
+                onRefresh={refreshProofs}
+                onRequestAttach={() => setAttachPromptProofId(proof.id)}
+              />
+
+              {proof.status === "draft" ? (
+                <div className="space-y-3 border-t border-border pt-3">
+                  <p className="text-sm font-medium">Internal checklist</p>
+                  {PROOF_INTERNAL_CHECKLIST_KEYS.map((key) => (
+                    <label key={key} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(checklist[`${proof.id}:${key}`])}
+                        onChange={(event) =>
+                          setChecklist((current) => ({
+                            ...current,
+                            [`${proof.id}:${key}`]: event.target.checked,
+                          }))
+                        }
+                      />
+                      {PROOF_INTERNAL_CHECKLIST_LABELS[key]}
+                    </label>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={pending}
+                    onClick={() =>
+                      proofAction(proof.id, "submit_internal_review", {
+                        checklist: PROOF_INTERNAL_CHECKLIST_KEYS.reduce(
+                          (acc, key) => ({
+                            ...acc,
+                            [key]: Boolean(checklist[`${proof.id}:${key}`]),
+                          }),
+                          {}
+                        ),
+                      })
+                    }
+                  >
+                    Submit internal review
+                  </Button>
+                </div>
+              ) : null}
+
+              {proof.status === "internal_review" ? (
+                <Button
+                  type="button"
+                  disabled={pending || !canSendBrandedProof(proof)}
+                  onClick={() => proofAction(proof.id, "mark_ready_to_send")}
+                >
+                  Mark ready to send
+                </Button>
+              ) : null}
+
+              {proof.status === "ready_to_send" ? (
+                <Button
+                  type="button"
+                  disabled={pending || !canSendBrandedProof(proof)}
+                  onClick={() => proofAction(proof.id, "send")}
+                >
+                  Send to customer
+                </Button>
+              ) : null}
+
+              {requiresGeneratedCustomerProof(proof) && !canSendBrandedProof(proof) ? (
+                <p className="text-xs text-amber-800">
+                  Generate the branded customer proof PDF before marking ready or sending.
+                </p>
+              ) : null}
+                </>
+              )}
+
+              {["sent", "viewed"].includes(proof.status) ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={pending}
+                  onClick={() => proofAction(proof.id, "resend_notification")}
+                >
+                  Resend proof notification
+                </Button>
+              ) : null}
+
+              {canCreateRevisedProof(proof, proofs) ? (
+                <Button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => createRevisedProof(proof.id)}
+                >
+                  Create revised proof
+                </Button>
+              ) : null}
+
+              {isArchived ? (
+                <p className="text-xs text-muted-foreground">
+                  Previous version — customer proof files are preserved in 03 Proofs.
+                </p>
+              ) : null}
+            </div>
+            );
+          })}
+              </div>
+            );
+          })}
         </div>
       ) : null}
 
@@ -667,188 +894,6 @@ export function AdminJobProofsPanel({
           </div>
         </div>
       ) : null}
-
-      <div className="space-y-4">
-        {sortedProofs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No proofs yet.</p>
-        ) : (
-          sortedProofs.map((proof) => {
-            const isCurrent = currentProof?.id === proof.id;
-            const isEditableDraft = ["draft", "internal_review", "ready_to_send"].includes(
-              proof.status
-            );
-            const isArchived = ["superseded", "cancelled"].includes(proof.status);
-
-            return (
-            <div
-              key={proof.id}
-              className={`rounded-lg border p-4 space-y-3 ${
-                isArchived ? "border-border/70 bg-muted/20 opacity-80" : "border-border"
-              }`}
-            >
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="font-medium">{proof.title}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {isCurrent ? "Current proof: " : "Proof "}
-                    v{proof.version_number}
-                    {isCurrent ? "" : ` — ${PROOF_STATUS_LABELS[proof.status as keyof typeof PROOF_STATUS_LABELS] ?? proof.status}`}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{proof.proof_reference}</p>
-                </div>
-                <StatusBadge
-                  status={mapProofStatusToBadge(proof.status)}
-                  label={PROOF_STATUS_LABELS[proof.status]}
-                />
-              </div>
-
-              <div className="text-sm text-muted-foreground">
-                <p>Source: {PROOF_ARTWORK_ORIGIN_LABELS[proof.artwork_origin]}</p>
-                {proof.sent_at ? (
-                  <p>Sent: {new Date(proof.sent_at).toLocaleString("en-GB")}</p>
-                ) : null}
-                {proof.approved_at ? (
-                  <p>Approved: {new Date(proof.approved_at).toLocaleString("en-GB")}</p>
-                ) : null}
-                {proof.changes_requested_comment ? (
-                  <p>Customer comment: {proof.changes_requested_comment}</p>
-                ) : null}
-              </div>
-
-              {proof.manifestItems.length ? (
-                <ul className="text-sm">
-                  {proof.manifestItems.map((item) => (
-                    <li key={item.id}>
-                      {item.item_reference ? `${item.item_reference} · ` : ""}
-                      {item.item_name}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-
-              {!isEditableDraft ? null : (
-                <>
-              <ProofFileAttachmentPanel
-                jobId={jobId}
-                proof={proof}
-                dropboxLinked={dropboxLinked}
-                jobFiles={jobFiles}
-                pending={pending}
-                onPendingChange={setPending}
-                onError={setError}
-                onRefresh={refreshProofs}
-                forceShowAttach={attachPromptProofId === proof.id}
-                onAttachFormOpened={() => setAttachPromptProofId(null)}
-              />
-
-              <ProofBrandedPdfPanel
-                jobId={jobId}
-                proof={proof}
-                pending={pending}
-                onPendingChange={setPending}
-                onError={setError}
-                onRefresh={refreshProofs}
-                onRequestAttach={() => setAttachPromptProofId(proof.id)}
-              />
-
-              {proof.status === "draft" ? (
-                <div className="space-y-3 border-t border-border pt-3">
-                  <p className="text-sm font-medium">Internal checklist</p>
-                  {PROOF_INTERNAL_CHECKLIST_KEYS.map((key) => (
-                    <label key={key} className="flex items-center gap-2 text-sm">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(checklist[`${proof.id}:${key}`])}
-                        onChange={(event) =>
-                          setChecklist((current) => ({
-                            ...current,
-                            [`${proof.id}:${key}`]: event.target.checked,
-                          }))
-                        }
-                      />
-                      {PROOF_INTERNAL_CHECKLIST_LABELS[key]}
-                    </label>
-                  ))}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={pending}
-                    onClick={() =>
-                      proofAction(proof.id, "submit_internal_review", {
-                        checklist: PROOF_INTERNAL_CHECKLIST_KEYS.reduce(
-                          (acc, key) => ({
-                            ...acc,
-                            [key]: Boolean(checklist[`${proof.id}:${key}`]),
-                          }),
-                          {}
-                        ),
-                      })
-                    }
-                  >
-                    Submit internal review
-                  </Button>
-                </div>
-              ) : null}
-
-              {proof.status === "internal_review" ? (
-                <Button
-                  type="button"
-                  disabled={pending || !canSendBrandedProof(proof)}
-                  onClick={() => proofAction(proof.id, "mark_ready_to_send")}
-                >
-                  Mark ready to send
-                </Button>
-              ) : null}
-
-              {proof.status === "ready_to_send" ? (
-                <Button
-                  type="button"
-                  disabled={pending || !canSendBrandedProof(proof)}
-                  onClick={() => proofAction(proof.id, "send")}
-                >
-                  Send to customer
-                </Button>
-              ) : null}
-
-              {requiresGeneratedCustomerProof(proof) && !canSendBrandedProof(proof) ? (
-                <p className="text-xs text-amber-800">
-                  Generate the branded customer proof PDF before marking ready or sending.
-                </p>
-              ) : null}
-                </>
-              )}
-
-              {["sent", "viewed"].includes(proof.status) ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={pending}
-                  onClick={() => proofAction(proof.id, "resend_notification")}
-                >
-                  Resend proof notification
-                </Button>
-              ) : null}
-
-              {canCreateRevisedProof(proof, proofs) ? (
-                <Button
-                  type="button"
-                  disabled={pending}
-                  onClick={() => createRevisedProof(proof.id)}
-                >
-                  Create revised proof
-                </Button>
-              ) : null}
-
-              {isArchived ? (
-                <p className="text-xs text-muted-foreground">
-                  Previous version — customer proof files are preserved in 03 Proofs.
-                </p>
-              ) : null}
-            </div>
-            );
-          })
-        )}
-      </div>
     </div>
   );
 }
