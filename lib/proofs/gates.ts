@@ -10,10 +10,15 @@ import {
 } from "@/lib/proofs/coverage";
 import {
   PROOF_SELECT,
+  PROOF_WORKFLOW_STATUS_LABELS,
   type ProofWorkflowStatus,
 } from "@/lib/proofs/constants";
 import { isMissingProofSchemaError } from "@/lib/proofs/errors";
 import type { JobProofRecord } from "@/lib/proofs/types";
+import {
+  groupProofsByLineage,
+  getCurrentProofInLineage,
+} from "@/lib/proofs/versioning";
 
 export type ProofGateEvaluation = {
   schemaAvailable: boolean;
@@ -189,10 +194,9 @@ export async function syncJobProofWorkflowStatus(
   }
 
   const activeProofs = (proofs ?? []) as JobProofRecord[];
-  const primaryProof = pickPrimaryWorkflowProof(activeProofs);
-  const workflowStatus: ProofWorkflowStatus = primaryProof
-    ? mapProofStatusToWorkflow(primaryProof)
-    : "no_proof";
+  const aggregate = deriveAggregateJobProofWorkflow(activeProofs);
+  const primaryProof = aggregate.primaryProof;
+  const workflowStatus: ProofWorkflowStatus = aggregate.status;
 
   const updates: Record<string, unknown> = {
     proof_workflow_status: workflowStatus,
@@ -212,34 +216,68 @@ export async function syncJobProofWorkflowStatus(
 }
 
 function pickPrimaryWorkflowProof(proofs: JobProofRecord[]) {
-  if (!proofs.length) {
-    return null;
+  return deriveAggregateJobProofWorkflow(proofs).primaryProof;
+}
+
+export function deriveAggregateJobProofWorkflow(proofs: JobProofRecord[]) {
+  const activeProofs = proofs.filter(
+    (proof) => !["cancelled", "superseded"].includes(proof.status)
+  );
+  const lineageGroups = groupProofsByLineage(activeProofs);
+
+  if (!lineageGroups.length) {
+    return {
+      status: "no_proof" as ProofWorkflowStatus,
+      label: PROOF_WORKFLOW_STATUS_LABELS.no_proof,
+      primaryProof: null as JobProofRecord | null,
+      lineageStatuses: [] as ProofWorkflowStatus[],
+    };
   }
 
-  const priority = [
-    "sent",
-    "viewed",
+  const lineageStates = lineageGroups.map((lineageProofs) => {
+    const current = getCurrentProofInLineage(lineageProofs);
+    return {
+      current,
+      status: current ? mapProofStatusToWorkflow(current) : ("no_proof" as ProofWorkflowStatus),
+    };
+  });
+
+  const lineageStatuses = lineageStates.map((entry) => entry.status);
+  const priority: ProofWorkflowStatus[] = [
     "changes_requested",
+    "awaiting_customer",
     "ready_to_send",
     "internal_review",
     "draft",
+    "no_proof",
     "approved",
-  ] as const;
+  ];
 
-  for (const status of priority) {
-    const matches = proofs.filter((proof) => proof.status === status);
-    if (matches.length) {
-      return [...matches].sort((left, right) => {
-        if (right.version_number !== left.version_number) {
-          return right.version_number - left.version_number;
-        }
-
-        return right.created_at.localeCompare(left.created_at);
-      })[0];
+  let status: ProofWorkflowStatus = "no_proof";
+  for (const candidate of priority) {
+    if (lineageStatuses.includes(candidate)) {
+      status = candidate;
+      break;
     }
   }
 
-  return proofs[0] ?? null;
+  const matchingCount = lineageStatuses.filter((entry) => entry === status).length;
+  const label =
+    matchingCount === lineageStatuses.length
+      ? PROOF_WORKFLOW_STATUS_LABELS[status]
+      : `${matchingCount} of ${lineageStatuses.length} proof series — ${PROOF_WORKFLOW_STATUS_LABELS[status]}`;
+
+  const primaryProof =
+    lineageStates.find((entry) => entry.status === status)?.current ??
+    lineageStates[0]?.current ??
+    null;
+
+  return {
+    status,
+    label,
+    primaryProof,
+    lineageStatuses,
+  };
 }
 
 function mapProofStatusToWorkflow(proof: JobProofRecord): ProofWorkflowStatus {

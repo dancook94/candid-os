@@ -2,10 +2,11 @@ import type { JobProofView } from "@/lib/proofs/types";
 
 /** Statuses where staff can start the next version from the current proof in a lineage. */
 export const REVISABLE_PROOF_STATUSES = [
-  "changes_requested",
-  "approved",
+  "ready_to_send",
   "sent",
   "viewed",
+  "changes_requested",
+  "approved",
 ] as const;
 
 export type RevisableProofStatus = (typeof REVISABLE_PROOF_STATUSES)[number];
@@ -129,10 +130,34 @@ export function getCurrentProofRecord<
   })[0];
 }
 
+export function hasBlockingInProgressRevision<
+  T extends { id: string; status: string; version_number: number },
+>(lineageProofs: T[], sourceProof: Pick<T, "id" | "version_number">) {
+  return lineageProofs.some(
+    (proof) =>
+      proof.id !== sourceProof.id &&
+      IN_PROGRESS_PROOF_STATUSES.includes(
+        proof.status as (typeof IN_PROGRESS_PROOF_STATUSES)[number]
+      ) &&
+      proof.version_number > sourceProof.version_number
+  );
+}
+
+export function proofReferenceForVersion(jobReference: string, versionNumber: number) {
+  return buildProofReference(jobReference, versionNumber);
+}
+
+export function proofReferenceMatchesVersion(
+  proof: Pick<JobProofView, "proof_reference" | "version_number">,
+  jobReference: string
+) {
+  return proof.proof_reference === proofReferenceForVersion(jobReference, proof.version_number);
+}
+
 export function canCreateRevisedProof(
   sourceProof: Pick<
     JobProofView,
-    "status" | "proof_lineage_id" | "version_number" | "brandedPdfGeneratedAt"
+    "id" | "status" | "proof_lineage_id" | "version_number" | "brandedPdfGeneratedAt"
   > & {
     hasGeneratedCustomerProof?: boolean;
   },
@@ -162,7 +187,7 @@ export function canCreateRevisedProof(
     return false;
   }
 
-  if (getInProgressProof(lineageProofs)) {
+  if (hasBlockingInProgressRevision(lineageProofs, sourceProof)) {
     return false;
   }
 
@@ -187,6 +212,7 @@ export function getLineageRevisionSourceProof<
   }
 
   const revisionContext = {
+    id: currentInLineage.id,
     status: currentInLineage.status,
     proof_lineage_id: currentInLineage.proof_lineage_id,
     version_number: currentInLineage.version_number,
@@ -208,7 +234,13 @@ function hasGeneratedCustomerProofForRevision(
 }
 
 export function revisionCreatesNewImmutableVersion(status: string) {
-  return ["sent", "viewed", "approved", "changes_requested"].includes(status);
+  return [
+    "ready_to_send",
+    "sent",
+    "viewed",
+    "approved",
+    "changes_requested",
+  ].includes(status);
 }
 
 export function formatProofHistoryEntry(

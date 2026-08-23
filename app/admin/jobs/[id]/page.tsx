@@ -240,6 +240,7 @@ export default async function AdminJobDetailPage({
           <CardContent className="pt-6">
             <AdminJobProofsPanel
               jobId={detail.job.id}
+              jobReference={detail.job.job_reference}
               selectableItems={proofSelectableItems.items}
               manifestSchemaMissing={proofSelectableItems.schemaMissing}
               dropboxLinked={Boolean(detail.job.dropbox_folder_path)}

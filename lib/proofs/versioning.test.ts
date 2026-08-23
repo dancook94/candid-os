@@ -144,6 +144,7 @@ describe("canCreateRevisedProof", () => {
     assert.equal(
       canCreateRevisedProof(
         {
+          id: "1",
           status: "changes_requested",
           proof_lineage_id: "lineage-a",
           version_number: 1,
@@ -162,10 +163,34 @@ describe("canCreateRevisedProof", () => {
     );
   });
 
+  it("allows revision from ready_to_send when no newer in-progress version exists", () => {
+    assert.equal(
+      canCreateRevisedProof(
+        {
+          id: "1",
+          status: "ready_to_send",
+          proof_lineage_id: "lineage-a",
+          version_number: 1,
+          brandedPdfGeneratedAt: "2026-01-01",
+        },
+        [
+          {
+            id: "1",
+            status: "ready_to_send",
+            version_number: 1,
+            proof_lineage_id: "lineage-a",
+          },
+        ]
+      ),
+      true
+    );
+  });
+
   it("blocks revision while another version is in progress in the same lineage", () => {
     assert.equal(
       canCreateRevisedProof(
         {
+          id: "1",
           status: "changes_requested",
           proof_lineage_id: "lineage-a",
           version_number: 1,
@@ -194,6 +219,7 @@ describe("canCreateRevisedProof", () => {
     assert.equal(
       canCreateRevisedProof(
         {
+          id: "1",
           status: "sent",
           proof_lineage_id: "lineage-a",
           version_number: 1,
@@ -216,6 +242,7 @@ describe("canCreateRevisedProof", () => {
     assert.equal(
       canCreateRevisedProof(
         {
+          id: "1",
           status: "draft",
           proof_lineage_id: "lineage-a",
           version_number: 1,

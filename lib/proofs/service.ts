@@ -34,6 +34,7 @@ import { resolveCustomerProofDownloadFile } from "@/lib/proofs/download-file";
 import {
   buildProofReference,
   getInProgressProof,
+  hasBlockingInProgressRevision,
   isRevisableProofStatus,
   manifestItemSetsMatch,
   proofSupportsRevision,
@@ -377,7 +378,11 @@ export async function loadProofsForJob(
       .select(PROOF_SELECT)
       .eq("job_id", jobId)
       .order("version_number", { ascending: false }),
-    adminClient.from("jobs").select("dropbox_folder_path").eq("id", jobId).maybeSingle(),
+    adminClient
+      .from("jobs")
+      .select("dropbox_folder_path, job_reference")
+      .eq("id", jobId)
+      .maybeSingle(),
   ]);
 
   if (error) {
@@ -388,6 +393,37 @@ export async function loadProofsForJob(
   }
 
   const dropboxFolderPath = (job?.dropbox_folder_path as string | null) ?? null;
+  const jobReference = (job?.job_reference as string | null) ?? null;
+
+  const staleReferenceUpdates: Array<{ id: string; proof_reference: string }> = [];
+  for (const proof of proofs ?? []) {
+    if (!jobReference) {
+      continue;
+    }
+
+    const expectedReference = buildProofReference(
+      jobReference,
+      proof.version_number as number
+    );
+    if (proof.proof_reference !== expectedReference) {
+      staleReferenceUpdates.push({
+        id: proof.id as string,
+        proof_reference: expectedReference,
+      });
+      proof.proof_reference = expectedReference;
+    }
+  }
+
+  if (staleReferenceUpdates.length) {
+    await Promise.all(
+      staleReferenceUpdates.map((update) =>
+        adminClient
+          .from("job_proofs")
+          .update({ proof_reference: update.proof_reference })
+          .eq("id", update.id)
+      )
+    );
+  }
 
   const proofIds = (proofs ?? []).map((proof) => proof.id);
   if (proofIds.length === 0) {
@@ -784,10 +820,15 @@ export async function createRevisedJobProof(
   const lineageProofs = (existingProofs ?? []).filter(
     (proof) => proof.proof_lineage_id === proofLineageId
   );
-  const inProgress = getInProgressProof(lineageProofs);
-  if (inProgress) {
+  if (
+    hasBlockingInProgressRevision(lineageProofs, {
+      id: sourceProofId,
+      version_number: sourceProof.version_number as number,
+    })
+  ) {
+    const inProgress = getInProgressProof(lineageProofs);
     throw new ProofError(
-      `Proof v${inProgress.version_number} is already in progress for this proof series. Finish that version before creating a revision.`,
+      `Proof v${inProgress?.version_number ?? "?"} is already in progress for this proof series. Finish that version before creating a revision.`,
       409
     );
   }
