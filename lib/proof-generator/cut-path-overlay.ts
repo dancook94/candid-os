@@ -1,16 +1,20 @@
 import type { PDFFont, PDFPage } from "pdf-lib";
 import { rgb } from "pdf-lib";
 
+import {
+  drawCutPathOverlayPath,
+  drawCutPathSampleStroke,
+} from "@/lib/proof-generator/cut-path-overlay-style";
 import type {
   CutPathGeometry,
-  CutPathPathCommand,
 } from "@/lib/proof-generator/extract-cut-path-geometry";
 import { sanitizePdfText } from "@/lib/proof-generator/pdf-text";
 
-/** Proof-only cut path magenta (#EC008C). */
-export const CUT_PATH_OVERLAY_COLOR = rgb(236 / 255, 0, 140 / 255);
-export const CUT_PATH_OVERLAY_WIDTH = 1.75;
-export const CUT_PATH_OVERLAY_DASH = [5, 4] as const;
+export {
+  CUT_PATH_OVERLAY_COLOR,
+  CUT_PATH_OVERLAY_DASH,
+  CUT_PATH_OVERLAY_WIDTH,
+} from "@/lib/proof-generator/cut-path-overlay-style";
 
 export type ArtworkPreviewPlacement = {
   frameX: number;
@@ -95,137 +99,6 @@ export function mapPdfPointToPreview(
   };
 }
 
-function flattenCubicBezier(
-  p0: { x: number; y: number },
-  p1: { x: number; y: number },
-  p2: { x: number; y: number },
-  p3: { x: number; y: number },
-  segments = 16
-) {
-  const points: Array<{ x: number; y: number }> = [];
-
-  for (let index = 0; index <= segments; index += 1) {
-    const t = index / segments;
-    const mt = 1 - t;
-    points.push({
-      x:
-        mt * mt * mt * p0.x +
-        3 * mt * mt * t * p1.x +
-        3 * mt * t * t * p2.x +
-        t * t * t * p3.x,
-      y:
-        mt * mt * mt * p0.y +
-        3 * mt * mt * t * p1.y +
-        3 * mt * t * t * p2.y +
-        t * t * t * p3.y,
-    });
-  }
-
-  return points;
-}
-
-function subpathToPreviewPoints(
-  subpath: CutPathPathCommand[],
-  geometry: CutPathGeometry,
-  placement: ArtworkPreviewPlacement
-) {
-  const segments: Array<{ start: { x: number; y: number }; end: { x: number; y: number } }> = [];
-  let current: { x: number; y: number } | null = null;
-  let subpathStart: { x: number; y: number } | null = null;
-
-  for (const command of subpath) {
-    if (command.op === "M") {
-      current = mapPdfPointToPreview(command, geometry, placement);
-      subpathStart = current;
-      continue;
-    }
-
-    if (!current) {
-      continue;
-    }
-
-    if (command.op === "L") {
-      const end = mapPdfPointToPreview(command, geometry, placement);
-      segments.push({ start: current, end });
-      current = end;
-      continue;
-    }
-
-    if (command.op === "C") {
-      const control1 = mapPdfPointToPreview(
-        { x: command.x1, y: command.y1 },
-        geometry,
-        placement
-      );
-      const control2 = mapPdfPointToPreview(
-        { x: command.x2, y: command.y2 },
-        geometry,
-        placement
-      );
-      const end = mapPdfPointToPreview({ x: command.x, y: command.y }, geometry, placement);
-      const flattened = flattenCubicBezier(current, control1, control2, end);
-
-      for (let index = 1; index < flattened.length; index += 1) {
-        segments.push({
-          start: flattened[index - 1],
-          end: flattened[index],
-        });
-      }
-
-      current = end;
-      continue;
-    }
-
-    if (command.op === "Z" && subpathStart) {
-      segments.push({ start: current, end: subpathStart });
-      current = subpathStart;
-    }
-  }
-
-  return segments;
-}
-
-function drawDashedLine(
-  page: PDFPage,
-  start: { x: number; y: number },
-  end: { x: number; y: number }
-) {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const length = Math.hypot(dx, dy);
-
-  if (length < 0.01) {
-    return;
-  }
-
-  const [dash, gap] = CUT_PATH_OVERLAY_DASH;
-  const patternLength = dash + gap;
-  let travelled = 0;
-
-  while (travelled < length) {
-    const dashStart = travelled / length;
-    const dashEnd = Math.min((travelled + dash) / length, 1);
-
-    if (dashEnd > dashStart) {
-      page.drawLine({
-        start: {
-          x: start.x + dx * dashStart,
-          y: start.y + dy * dashStart,
-        },
-        end: {
-          x: start.x + dx * dashEnd,
-          y: start.y + dy * dashEnd,
-        },
-        thickness: CUT_PATH_OVERLAY_WIDTH,
-        color: CUT_PATH_OVERLAY_COLOR,
-        lineCap: 1,
-      });
-    }
-
-    travelled += patternLength;
-  }
-}
-
 export function buildSvgPathFromGeometry(
   geometry: CutPathGeometry,
   placement: ArtworkPreviewPlacement
@@ -262,21 +135,8 @@ export function drawCutPathOverlay(
   geometry: CutPathGeometry,
   placement: ArtworkPreviewPlacement
 ) {
-  let segmentsDrawn = 0;
-
-  for (const subpath of geometry.subpaths) {
-    if (subpath.length === 0) {
-      continue;
-    }
-
-    const segments = subpathToPreviewPoints(subpath, geometry, placement);
-    for (const segment of segments) {
-      drawDashedLine(page, segment.start, segment.end);
-      segmentsDrawn += 1;
-    }
-  }
-
-  return segmentsDrawn > 0;
+  const svgPath = buildSvgPathFromGeometry(geometry, placement);
+  return drawCutPathOverlayPath(page, svgPath);
 }
 
 export function drawCutPathOverlayLegend(
@@ -287,14 +147,7 @@ export function drawCutPathOverlayLegend(
   options?: { finishedCutSizeLabel?: string | null }
 ) {
   const label = sanitizePdfText("Cut line — does not print");
-  page.drawLine({
-    start: { x, y: y + 4 },
-    end: { x: x + 22, y: y + 4 },
-    thickness: CUT_PATH_OVERLAY_WIDTH,
-    color: CUT_PATH_OVERLAY_COLOR,
-    dashArray: [...CUT_PATH_OVERLAY_DASH],
-    lineCap: 1,
-  });
+  drawCutPathSampleStroke(page, { x, y: y + 4 }, { x: x + 22, y: y + 4 });
 
   page.drawText(label, {
     x: x + 28,

@@ -108,7 +108,8 @@ export async function validateFlattenedArtworkPreview(input: {
 
 /**
  * Flatten the original production PDF page through pdf.js into a PNG preview.
- * Uses disableFontFace=false so embedded/outlined text survives Node rendering.
+ * In Node, disableFontFace must stay true so pdf.js draws glyph outlines directly
+ * instead of loading @font-face fonts into canvas (which produces box/X glyphs).
  */
 export async function rasterizePdfPageToPng(
   pdfBuffer: Buffer,
@@ -121,7 +122,7 @@ export async function rasterizePdfPageToPng(
     standardFontDataUrl: assets.standardFontDataUrl,
     cMapUrl: assets.cMapUrl,
     cMapPacked: true,
-    disableFontFace: false,
+    disableFontFace: true,
     useSystemFonts: true,
   }).promise;
 
@@ -170,7 +171,7 @@ export async function rasterizePdfPageToPng(
     pageWidthPt: viewportAtScale1.width,
     pageHeightPt: viewportAtScale1.height,
     renderScale,
-    disableFontFace: false,
+    disableFontFace: true,
   });
 
   return {
