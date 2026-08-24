@@ -540,8 +540,20 @@ export function resolvePreflightChecksAfterProductionConfirmation(
       );
     }
 
+    if (
+      check.key === "cut_path_confirmed" ||
+      check.key === "cut_path_not_required" ||
+      check.key === "cut_path_required_missing"
+    ) {
+      return false;
+    }
+
     if (check.key === "white_ink_candidates") {
       return !productionFeatures.confirmedWhiteInk && !productionFeatures.noWhiteInkRequired;
+    }
+
+    if (check.key === "white_ink_confirmed" || check.key === "white_ink_not_required") {
+      return false;
     }
 
     return true;

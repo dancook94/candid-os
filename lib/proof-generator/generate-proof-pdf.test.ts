@@ -468,11 +468,74 @@ describe("generateCustomerProofPdf", () => {
       preflight.checks.some((check) => check.key === "cut_path_candidates"),
       false
     );
+    assert.equal(
+      preflight.checks.filter((check) => check.key === "cut_path_confirmed").length,
+      1
+    );
     const cutPathCheck = preflight.checks.find((check) => check.key === "cut_path_confirmed");
     assert.ok(cutPathCheck);
     assert.equal(cutPathCheck?.message, "CutContour confirmed by Candid");
 
     const validation = await validateGeneratedProofPdf(pdf);
     assert.equal(validation.ok, true);
+  });
+
+  it("keeps exactly one cut path PASS when checks were already resolved before PDF generation", async () => {
+    const sourceBuffer = (
+      await import("@/lib/proof-generator/cut-path-test-pdfs")
+    ).buildContourCutTestPdfBuffer({ shape: "circle", cutWidthMm: 400, cutHeightMm: 400 });
+
+    const preflight = buildPreflight({
+      checks: [
+        {
+          key: "cut_path_confirmed",
+          label: "Cut path",
+          status: "pass",
+          detectedValue: "CutContour",
+          expectedValue: null,
+          message: "CutContour confirmed by Candid",
+          confidence: "high",
+        },
+      ],
+      metadata: {
+        ...buildPreflight().metadata,
+        fileName: "artwork.pdf",
+        mimeType: "application/pdf",
+        inputType: "pdf",
+        pageCount: 1,
+      },
+      productionFeatures: {
+        cutPathCandidates: [],
+        whiteInkCandidates: [],
+        layers: [],
+        spotColourGroups: { productionSeparations: ["CutContour"], otherSpotColours: [] },
+        expectsCutPath: true,
+        cutPathOverlayAvailable: true,
+        confirmedCutPath: {
+          name: "CutContour",
+          sourceType: "separation",
+          confirmedAt: "2026-01-01T00:00:00.000Z",
+          confirmedByProfileId: "user-1",
+        },
+        showCutPathOnProof: true,
+        cutPathSize: { widthMm: 400, heightMm: 400, widthPt: 0, heightPt: 0 },
+      },
+    });
+
+    await generateCustomerProofPdf({
+      jobReference: "J-4",
+      projectName: "Foamex Panels",
+      proofReference: "J-4 Proof v12",
+      versionNumber: 12,
+      preflight,
+      sourceBuffer,
+      sourceFileName: "artwork.pdf",
+    });
+
+    assert.equal(
+      preflight.checks.filter((check) => check.key === "cut_path_confirmed").length,
+      1
+    );
+    assert.equal(preflight.productionFeatures.cutPathOverlayRendered, true);
   });
 });

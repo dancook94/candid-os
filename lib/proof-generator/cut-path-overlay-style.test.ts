@@ -5,7 +5,9 @@ import { PDFDocument } from "pdf-lib";
 
 import {
   CUT_PATH_OVERLAY_DASH,
-  drawCutPathOverlayPath,
+  createCutPathDashCursor,
+  drawCutPathOverlaySegment,
+  drawCutPathSampleStroke,
   getCutPathOverlayStrokeOptions,
 } from "@/lib/proof-generator/cut-path-overlay-style";
 import { drawCutPathOverlay } from "@/lib/proof-generator/cut-path-overlay";
@@ -20,7 +22,7 @@ describe("cut path overlay style", () => {
     assert.equal(stroke.borderWidth, 1.75);
   });
 
-  it("renders cut overlay geometry through a single dashed SVG path", async () => {
+  it("renders cut overlay geometry as dashed preview-space line segments", async () => {
     const sourceBuffer = buildCutPathTestPdfBuffer({ shape: "circle" });
     const extraction = await extractCutPathGeometry(sourceBuffer, "CutContour", 0);
     assert.equal(extraction.ok, true);
@@ -52,10 +54,18 @@ describe("cut path overlay style", () => {
     assert.ok(bytes.byteLength > 500);
   });
 
-  it("draws dashed overlay paths through drawCutPathOverlayPath", async () => {
+  it("draws overlay segments with a continuous dash cursor", async () => {
     const document = await PDFDocument.create();
     const page = document.addPage([200, 200]);
-    assert.equal(drawCutPathOverlayPath(page, "M 20 20 L 120 20 L 120 120 Z"), true);
+    const cursor = createCutPathDashCursor();
+
+    assert.equal(
+      drawCutPathOverlaySegment(page, { x: 20, y: 20 }, { x: 120, y: 20 }, cursor),
+      true
+    );
+    assert.ok(cursor.distance > 0);
+
+    drawCutPathSampleStroke(page, { x: 20, y: 40 }, { x: 120, y: 40 });
 
     const bytes = await document.save();
     assert.ok(bytes.byteLength > 200);

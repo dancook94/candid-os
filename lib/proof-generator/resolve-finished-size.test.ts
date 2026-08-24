@@ -299,6 +299,41 @@ describe("applyAuthoritativeFinishedSizeToPreflight", () => {
     assert.equal(confirmed?.status, "pass");
     assert.equal(confirmed?.message, "CutContour confirmed by Candid");
   });
+
+  it("keeps exactly one resolved cut path PASS when resolution runs twice", async () => {
+    const buffer = buildContourCutTestPdfBuffer();
+    const metadata = enrichMetadataWithResolvedGeometry(baseMetadata(), buffer);
+    const preflight = basePreflight({
+      metadata,
+      productionFeatures: baseProductionFeatures({
+        cutPathCandidates: [
+          {
+            name: "CutContour",
+            sourceType: "separation",
+            confidence: "high",
+            reason: "Separation name",
+          },
+        ],
+        expectsCutPath: true,
+        confirmedCutPath: {
+          name: "CutContour",
+          sourceType: "separation",
+          confirmedAt: "2026-01-01",
+          confirmedByProfileId: "user-1",
+        },
+        showCutPathOnProof: true,
+        cutPathSizeExtractable: true,
+      }),
+    });
+
+    const once = await applyAuthoritativeFinishedSizeToPreflight(preflight, buffer);
+    const twice = await applyAuthoritativeFinishedSizeToPreflight(once, buffer);
+
+    assert.equal(
+      twice.checks.filter((check) => check.key === "cut_path_confirmed").length,
+      1
+    );
+  });
 });
 
 describe("cut path extraction guard", () => {

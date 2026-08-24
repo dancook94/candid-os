@@ -19,6 +19,14 @@ export type CutPathOverlayStrokeOptions = {
   borderLineCap: LineCapStyle;
 };
 
+export type CutPathDashCursor = {
+  distance: number;
+};
+
+export function createCutPathDashCursor(): CutPathDashCursor {
+  return { distance: 0 };
+}
+
 export function getCutPathOverlayStrokeOptions(): CutPathOverlayStrokeOptions {
   return {
     borderColor: CUT_PATH_OVERLAY_COLOR,
@@ -51,18 +59,56 @@ export function drawCutPathSampleStroke(
   });
 }
 
-export function drawCutPathOverlayPath(page: PDFPage, svgPath: string) {
-  if (!svgPath.trim()) {
+/**
+ * Draw one overlay segment with a dash pattern that continues across the full path.
+ * Uses explicit dash chunks instead of drawSvgPath so curves stay visibly dashed in Acrobat.
+ */
+export function drawCutPathOverlaySegment(
+  page: PDFPage,
+  start: { x: number; y: number },
+  end: { x: number; y: number },
+  cursor: CutPathDashCursor
+) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy);
+
+  if (length < 0.01) {
     return false;
   }
 
-  const pageHeight = page.getHeight();
+  const [dash, gap] = CUT_PATH_OVERLAY_DASH;
+  const patternLength = dash + gap;
+  const { dashArray: _ignoredDash, ...lineOptions } = getCutPathOverlayLineOptions();
+  let travelled = 0;
+  let drawn = false;
 
-  page.drawSvgPath(svgPath, {
-    ...getCutPathOverlayStrokeOptions(),
-    x: 0,
-    y: pageHeight,
-  });
+  while (travelled < length) {
+    const patternOffset = (cursor.distance + travelled) % patternLength;
+    const remainingInPattern =
+      patternOffset < dash ? dash - patternOffset : patternLength - patternOffset;
+    const step = Math.min(remainingInPattern, length - travelled);
 
-  return true;
+    if (patternOffset < dash) {
+      const startRatio = travelled / length;
+      const endRatio = (travelled + step) / length;
+      page.drawLine({
+        start: {
+          x: start.x + dx * startRatio,
+          y: start.y + dy * startRatio,
+        },
+        end: {
+          x: start.x + dx * endRatio,
+          y: start.y + dy * endRatio,
+        },
+        ...lineOptions,
+      });
+      drawn = true;
+    }
+
+    travelled += step;
+  }
+
+  cursor.distance += length;
+  return drawn;
 }
