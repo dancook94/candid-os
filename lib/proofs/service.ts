@@ -7,6 +7,8 @@ import { loadManifestItemsForProofContext } from "@/lib/manifest/proof-requireme
 import { revalidateJobPages } from "@/lib/jobs/revalidation";
 import { resolveJobProofRequired } from "@/lib/notifications/artwork-copy";
 import { ProofError, isMissingProofSchemaError } from "@/lib/proofs/errors";
+import { hasValidGeneratedCustomerProof } from "@/lib/proofs/draft-workflow";
+import { requiresGeneratedCustomerProof } from "@/lib/proofs/workflow-policy";
 import {
   PROOF_ACTIVITY_TYPES,
   PROOF_ATTACHABLE_STATUSES,
@@ -302,6 +304,34 @@ export async function proofHasGeneratedCustomerArtifact(
   return Boolean(preflight?.generated_at);
 }
 
+export async function invalidateGeneratedCustomerProof(
+  adminClient: SupabaseClient,
+  proofId: string
+) {
+  const customerProof = await loadProofFileRecord(adminClient, proofId, "customer_proof");
+  if (customerProof?.id) {
+    await adminClient.from("job_proof_files").delete().eq("id", customerProof.id);
+  }
+
+  const { error } = await adminClient
+    .from("job_proof_preflight")
+    .update({
+      generated_at: null,
+      generated_dropbox_path: null,
+      generated_file_name: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("proof_id", proofId);
+
+  if (error && error.code !== "42703" && error.code !== "42P01") {
+    throw new ProofError(error.message, 500);
+  }
+}
+
+function proofStatusAllowsSourceInvalidation(status: string) {
+  return ["draft", "internal_review"].includes(status);
+}
+
 async function loadManifestItemsByIds(
   adminClient: SupabaseClient,
   jobId: string,
@@ -462,7 +492,7 @@ export async function loadProofsForJob(
 
   const preflightResult = await adminClient
     .from("job_proof_preflight")
-    .select("proof_id, generated_at")
+    .select("proof_id, generated_at, overall_status, updated_at, source_dropbox_path")
     .in("proof_id", proofIds);
 
   const preflightByProofId = new Map(
@@ -470,7 +500,12 @@ export async function loadProofsForJob(
       ? []
       : (preflightResult.data ?? []).map((row) => [
           row.proof_id as string,
-          (row.generated_at as string | null) ?? null,
+          {
+            generatedAt: (row.generated_at as string | null) ?? null,
+            overallStatus: (row.overall_status as string | null) ?? null,
+            updatedAt: (row.updated_at as string | null) ?? null,
+            sourceDropboxPath: (row.source_dropbox_path as string | null) ?? null,
+          },
         ])
   );
 
@@ -485,7 +520,8 @@ export async function loadProofsForJob(
 
       const mapped: JobProofView = {
         ...(proof as JobProofView),
-        brandedPdfGeneratedAt: preflightByProofId.get(proof.id as string) ?? null,
+        brandedPdfGeneratedAt: preflightByProofId.get(proof.id as string)?.generatedAt ?? null,
+        preflightSummary: preflightByProofId.get(proof.id as string) ?? null,
         files: (files ?? [])
           .filter((file) => file.proof_id === proof.id)
           .map((file) => mapProofFileView(file, dropboxFolderPath)),
@@ -1137,6 +1173,20 @@ export async function submitProofInternalReview(
     throw new ProofError("Only draft proofs can enter internal review.", 409);
   }
 
+  const { proofs } = await loadProofsForJob(adminClient, jobId);
+  const proofView = proofs.find((candidate) => candidate.id === proofId);
+
+  if (
+    proofView &&
+    requiresGeneratedCustomerProof(proofView) &&
+    !hasValidGeneratedCustomerProof(proofView)
+  ) {
+    throw new ProofError(
+      "Regenerate the branded PDF before submitting internal review. The current generated proof is missing or out of date.",
+      409
+    );
+  }
+
   const now = new Date().toISOString();
 
   await adminClient.from("job_proof_internal_reviews").insert({
@@ -1426,10 +1476,14 @@ export async function attachProofFile(
   assertProofStatusAllowsAttachment(proof.status);
 
   if (await proofHasGeneratedCustomerArtifact(adminClient, proofId)) {
-    throw new ProofError(
-      "This proof version already has a generated customer PDF. Use Create revised proof to start the next version before changing artwork.",
-      409
-    );
+    if (proofStatusAllowsSourceInvalidation(proof.status as string)) {
+      await invalidateGeneratedCustomerProof(adminClient, proofId);
+    } else {
+      throw new ProofError(
+        "This proof version already has a generated customer PDF. Use Create revised proof to start the next version before changing artwork.",
+        409
+      );
+    }
   }
 
   const metadata = await resolveAttachProofFileMetadata(adminClient, job, input);
@@ -1483,10 +1537,14 @@ export async function removeProofFile(
   assertProofStatusAllowsAttachment(proof.status);
 
   if (await proofHasGeneratedCustomerArtifact(adminClient, proofId)) {
-    throw new ProofError(
-      "This proof version already has a generated customer PDF. Use Create revised proof to start the next version before changing artwork.",
-      409
-    );
+    if (proofStatusAllowsSourceInvalidation(proof.status as string)) {
+      await invalidateGeneratedCustomerProof(adminClient, proofId);
+    } else {
+      throw new ProofError(
+        "This proof version already has a generated customer PDF. Use Create revised proof to start the next version before changing artwork.",
+        409
+      );
+    }
   }
 
   const existing = await loadProofFileRecord(adminClient, proofId, "source_artwork");
@@ -1840,6 +1898,20 @@ export async function markProofReadyToSend(
 
   if (proof.status !== "internal_review") {
     throw new ProofError("Proof must be in internal review before marking ready to send.", 409);
+  }
+
+  const { proofs } = await loadProofsForJob(adminClient, jobId);
+  const proofView = proofs.find((candidate) => candidate.id === proofId);
+
+  if (
+    proofView &&
+    requiresGeneratedCustomerProof(proofView) &&
+    !hasValidGeneratedCustomerProof(proofView)
+  ) {
+    throw new ProofError(
+      "Regenerate the branded PDF before marking this proof ready to send. The current generated proof is missing or out of date.",
+      409
+    );
   }
 
   await assertCustomerFacingProofAttached(

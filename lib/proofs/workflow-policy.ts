@@ -2,6 +2,7 @@ import {
   PROOF_ATTACHABLE_STATUSES,
   REVISABLE_PROOF_STATUSES,
 } from "@/lib/proofs/constants";
+import { hasValidGeneratedCustomerProof } from "@/lib/proofs/draft-workflow";
 import type { JobProofView } from "@/lib/proofs/types";
 import {
   getCustomerProofFile,
@@ -304,6 +305,10 @@ export function canEditProofAttachment(
     return false;
   }
 
+  if (isEditableDraftRevision(proof)) {
+    return true;
+  }
+
   if (!["draft", "internal_review"].includes(proof.status)) {
     return false;
   }
@@ -333,7 +338,7 @@ export function canSendProofToCustomer(proof: JobProofView) {
     return true;
   }
 
-  return hasGeneratedCustomerProof(proofFiles(proof));
+  return hasValidGeneratedCustomerProof(proof);
 }
 
 export function requiresGeneratedCustomerProof(proof: JobProofView) {

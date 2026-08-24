@@ -65,6 +65,12 @@ export type JobProofFileView = JobProofFileRecord & {
 export type JobProofView = JobProofRecord & {
   files: JobProofFileView[];
   brandedPdfGeneratedAt: string | null;
+  preflightSummary: {
+    overallStatus: string | null;
+    updatedAt: string | null;
+    generatedAt: string | null;
+    sourceDropboxPath: string | null;
+  } | null;
   manifestItems: Array<{
     id: string;
     item_reference: string | null;

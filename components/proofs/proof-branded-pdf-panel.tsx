@@ -7,6 +7,7 @@ import { validateOperatorConfirmation } from "@/lib/proof-generator/operator-con
 import { logDiagnosticStage } from "@/lib/proof-generator/diagnostic-stage-log";
 import type { PreflightResult, PreflightOperatorConfirmation } from "@/lib/proof-generator/types";
 import type { JobProofView } from "@/lib/proofs/types";
+import { isGeneratedPdfStale } from "@/lib/proofs/draft-workflow";
 import { getProofActions, requiresGeneratedCustomerProof } from "@/lib/proofs/workflow-policy";
 import {
   getCustomerProofFile,
@@ -96,6 +97,8 @@ export function ProofBrandedPdfPanel({
   const customerProof = getCustomerProofFile(proof.files ?? []);
   const hasAttachment = requiresGeneratedCustomerProof(proof);
   const hasCustomerProof = hasGeneratedCustomerProof(proof.files ?? []);
+  const generatedPdfStale = isGeneratedPdfStale(proof);
+  const isEditableDraft = ["draft", "internal_review"].includes(proof.status);
 
   const warningChecks = useMemo(
     () =>
@@ -247,9 +250,13 @@ export function ProofBrandedPdfPanel({
           Analyse the attached source artwork, review preflight checks, then generate
           the Candid Creative branded PDF into 03 Proofs. Source artwork stays in its
           original Dropbox location.
-          {hasCustomerProof
-            ? " This version already has a generated PDF. Use Create revised proof to start the next version with new artwork."
-            : ""}
+          {hasCustomerProof && generatedPdfStale
+            ? " The generated PDF is out of date. Re-analyse and regenerate before sending."
+            : hasCustomerProof && isEditableDraft
+              ? " Continue preflight and internal review, or regenerate if artwork changes."
+              : hasCustomerProof
+                ? " This version already has a generated PDF. Use Create revised proof to start the next version with new artwork."
+                : ""}
         </p>
       </div>
 
@@ -261,7 +268,11 @@ export function ProofBrandedPdfPanel({
         <div>
           <dt className="text-muted-foreground">Customer proof</dt>
           <dd className="font-medium">
-            {customerProof?.file_name ?? "Not generated yet"}
+            {customerProof?.file_name
+              ? generatedPdfStale
+                ? `${customerProof.file_name} (stale — regenerate required)`
+                : customerProof.file_name
+              : "Not generated yet"}
           </dd>
         </div>
         <div>
@@ -308,7 +319,9 @@ export function ProofBrandedPdfPanel({
               disabled={pending || generating}
               onClick={() => void analyseArtwork()}
             >
-              Analyse artwork & review preflight
+              {hasCustomerProof && !generatedPdfStale
+                ? "Re-analyse artwork & review preflight"
+                : "Analyse artwork & review preflight"}
             </Button>
           )}
         </div>

@@ -30,6 +30,12 @@ import {
   getProofActions,
   requiresGeneratedCustomerProof,
 } from "@/lib/proofs/workflow-policy";
+import {
+  findEditableDraftProofs,
+  getDraftProgressSummary,
+  isGeneratedPdfStale,
+  type EditableDraftProof,
+} from "@/lib/proofs/draft-workflow";
 import type { JobProofView } from "@/lib/proofs/types";
 import type { ProofSelectableManifestItem } from "@/lib/proofs/manifest-items";
 import {
@@ -123,6 +129,10 @@ export function AdminJobProofsPanel({
   const [expandedHistoricLineages, setExpandedHistoricLineages] = useState<Record<string, boolean>>(
     {}
   );
+  const [existingDraftPrompt, setExistingDraftPrompt] = useState<EditableDraftProof[] | null>(
+    null
+  );
+  const [discardConfirmProof, setDiscardConfirmProof] = useState<JobProofView | null>(null);
 
   const completeJobFiles = jobFiles.filter((file) => file.upload_status === "complete");
 
@@ -251,6 +261,36 @@ export function AdminJobProofsPanel({
     }
   }
 
+  function scrollToProofSection(elementId: string) {
+    window.requestAnimationFrame(() => {
+      document.getElementById(elementId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  function continueProof(proof: JobProofView) {
+    setError(null);
+    setShowCreate(false);
+    setExistingDraftPrompt(null);
+    setFocusedProofId(proof.id);
+    scrollToProofSection(`proof-workflow-${proof.id}`);
+  }
+
+  function handleCreateProofClick() {
+    setError(null);
+    setExistingDraftPrompt(null);
+
+    const editableDrafts = findEditableDraftProofs(proofs);
+    const hasCreatableItems = selectableItems.length > 0;
+
+    if (!hasCreatableItems && editableDrafts.length > 0) {
+      setExistingDraftPrompt(editableDrafts);
+      return;
+    }
+
+    setShowCreate(true);
+    scrollToProofSection("create-proof-form");
+  }
+
   async function discardDraftRevision(proofId: string) {
     setError(null);
     setPending(true);
@@ -270,6 +310,16 @@ export function AdminJobProofsPanel({
     }
 
     await refreshProofs();
+  }
+
+  async function confirmDiscardDraftRevision() {
+    if (!discardConfirmProof) {
+      return;
+    }
+
+    const proofId = discardConfirmProof.id;
+    setDiscardConfirmProof(null);
+    await discardDraftRevision(proofId);
   }
 
   const aggregateWorkflow = deriveAggregateJobProofWorkflow(proofs);
@@ -301,7 +351,7 @@ export function AdminJobProofsPanel({
 
   function renderEditableProofWorkflow(proof: JobProofView) {
     return (
-      <>
+      <div id={`proof-workflow-${proof.id}`} className="space-y-4 border-t border-border pt-4">
         <ProofFileAttachmentPanel
           jobId={jobId}
           proof={proof}
@@ -379,7 +429,7 @@ export function AdminJobProofsPanel({
             Generate the branded customer proof PDF before marking ready or sending.
           </p>
         ) : null}
-      </>
+      </div>
     );
   }
 
@@ -500,7 +550,7 @@ export function AdminJobProofsPanel({
           </p>
         </div>
         {proofRequired ? (
-          <Button type="button" onClick={() => setShowCreate(true)} disabled={pending}>
+          <Button type="button" onClick={handleCreateProofClick} disabled={pending}>
             + Create proof
           </Button>
         ) : null}
@@ -591,6 +641,86 @@ export function AdminJobProofsPanel({
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
+      {existingDraftPrompt?.length ? (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 space-y-4">
+          <div className="space-y-1">
+            <h3 className="font-semibold text-amber-950">Draft proof already exists</h3>
+            {existingDraftPrompt.length === 1 ? (
+              <p className="text-sm text-amber-900">
+                A draft proof already exists for {existingDraftPrompt[0].lineageTitle} (v
+                {existingDraftPrompt[0].version_number}).
+              </p>
+            ) : (
+              <div className="space-y-2 text-sm text-amber-900">
+                <p>Draft proofs are already in progress for:</p>
+                <ul className="list-disc pl-5">
+                  {existingDraftPrompt.map((draft) => (
+                    <li key={draft.id}>
+                      {draft.lineageTitle} · v{draft.version_number}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {existingDraftPrompt.length === 1 ? (
+              <Button
+                type="button"
+                onClick={() => continueProof(existingDraftPrompt[0])}
+              >
+                Continue v{existingDraftPrompt[0].version_number}
+              </Button>
+            ) : (
+              existingDraftPrompt.map((draft) => (
+                <Button
+                  key={draft.id}
+                  type="button"
+                  variant="outline"
+                  onClick={() => continueProof(draft)}
+                >
+                  Continue {draft.lineageTitle} v{draft.version_number}
+                </Button>
+              ))
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setExistingDraftPrompt(null)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
+      {discardConfirmProof ? (
+        <div className="rounded-lg border border-red-300 bg-red-50 p-4 space-y-4">
+          <div className="space-y-1">
+            <h3 className="font-semibold text-red-950">
+              Discard {discardConfirmProof.title} proof v{discardConfirmProof.version_number}?
+            </h3>
+            <p className="text-sm text-red-900">
+              This will abandon the current draft and return the proof series to the previous
+              version. This cannot be undone.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending}
+              onClick={() => void confirmDiscardDraftRevision()}
+            >
+              Discard draft revision
+            </Button>
+            <Button type="button" onClick={() => setDiscardConfirmProof(null)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       {lineageGroups.length > 0 ? (
         <div className="space-y-6">
           {lineageGroups.map((lineageProofs) => {
@@ -612,6 +742,13 @@ export function AdminJobProofsPanel({
               : null;
             const historicExpanded = expandedHistoricLineages[lineageId] ?? false;
             const customerProof = currentProof ? getCustomerProofFile(currentProof.files) : null;
+            const draftProgress =
+              currentProof && currentProofActions?.isCurrentEditableDraft
+                ? getDraftProgressSummary(currentProof)
+                : null;
+            const generatedPdfStale = currentProof
+              ? isGeneratedPdfStale(currentProof)
+              : false;
             const referenceMismatch =
               currentProof && jobReference
                 ? !proofReferenceMatchesVersion(currentProof, jobReference)
@@ -664,16 +801,44 @@ export function AdminJobProofsPanel({
                       </div>
                     </div>
 
-                    <div className="text-sm text-muted-foreground space-y-1">
-                      <p>Source: {PROOF_ARTWORK_ORIGIN_LABELS[currentProof.artwork_origin]}</p>
-                      {currentProof.customer_message ? (
-                        <p>Customer message: {currentProof.customer_message}</p>
-                      ) : null}
-                      {customerProof ? <p>Generated PDF: {customerProof.file_name}</p> : null}
-                    </div>
+                    {draftProgress ? (
+                      <dl className="grid gap-2 rounded-lg border border-border bg-background/80 p-3 text-sm">
+                        <div>
+                          <dt className="text-muted-foreground">Source artwork</dt>
+                          <dd>{draftProgress.sourceArtwork}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">Preflight</dt>
+                          <dd>{draftProgress.preflight}</dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">Generated PDF</dt>
+                          <dd className={generatedPdfStale ? "text-amber-800" : undefined}>
+                            {draftProgress.generatedPdf}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">Internal review</dt>
+                          <dd>{draftProgress.internalReview}</dd>
+                        </div>
+                      </dl>
+                    ) : (
+                      <div className="text-sm text-muted-foreground space-y-1">
+                        <p>Source: {PROOF_ARTWORK_ORIGIN_LABELS[currentProof.artwork_origin]}</p>
+                        {currentProof.customer_message ? (
+                          <p>Customer message: {currentProof.customer_message}</p>
+                        ) : null}
+                        {customerProof ? <p>Generated PDF: {customerProof.file_name}</p> : null}
+                      </div>
+                    )}
 
                     <div className="flex flex-wrap gap-2">
-                      {customerProof ? (
+                      {currentProofActions?.isCurrentEditableDraft ? (
+                        <Button type="button" onClick={() => continueProof(currentProof)}>
+                          Continue proof
+                        </Button>
+                      ) : null}
+                      {customerProof && !generatedPdfStale ? (
                         <Button
                           type="button"
                           variant="outline"
@@ -706,7 +871,7 @@ export function AdminJobProofsPanel({
                           type="button"
                           variant="outline"
                           disabled={pending}
-                          onClick={() => discardDraftRevision(currentProof.id)}
+                          onClick={() => setDiscardConfirmProof(currentProof)}
                         >
                           Discard draft revision
                         </Button>
@@ -803,7 +968,13 @@ export function AdminJobProofsPanel({
       ) : null}
 
       {showCreate ? (
-        <div className="rounded-lg border border-border p-4 space-y-5">
+        <div id="create-proof-form" className="rounded-lg border border-border p-4 space-y-5">
+          {findEditableDraftProofs(proofs).length > 0 && selectableItems.length > 0 ? (
+            <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+              Some proof series already have draft revisions in progress. You can still create
+              a first proof for manifest items that do not have an active proof series yet.
+            </p>
+          ) : null}
           <div>
             <h3 className="font-semibold">Create proof</h3>
             <p className="mt-1 text-sm text-muted-foreground">

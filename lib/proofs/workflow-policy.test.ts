@@ -259,10 +259,10 @@ describe("canCreateRevision", () => {
 });
 
 describe("canEditProofAttachment", () => {
-  it("blocks attachment edits once a generated customer proof exists", () => {
+  it("blocks attachment edits once a proof is ready_to_send", () => {
     assert.equal(
       canEditProofAttachment({
-        status: "draft",
+        status: "ready_to_send",
         brandedPdfGeneratedAt: "2026-01-01",
         files: [{ file_role: "customer_proof", dropbox_path: "/proof.pdf" } as never],
       }),
@@ -276,6 +276,20 @@ describe("canEditProofAttachment", () => {
         status: "draft",
         brandedPdfGeneratedAt: null,
         files: [{ file_role: "source_artwork", dropbox_path: "/art.pdf" } as never],
+      }),
+      true
+    );
+  });
+
+  it("allows attachment edits on editable drafts even when a generated PDF exists", () => {
+    assert.equal(
+      canEditProofAttachment({
+        status: "draft",
+        brandedPdfGeneratedAt: "2026-01-01",
+        files: [
+          { file_role: "source_artwork", dropbox_path: "/art.pdf" } as never,
+          { file_role: "customer_proof", dropbox_path: "/proof.pdf" } as never,
+        ],
       }),
       true
     );
