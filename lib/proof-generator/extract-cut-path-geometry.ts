@@ -2,6 +2,7 @@ import { inflateSync } from "node:zlib";
 import { PDFDocument } from "pdf-lib";
 
 import { logProofGeneratorDebug } from "@/lib/proof-generator/artwork-buffer";
+import { tokenizeContentStream } from "@/lib/proof-generator/content-stream-tokenizer";
 
 export type CutPathPathCommand =
   | { op: "M"; x: number; y: number }
@@ -738,103 +739,6 @@ function resolvePageResources(
   }
 
   return maps;
-}
-
-function tokenizeContentStream(content: string): string[] {
-  const tokens: string[] = [];
-  let index = 0;
-
-  while (index < content.length) {
-    const char = content[index];
-
-    if (/\s/.test(char)) {
-      index += 1;
-      continue;
-    }
-
-    if (char === "%") {
-      while (index < content.length && content[index] !== "\n" && content[index] !== "\r") {
-        index += 1;
-      }
-      continue;
-    }
-
-    if (char === "(") {
-      index += 1;
-      let depth = 1;
-      while (index < content.length && depth > 0) {
-        if (content[index] === "\\") {
-          index += 2;
-          continue;
-        }
-        if (content[index] === "(") depth += 1;
-        if (content[index] === ")") depth -= 1;
-        index += 1;
-      }
-      continue;
-    }
-
-    if (char === "<") {
-      index += 1;
-      if (content[index] === "<") {
-        index += 1;
-        while (index < content.length && !(content[index] === ">" && content[index + 1] === ">")) {
-          index += 1;
-        }
-        index += 2;
-      } else {
-        while (index < content.length && content[index] !== ">") {
-          index += 1;
-        }
-        index += 1;
-      }
-      continue;
-    }
-
-    if (char === "[") {
-      index += 1;
-      let depth = 1;
-      while (index < content.length && depth > 0) {
-        if (content[index] === "[") depth += 1;
-        if (content[index] === "]") depth -= 1;
-        index += 1;
-      }
-      continue;
-    }
-
-    if (char === "/") {
-      index += 1;
-      let name = "/";
-      while (index < content.length && !/[\s\[\]()<>]/.test(content[index])) {
-        name += content[index];
-        index += 1;
-      }
-      tokens.push(name);
-      continue;
-    }
-
-    if (char === "-" && index + 1 < content.length && /\d/.test(content[index + 1])) {
-      let token = "-";
-      index += 1;
-      while (index < content.length && /[\d.]/.test(content[index])) {
-        token += content[index];
-        index += 1;
-      }
-      tokens.push(token);
-      continue;
-    }
-
-    let token = "";
-    while (index < content.length && !/[\s\[\]()<>/%]/.test(content[index])) {
-      token += content[index];
-      index += 1;
-    }
-    if (token) {
-      tokens.push(token);
-    }
-  }
-
-  return tokens;
 }
 
 function resolveColorSpaceName(name: string, colorSpaceMap: Map<string, string>) {

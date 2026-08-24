@@ -135,12 +135,15 @@ export async function generateCustomerProofPdf(input: {
           buffer: input.sourceBuffer,
           originalCutPathSuppressed: false,
           method: "none",
+          suppressionReason:
+            error instanceof Error ? error.message : "content stream could not be safely parsed",
         };
       }
       logDiagnosticStage("21", "original cut-path suppression completed/fallback", {
         sourceFileName: input.sourceFileName,
         method: previewSource.method,
         suppressed: previewSource.originalCutPathSuppressed,
+        suppressionReason: previewSource.suppressionReason ?? null,
       });
     }
 

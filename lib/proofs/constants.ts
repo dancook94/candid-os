@@ -154,6 +154,7 @@ export const PROOF_ACTIVITY_TYPES = {
   proofChangesRequested: "proof_changes_requested",
   proofApproved: "proof_approved",
   proofSuperseded: "proof_superseded",
+  proofDiscarded: "proof_discarded",
   proofBypassed: "proof_bypassed",
   proofRequirementChanged: "proof_requirement_changed",
 } as const;

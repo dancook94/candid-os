@@ -7,6 +7,7 @@ import type { ProofInternalChecklistKey } from "@/lib/proofs/constants";
 import { ProofError } from "@/lib/proofs/errors";
 import {
   createRevisedJobProof,
+  discardDraftRevision,
   markProofReadyToSend,
   resendProofReadyNotification,
   sendJobProof,
@@ -85,8 +86,19 @@ export async function POST(request: Request, context: RouteContext) {
           customerMessage: body.customerMessage,
           internalNote: body.internalNote,
         });
-        return NextResponse.json({ ok: true, proofId: revisedProof.id });
+        return NextResponse.json({
+          ok: true,
+          proofId: revisedProof.proof.id,
+          message: revisedProof.redirectMessage,
+        });
       }
+      case "discard_draft_revision":
+        await discardDraftRevision(adminClient, {
+          jobId,
+          proofId,
+          actorProfileId: authResult.userId,
+        });
+        break;
       default:
         return NextResponse.json({ error: "Unknown action." }, { status: 400 });
     }

@@ -27,7 +27,66 @@ describe("getProofActions", () => {
 
     assert.equal(actions.canCreateRevision, true);
     assert.equal(actions.canEditAttachment, false);
+    assert.equal(actions.isCurrentEditableDraft, false);
     assert.match(actions.revisionHelpText ?? "", /Creates v8/);
+  });
+
+  it("shows current revision messaging on an editable draft head", () => {
+    const proof = {
+      id: "2",
+      status: "draft" as const,
+      proof_lineage_id: "lineage-a",
+      version_number: 8,
+      brandedPdfGeneratedAt: null,
+      files: [{ file_role: "source_artwork", dropbox_path: "/art.pdf" } as never],
+      created_at: "2026-01-03",
+      sent_at: null,
+      viewed_at: null,
+      approved_at: null,
+      changes_requested_at: null,
+      ready_to_send_at: null,
+    };
+
+    const actions = getProofActions(proof, [proof], {
+      lineageProofs: [proof],
+      assumeCurrentInLineage: true,
+    });
+
+    assert.equal(actions.isCurrentEditableDraft, true);
+    assert.equal(actions.currentRevisionLabel, "Current revision");
+    assert.equal(actions.canCreateRevision, false);
+    assert.match(actions.editableDraftHelpText ?? "", /current revision/i);
+  });
+
+  it("allows discarding a current draft when a previous version exists", () => {
+    const currentDraft = {
+      id: "2",
+      status: "draft" as const,
+      proof_lineage_id: "lineage-a",
+      version_number: 8,
+      brandedPdfGeneratedAt: null,
+      files: [],
+      created_at: "2026-01-03",
+      sent_at: null,
+      viewed_at: null,
+      approved_at: null,
+      changes_requested_at: null,
+      ready_to_send_at: null,
+    };
+    const previous = {
+      id: "1",
+      status: "draft" as const,
+      proof_lineage_id: "lineage-a",
+      version_number: 7,
+      created_at: "2026-01-02",
+    };
+
+    const actions = getProofActions(currentDraft, [currentDraft, previous], {
+      lineageProofs: [currentDraft, previous],
+      assumeCurrentInLineage: true,
+    });
+
+    assert.equal(actions.canDiscardDraftRevision, true);
   });
 
   it("blocks attachment edits once a proof is ready_to_send", () => {
@@ -65,6 +124,31 @@ describe("canCreateRevision", () => {
         ]
       ),
       true
+    );
+  });
+
+  it("does not offer revision for a current editable draft", () => {
+    assert.equal(
+      canCreateRevision(
+        {
+          id: "2",
+          status: "draft",
+          proof_lineage_id: "lineage-a",
+          version_number: 8,
+          brandedPdfGeneratedAt: "2026-01-01",
+          files: [{ file_role: "customer_proof", dropbox_path: "/proof.pdf" } as never],
+        },
+        [
+          {
+            id: "2",
+            status: "draft",
+            proof_lineage_id: "lineage-a",
+            version_number: 8,
+            created_at: "2026-01-03",
+          },
+        ]
+      ),
+      false
     );
   });
 

@@ -1,6 +1,7 @@
 import { deflateSync, inflateSync } from "node:zlib";
 
 import { logProofGeneratorDebug } from "@/lib/proof-generator/artwork-buffer";
+import { tokenizeContentStreamSafe } from "@/lib/proof-generator/content-stream-tokenizer";
 import {
   logProofGeneratorStage,
   PROOF_GENERATOR_TIMEOUTS,
@@ -12,6 +13,7 @@ export type SuppressCutPathPreviewResult = {
   buffer: Buffer;
   originalCutPathSuppressed: boolean;
   method: "ocg_content_filter" | "separation_content_filter" | "none" | "unsupported_source";
+  suppressionReason?: string | null;
 };
 
 type ParsedPdfObject = {
@@ -354,76 +356,6 @@ function resolveStreamResourceMaps(input: {
   return { colorSpaceMap, propertiesMap };
 }
 
-function tokenizeContentStream(content: string): string[] {
-  const tokens: string[] = [];
-  let index = 0;
-
-  while (index < content.length) {
-    const char = content[index];
-
-    if (/\s/.test(char)) {
-      index += 1;
-      continue;
-    }
-
-    if (char === "%") {
-      while (index < content.length && content[index] !== "\n" && content[index] !== "\r") {
-        index += 1;
-      }
-      continue;
-    }
-
-    if (char === "(") {
-      index += 1;
-      let depth = 1;
-      while (index < content.length && depth > 0) {
-        if (content[index] === "\\") {
-          index += 2;
-          continue;
-        }
-        if (content[index] === "(") {
-          depth += 1;
-        }
-        if (content[index] === ")") {
-          depth -= 1;
-        }
-        index += 1;
-      }
-      continue;
-    }
-
-    if (char === "<") {
-      index += 1;
-      if (content[index] === "<") {
-        index += 1;
-        while (index < content.length && !(content[index] === ">" && content[index + 1] === ">")) {
-          index += 1;
-        }
-        index += 2;
-        continue;
-      }
-
-      while (index < content.length && content[index] !== ">") {
-        index += 1;
-      }
-      index += 1;
-      continue;
-    }
-
-    let token = "";
-    while (index < content.length && !/[\s<>()[%]/.test(content[index])) {
-      token += content[index];
-      index += 1;
-    }
-
-    if (token) {
-      tokens.push(token);
-    }
-  }
-
-  return tokens;
-}
-
 const PATH_PAINT_OPERATORS = new Set(["S", "s", "f", "F", "f*", "B", "B*", "b", "b*"]);
 const PATH_BUILD_OPERATORS = new Set(["m", "l", "c", "v", "y", "re", "h"]);
 
@@ -435,8 +367,12 @@ function filterContentStream(input: {
   propertiesMap: Map<string, string>;
   objects: Map<string, ParsedPdfObject>;
   ocgRegistry: Map<string, string>;
-}): { filtered: string; changed: boolean } {
-  const tokens = tokenizeContentStream(input.content);
+}): { filtered: string; changed: boolean } | { error: string } {
+  const tokenizeResult = tokenizeContentStreamSafe(input.content);
+  if (!tokenizeResult.ok) {
+    return { error: tokenizeResult.reason };
+  }
+  const tokens = tokenizeResult.tokens;
   const output: string[] = [];
   const operands: string[] = [];
   const ocgSuppressDepth: boolean[] = [];
@@ -779,6 +715,36 @@ function createCustomerPreviewPdfBufferInternal(
   confirmedCutPath: { name: string; sourceType: ProductionFeatureSourceType },
   mode: "optional_content_group" | "separation"
 ): SuppressCutPathPreviewResult {
+  const fallbackMethod =
+    mode === "optional_content_group" ? "ocg_content_filter" : "separation_content_filter";
+
+  try {
+    return createCustomerPreviewPdfBufferInternalUnsafe(
+      sourceBuffer,
+      confirmedCutPath,
+      mode,
+      fallbackMethod
+    );
+  } catch (error) {
+    const reason =
+      error instanceof Error ? error.message : "content stream could not be safely parsed";
+    logProofGeneratorStage("cut-path suppression skipped/fallback", { reason });
+    logProofGeneratorDebug("cut_path_preview_suppression_parse_failed", { reason });
+    return {
+      buffer: sourceBuffer,
+      originalCutPathSuppressed: false,
+      method: fallbackMethod,
+      suppressionReason: reason,
+    };
+  }
+}
+
+function createCustomerPreviewPdfBufferInternalUnsafe(
+  sourceBuffer: Buffer,
+  confirmedCutPath: { name: string; sourceType: ProductionFeatureSourceType },
+  mode: "optional_content_group" | "separation",
+  fallbackMethod: "ocg_content_filter" | "separation_content_filter"
+): SuppressCutPathPreviewResult {
   const objects = parsePdfObjects(sourceBuffer);
   const pageObject = findFirstPageObject(objects);
   if (!pageObject) {
@@ -813,7 +779,7 @@ function createCustomerPreviewPdfBufferInternal(
       streamHeader: object.header,
       objects: workingObjects,
     });
-    const { filtered, changed } = filterContentStream({
+    const filterResult = filterContentStream({
       content,
       targetCutPathName: confirmedCutPath.name,
       mode,
@@ -822,6 +788,21 @@ function createCustomerPreviewPdfBufferInternal(
       objects: workingObjects,
       ocgRegistry,
     });
+
+    if ("error" in filterResult) {
+      logProofGeneratorStage("cut-path suppression skipped/fallback", {
+        reason: filterResult.error,
+        streamKey,
+      });
+      return {
+        buffer: sourceBuffer,
+        originalCutPathSuppressed: false,
+        method: fallbackMethod,
+        suppressionReason: filterResult.error,
+      };
+    }
+
+    const { filtered, changed } = filterResult;
 
     if (!changed) {
       continue;

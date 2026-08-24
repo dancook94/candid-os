@@ -42,14 +42,20 @@ export type ProofActionContext = {
 
 export type ProofActions = {
   isCurrentInLineage: boolean;
+  isCurrentEditableDraft: boolean;
+  currentRevisionLabel: string | null;
   canEditAttachment: boolean;
   canReplaceAttachment: boolean;
   canRemoveAttachment: boolean;
   canGenerateBrandedPdf: boolean;
   canSendToCustomer: boolean;
   canCreateRevision: boolean;
+  canDiscardDraftRevision: boolean;
   revisionHelpText: string | null;
+  editableDraftHelpText: string | null;
 };
+
+const EDITABLE_DRAFT_STATUSES = ["draft", "internal_review"] as const;
 
 function proofFiles(proof: Pick<JobProofView, "files">) {
   return proof.files ?? [];
@@ -127,6 +133,14 @@ export function isCurrentProofInLineage(
 
 function proofSupportsNextRevision(proof: ProofWorkflowContext) {
   if (
+    EDITABLE_DRAFT_STATUSES.includes(
+      proof.status as (typeof EDITABLE_DRAFT_STATUSES)[number]
+    )
+  ) {
+    return false;
+  }
+
+  if (
     REVISABLE_PROOF_STATUSES.includes(
       proof.status as (typeof REVISABLE_PROOF_STATUSES)[number]
     )
@@ -135,6 +149,72 @@ function proofSupportsNextRevision(proof: ProofWorkflowContext) {
   }
 
   return proofHasGeneratedCustomerArtifactView(proof);
+}
+
+export function isEditableDraftRevision(
+  proof: Pick<JobProofView, "status">
+): boolean {
+  return EDITABLE_DRAFT_STATUSES.includes(
+    proof.status as (typeof EDITABLE_DRAFT_STATUSES)[number]
+  );
+}
+
+export function getEditableDraftInLineage(lineageProofs: ProofLineageMember[]) {
+  const current = getCurrentProofInLineage(lineageProofs);
+  if (!current || !isEditableDraftRevision(current)) {
+    return null;
+  }
+  return current;
+}
+
+export function canDiscardDraftRevision(
+  proof: ProofLineageMember &
+    Partial<
+      Pick<
+        JobProofView,
+        | "sent_at"
+        | "viewed_at"
+        | "approved_at"
+        | "changes_requested_at"
+        | "ready_to_send_at"
+      >
+    >,
+  lineageProofs: ProofLineageMember[]
+) {
+  if (!isEditableDraftRevision(proof)) {
+    return false;
+  }
+
+  if (
+    proof.sent_at ||
+    proof.viewed_at ||
+    proof.approved_at ||
+    proof.changes_requested_at ||
+    proof.ready_to_send_at
+  ) {
+    return false;
+  }
+
+  if (!isCurrentProofInLineage(proof, lineageProofs)) {
+    return false;
+  }
+
+  return lineageProofs.some(
+    (candidate) =>
+      candidate.id !== proof.id &&
+      !["cancelled", "superseded"].includes(candidate.status) &&
+      candidate.version_number < proof.version_number
+  );
+}
+
+export function editableDraftHelpText(
+  proof: Pick<JobProofView, "version_number" | "status">
+) {
+  if (!isEditableDraftRevision(proof)) {
+    return null;
+  }
+
+  return `This is the current revision (v${proof.version_number}). Attach or replace source artwork, run preflight, then generate the branded PDF. Create a new revision only after this version is sent or approved.`;
 }
 
 /**
@@ -192,16 +272,24 @@ export function getProofActions(
   const canEditAttachment = canEditProofAttachment(proof);
   const canCreateRevisionAction =
     isCurrentInLineage && canCreateNextRevision(proof, lineageProofs);
+  const isCurrentEditableDraft =
+    isCurrentInLineage && isEditableDraftRevision(proof);
 
   return {
     isCurrentInLineage,
+    isCurrentEditableDraft,
+    currentRevisionLabel: isCurrentEditableDraft ? "Current revision" : null,
     canEditAttachment,
     canReplaceAttachment: canEditAttachment,
     canRemoveAttachment: canEditAttachment,
     canGenerateBrandedPdf: canGenerateBrandedPdf(proof),
     canSendToCustomer: canSendProofToCustomer(proof as JobProofView),
     canCreateRevision: canCreateRevisionAction,
+    canDiscardDraftRevision: canDiscardDraftRevision(proof, lineageProofs),
     revisionHelpText: canCreateRevisionAction ? revisionHelpText(proof) : null,
+    editableDraftHelpText: isCurrentEditableDraft
+      ? editableDraftHelpText(proof)
+      : null,
   };
 }
 

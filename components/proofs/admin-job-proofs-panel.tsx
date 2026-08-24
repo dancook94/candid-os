@@ -227,12 +227,16 @@ export function AdminJobProofsPanel({
       body: JSON.stringify({ action: "create_revised_proof" }),
     });
 
-    const payload = (await response.json()) as { error?: string; proofId?: string };
+    const payload = (await response.json()) as { error?: string; proofId?: string; message?: string | null };
     setPending(false);
 
     if (!response.ok) {
       setError(payload.error ?? "Unable to create revised proof.");
       return;
+    }
+
+    if (payload.message) {
+      setError(null);
     }
 
     await refreshProofs();
@@ -245,6 +249,27 @@ export function AdminJobProofsPanel({
           ?.scrollIntoView({ behavior: "smooth", block: "start" });
       });
     }
+  }
+
+  async function discardDraftRevision(proofId: string) {
+    setError(null);
+    setPending(true);
+
+    const response = await fetch(`/api/admin/jobs/${jobId}/proofs/${proofId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "discard_draft_revision" }),
+    });
+
+    const payload = (await response.json()) as { error?: string };
+    setPending(false);
+
+    if (!response.ok) {
+      setError(payload.error ?? "Unable to discard draft revision.");
+      return;
+    }
+
+    await refreshProofs();
   }
 
   const aggregateWorkflow = deriveAggregateJobProofWorkflow(proofs);
@@ -612,14 +637,23 @@ export function AdminJobProofsPanel({
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="space-y-1">
                         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                          Current proof
+                          {currentProofActions?.isCurrentEditableDraft
+                            ? "Current revision"
+                            : "Current proof"}
                         </p>
                         <div className="flex flex-wrap items-center gap-3">
-                          <p className="text-lg font-semibold">v{currentProof.version_number}</p>
+                          <p className="text-lg font-semibold">
+                            {lineageProofs[0]?.title} · v{currentProof.version_number}
+                          </p>
                           <StatusBadge
                             status={mapProofStatusToBadge(currentProof.status)}
                             label={currentStatusLabel ?? currentProof.status}
                           />
+                          {currentProofActions?.currentRevisionLabel ? (
+                            <span className="rounded-full bg-[var(--candid-yellow)]/20 px-2.5 py-0.5 text-xs font-medium text-foreground">
+                              {currentProofActions.currentRevisionLabel}
+                            </span>
+                          ) : null}
                         </div>
                         {referenceMismatch ? (
                           <p className="text-xs text-amber-800">
@@ -667,7 +701,23 @@ export function AdminJobProofsPanel({
                           Create revised proof
                         </Button>
                       ) : null}
+                      {currentProofActions?.canDiscardDraftRevision ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={pending}
+                          onClick={() => discardDraftRevision(currentProof.id)}
+                        >
+                          Discard draft revision
+                        </Button>
+                      ) : null}
                     </div>
+
+                    {currentProofActions?.editableDraftHelpText ? (
+                      <p className="text-xs text-muted-foreground">
+                        {currentProofActions.editableDraftHelpText}
+                      </p>
+                    ) : null}
 
                     {currentProofActions?.revisionHelpText ? (
                       <p className="text-xs text-muted-foreground">

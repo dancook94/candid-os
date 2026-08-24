@@ -46,6 +46,10 @@ import {
   shouldOfferCreateRevisedProof,
 } from "@/lib/proofs/versioning";
 import {
+  canDiscardDraftRevision,
+  getEditableDraftInLineage,
+} from "@/lib/proofs/workflow-policy";
+import {
   assertProofUploadFile,
   getFileExtension,
   isCustomerFacingProofAsset,
@@ -843,6 +847,33 @@ export async function createRevisedJobProof(
   const lineageProofs = allProofs.filter(
     (proof) => proof.proof_lineage_id === proofLineageId
   );
+  const editableDraft = getEditableDraftInLineage(lineageProofs);
+
+  if (editableDraft) {
+    if (editableDraft.id !== sourceProofId) {
+      const { data: existingDraft, error: existingDraftError } = await adminClient
+        .from("job_proofs")
+        .select(PROOF_SELECT)
+        .eq("id", editableDraft.id)
+        .eq("job_id", jobId)
+        .maybeSingle();
+
+      if (existingDraftError || !existingDraft) {
+        throw new ProofError(existingDraftError?.message ?? "Existing draft not found.", 500);
+      }
+
+      return {
+        proof: existingDraft,
+        redirectMessage: `A draft revision already exists: v${editableDraft.version_number}.`,
+      };
+    }
+
+    throw new ProofError(
+      `A draft revision already exists: v${editableDraft.version_number}. Finish artwork and generate the branded PDF, or discard this draft to return to the previous version.`,
+      409
+    );
+  }
+
   const revisionContext = buildProofRevisionContext({
     id: sourceProofId,
     status: sourceProof.status as JobProofView["status"],
@@ -970,7 +1001,120 @@ export async function createRevisedJobProof(
     opportunityId: job.opportunity_id,
   });
 
-  return proof;
+  return { proof, redirectMessage: null };
+}
+
+export async function discardDraftRevision(
+  adminClient: SupabaseClient,
+  {
+    jobId,
+    proofId,
+    actorProfileId,
+  }: {
+    jobId: string;
+    proofId: string;
+    actorProfileId: string;
+  }
+) {
+  const job = await loadJobContext(adminClient, jobId);
+  const proof = await loadMutableProof(adminClient, jobId, proofId);
+
+  const { data: existingProofs, error: existingError } = await adminClient
+    .from("job_proofs")
+    .select(PROOF_SELECT)
+    .eq("job_id", jobId);
+
+  if (existingError) {
+    throw new ProofError(existingError.message, 500);
+  }
+
+  const lineageProofs = (existingProofs ?? []).filter(
+    (candidate) => candidate.proof_lineage_id === proof.proof_lineage_id
+  );
+
+  if (
+    !canDiscardDraftRevision(
+      {
+        id: proof.id as string,
+        status: proof.status as JobProofView["status"],
+        version_number: proof.version_number as number,
+        proof_lineage_id: proof.proof_lineage_id as string,
+        sent_at: proof.sent_at as string | null,
+        viewed_at: proof.viewed_at as string | null,
+        approved_at: proof.approved_at as string | null,
+        changes_requested_at: proof.changes_requested_at as string | null,
+        ready_to_send_at: proof.ready_to_send_at as string | null,
+      },
+      lineageProofs.map((candidate) => ({
+        id: candidate.id as string,
+        status: candidate.status as JobProofView["status"],
+        version_number: candidate.version_number as number,
+        proof_lineage_id: candidate.proof_lineage_id as string,
+      }))
+    )
+  ) {
+    throw new ProofError(
+      "This draft revision cannot be discarded. It may have customer activity, or there is no previous version to restore.",
+      409
+    );
+  }
+
+  const now = new Date().toISOString();
+
+  const { error: updateError } = await adminClient
+    .from("job_proofs")
+    .update({
+      status: "cancelled",
+      cancelled_at: now,
+      updated_at: now,
+    })
+    .eq("id", proofId);
+
+  if (updateError) {
+    throw new ProofError(updateError.message, 500);
+  }
+
+  await syncJobProofWorkflowStatus(adminClient, jobId);
+
+  const restoredProof = getCurrentProofInLineage(
+    lineageProofs.map((candidate) => ({
+      ...candidate,
+      status: candidate.id === proofId ? "cancelled" : (candidate.status as string),
+    }))
+  );
+
+  await logProofActivity(adminClient, {
+    activityType: PROOF_ACTIVITY_TYPES.proofDiscarded,
+    description: `${proof.proof_reference} discarded. ${
+      restoredProof
+        ? `v${restoredProof.version_number} is now the current version in this series.`
+        : "No active version remains in this series."
+    }`,
+    companyId: job.company_id,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
+    actorProfileId,
+    metadata: {
+      job_id: jobId,
+      proof_id: proofId,
+      proof_lineage_id: proof.proof_lineage_id,
+      version_number: proof.version_number,
+      restored_proof_id: restoredProof?.id ?? null,
+      restored_version_number: restoredProof?.version_number ?? null,
+    },
+  });
+
+  revalidateJobPages({
+    jobId,
+    quoteId: job.quote_id,
+    opportunityId: job.opportunity_id,
+  });
+
+  return {
+    ok: true,
+    restoredProofId: restoredProof?.id ?? null,
+    restoredVersionNumber: restoredProof?.version_number ?? null,
+  };
 }
 
 export async function submitProofInternalReview(
