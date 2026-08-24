@@ -37,6 +37,7 @@ import {
 import { joinPdfParts, PDF_NOT_SPECIFIED } from "@/lib/proof-generator/pdf-text";
 import type { PreflightResult } from "@/lib/proof-generator/types";
 import { validateGeneratedProofPdf } from "@/lib/proof-generator/validate-proof-pdf";
+import { resolvePreflightChecksAfterProductionConfirmation } from "@/lib/proof-generator/warnings";
 import { buildCustomerProofPdfFileName } from "@/lib/proofs/dropbox";
 
 const FOOTER_BAR_HEIGHT = 34;
@@ -232,6 +233,10 @@ export async function generateCustomerProofPdf(input: {
     features.cutPathOverlayRendered =
       overlayRequested && cutPathOverlayGeometryAvailable && cutPathOverlayRendered;
     preflight.productionFeatures = features;
+    preflight.checks = resolvePreflightChecksAfterProductionConfirmation(
+      preflight.checks,
+      features
+    );
 
     if (overlayRequestedInitial && features.confirmedCutPath && features.showCutPathOnProof) {
       const cutPathSize = features.cutPathSize ?? features.resolvedProductionFinishedSize;
@@ -265,6 +270,7 @@ export async function generateCustomerProofPdf(input: {
     updateProofPageIndicators(doc.getPages(), fonts, 1);
 
     input.preflight.productionFeatures = features;
+    input.preflight.checks = preflight.checks;
 
     const bytes = await doc.save();
     const pdfBuffer = Buffer.from(bytes);

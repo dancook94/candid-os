@@ -260,6 +260,45 @@ describe("applyAuthoritativeFinishedSizeToPreflight", () => {
     assert.ok(updated.productionFeatures.cutPathSize);
     assert.ok(Math.abs((updated.productionFeatures.cutPathSize?.widthMm ?? 0) - 400) < 2);
   });
+
+  it("uses resolved preflight cut path state after finished size is applied", async () => {
+    const buffer = buildContourCutTestPdfBuffer();
+    const metadata = enrichMetadataWithResolvedGeometry(baseMetadata(), buffer);
+    const preflight = basePreflight({
+      metadata,
+      productionFeatures: baseProductionFeatures({
+        cutPathCandidates: [
+          {
+            name: "CutContour",
+            sourceType: "separation",
+            confidence: "high",
+            reason: "Separation name",
+          },
+        ],
+        expectsCutPath: true,
+        cutPathOverlayAvailable: true,
+        confirmedCutPath: {
+          name: "CutContour",
+          sourceType: "separation",
+          confirmedAt: "2026-01-01",
+          confirmedByProfileId: "user-1",
+        },
+        showCutPathOnProof: true,
+        cutPathSizeExtractable: true,
+      }),
+    });
+
+    const updated = await applyAuthoritativeFinishedSizeToPreflight(preflight, buffer);
+
+    assert.equal(
+      updated.checks.some((check) => check.key === "cut_path_candidates"),
+      false
+    );
+    const confirmed = updated.checks.find((check) => check.key === "cut_path_confirmed");
+    assert.ok(confirmed);
+    assert.equal(confirmed?.status, "pass");
+    assert.equal(confirmed?.message, "CutContour confirmed by Candid");
+  });
 });
 
 describe("cut path extraction guard", () => {

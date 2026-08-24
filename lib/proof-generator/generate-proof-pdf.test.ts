@@ -464,6 +464,13 @@ describe("generateCustomerProofPdf", () => {
     assert.ok(pdf.byteLength > 1000);
     assert.equal(preflight.productionFeatures.cutPathOverlayRendered, true);
     assert.equal(preflight.productionFeatures.originalCutPathSuppressed, false);
+    assert.equal(
+      preflight.checks.some((check) => check.key === "cut_path_candidates"),
+      false
+    );
+    const cutPathCheck = preflight.checks.find((check) => check.key === "cut_path_confirmed");
+    assert.ok(cutPathCheck);
+    assert.equal(cutPathCheck?.message, "CutContour confirmed by Candid");
 
     const validation = await validateGeneratedProofPdf(pdf);
     assert.equal(validation.ok, true);

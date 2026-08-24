@@ -411,7 +411,7 @@ function buildProductionFeatureChecks(input: {
         .join(", "),
       expectedValue: null,
       message:
-        "Possible cut paths detected. Confirm the production cut path or mark no cut line required.",
+        "Possible cut path detected — Candid confirmation required.",
       confidence: productionFeatures.cutPathCandidates[0]?.confidence ?? "medium",
     });
   } else if (productionFeatures.expectsCutPath) {

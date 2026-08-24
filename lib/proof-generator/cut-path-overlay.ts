@@ -101,7 +101,8 @@ export function mapPdfPointToPreview(
 
 export function buildSvgPathFromGeometry(
   geometry: CutPathGeometry,
-  placement: ArtworkPreviewPlacement
+  placement: ArtworkPreviewPlacement,
+  pageHeight: number
 ) {
   const parts: string[] = [];
 
@@ -109,7 +110,7 @@ export function buildSvgPathFromGeometry(
     for (const command of subpath) {
       if (command.op === "M" || command.op === "L") {
         const mapped = mapPdfPointToPreview(command, geometry, placement);
-        parts.push(`${command.op} ${mapped.x} ${mapped.y}`);
+        parts.push(`${command.op} ${mapped.x} ${pageHeight - mapped.y}`);
         continue;
       }
 
@@ -117,7 +118,9 @@ export function buildSvgPathFromGeometry(
         const p1 = mapPdfPointToPreview({ x: command.x1, y: command.y1 }, geometry, placement);
         const p2 = mapPdfPointToPreview({ x: command.x2, y: command.y2 }, geometry, placement);
         const p3 = mapPdfPointToPreview({ x: command.x, y: command.y }, geometry, placement);
-        parts.push(`C ${p1.x} ${p1.y} ${p2.x} ${p2.y} ${p3.x} ${p3.y}`);
+        parts.push(
+          `C ${p1.x} ${pageHeight - p1.y} ${p2.x} ${pageHeight - p2.y} ${p3.x} ${pageHeight - p3.y}`
+        );
         continue;
       }
 
@@ -135,7 +138,7 @@ export function drawCutPathOverlay(
   geometry: CutPathGeometry,
   placement: ArtworkPreviewPlacement
 ) {
-  const svgPath = buildSvgPathFromGeometry(geometry, placement);
+  const svgPath = buildSvgPathFromGeometry(geometry, placement, page.getHeight());
   return drawCutPathOverlayPath(page, svgPath);
 }
 

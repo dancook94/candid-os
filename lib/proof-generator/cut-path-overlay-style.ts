@@ -56,6 +56,13 @@ export function drawCutPathOverlayPath(page: PDFPage, svgPath: string) {
     return false;
   }
 
-  page.drawSvgPath(svgPath, getCutPathOverlayStrokeOptions());
+  const pageHeight = page.getHeight();
+
+  page.drawSvgPath(svgPath, {
+    ...getCutPathOverlayStrokeOptions(),
+    x: 0,
+    y: pageHeight,
+  });
+
   return true;
 }

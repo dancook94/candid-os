@@ -23,7 +23,7 @@ import type {
   QuotedSpecificationItem,
   SizeComparisonResult,
 } from "@/lib/proof-generator/types";
-import { buildPreflightChecks } from "@/lib/proof-generator/warnings";
+import { buildPreflightChecks, resolvePreflightChecksAfterProductionConfirmation } from "@/lib/proof-generator/warnings";
 
 export type { AuthoritativeFinishedSizeSource } from "@/lib/proof-generator/types";
 
@@ -271,14 +271,17 @@ export async function applyAuthoritativeFinishedSizeToPreflight(
     finishedSizeSource: resolved.finishedSizeSource,
   });
 
-  const checks = buildPreflightChecks({
-    metadata,
-    quotedItems: preflight.quotedItems,
-    sizeComparison,
-    productionFeatures,
-    fonts: preflight.fonts,
-    images: preflight.images,
-  });
+  const checks = resolvePreflightChecksAfterProductionConfirmation(
+    buildPreflightChecks({
+      metadata,
+      quotedItems: preflight.quotedItems,
+      sizeComparison,
+      productionFeatures,
+      fonts: preflight.fonts,
+      images: preflight.images,
+    }),
+    productionFeatures
+  );
 
   const rank: Record<PreflightResult["overallStatus"], number> = {
     pass: 0,
