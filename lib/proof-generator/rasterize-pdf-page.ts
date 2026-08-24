@@ -1,7 +1,15 @@
+import { createRequire } from "node:module";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
 import { createCanvas } from "@napi-rs/canvas";
-import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { getDocument, type PDFDocumentProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
+import sharp from "sharp";
 
 import { PROOF_PDF_PREVIEW_MAX_PX } from "@/lib/proof-generator/constants";
+import { logProofGeneratorDebug } from "@/lib/proof-generator/artwork-buffer";
+
+const require = createRequire(import.meta.url);
 
 export type RasterizedPdfPage = {
   pngBuffer: Buffer;
@@ -10,14 +18,110 @@ export type RasterizedPdfPage = {
   pageWidthPt: number;
   pageHeightPt: number;
   renderScale: number;
+  renderer: "pdfjs-dist";
 };
 
+function getPdfJsAssetUrls() {
+  const pdfjsRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
+  return {
+    standardFontDataUrl: pathToFileURL(path.join(pdfjsRoot, "standard_fonts/")).href,
+    cMapUrl: pathToFileURL(path.join(pdfjsRoot, "cmaps/")).href,
+  };
+}
+
+async function buildFullVisibilityOptionalContentConfig(
+  document: PDFDocumentProxy,
+  intent: "display" | "print" | "any"
+) {
+  try {
+    const config = await document.getOptionalContentConfig({ intent });
+    for (const [groupId] of config) {
+      config.setVisibility(groupId, true);
+    }
+    return config;
+  } catch {
+    return null;
+  }
+}
+
+export function sourcePdfContainsTextOperand(sourceBuffer: Buffer, label: string) {
+  if (sourceBuffer.includes(Buffer.from(label, "utf8"))) {
+    return true;
+  }
+
+  const latin = sourceBuffer.toString("latin1");
+  if (latin.includes(`(${label})`) || latin.includes(`(${label.toLowerCase()})`)) {
+    return true;
+  }
+
+  const hexLabel = Buffer.from(label, "utf8").toString("hex").toUpperCase();
+  return latin.toUpperCase().includes(`<${hexLabel}>`);
+}
+
+export async function countDarkPixels(pngBuffer: Buffer, threshold = 80) {
+  const { data, info } = await sharp(pngBuffer).ensureAlpha().raw().toBuffer({
+    resolveWithObject: true,
+  });
+
+  let count = 0;
+  for (let index = 0; index < data.length; index += info.channels) {
+    const red = data[index];
+    const green = data[index + 1];
+    const blue = data[index + 2];
+    if (red < threshold && green < threshold && blue < threshold) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+export async function validateFlattenedArtworkPreview(input: {
+  sourceBuffer: Buffer;
+  pngBuffer: Buffer;
+  expectedTextLabel?: string;
+  requireVisibleText?: boolean;
+  minDarkPixels?: number;
+}) {
+  const label = input.expectedTextLabel ?? "Test";
+  const shouldValidate =
+    input.requireVisibleText === true || sourcePdfContainsTextOperand(input.sourceBuffer, label);
+
+  if (!shouldValidate) {
+    return { ok: true as const, skipped: true as const };
+  }
+
+  const darkPixels = await countDarkPixels(input.pngBuffer);
+  const minRequired =
+    input.minDarkPixels ?? Math.max(250, Math.floor(input.pngBuffer.length / 4000));
+
+  if (darkPixels < minRequired) {
+    return {
+      ok: false as const,
+      reason: `Flattened artwork preview is missing visible "${label}" text (${darkPixels} dark pixels, expected at least ${minRequired}).`,
+      darkPixels,
+    };
+  }
+
+  return { ok: true as const, darkPixels };
+}
+
+/**
+ * Flatten the original production PDF page through pdf.js into a PNG preview.
+ * Uses disableFontFace=false so embedded/outlined text survives Node rendering.
+ */
 export async function rasterizePdfPageToPng(
   pdfBuffer: Buffer,
   pageIndex = 0
 ): Promise<RasterizedPdfPage> {
+  const assets = getPdfJsAssetUrls();
+
   const document = await getDocument({
     data: new Uint8Array(pdfBuffer),
+    standardFontDataUrl: assets.standardFontDataUrl,
+    cMapUrl: assets.cMapUrl,
+    cMapPacked: true,
+    disableFontFace: false,
     useSystemFonts: true,
   }).promise;
 
@@ -41,11 +145,33 @@ export async function rasterizePdfPageToPng(
   context.fillStyle = "#ffffff";
   context.fillRect(0, 0, widthPx, heightPx);
 
+  const renderIntent = "print";
+  const optionalContentConfig = await buildFullVisibilityOptionalContentConfig(
+    document,
+    renderIntent
+  );
+
   await page.render({
     canvas: canvas as unknown as HTMLCanvasElement,
     canvasContext: context as unknown as CanvasRenderingContext2D,
     viewport,
+    intent: renderIntent,
+    optionalContentConfigPromise: optionalContentConfig
+      ? Promise.resolve(optionalContentConfig)
+      : document.getOptionalContentConfig({ intent: renderIntent }),
   }).promise;
+
+  page.cleanup();
+
+  logProofGeneratorDebug("artwork_preview_flattened", {
+    renderer: "pdfjs-dist",
+    widthPx,
+    heightPx,
+    pageWidthPt: viewportAtScale1.width,
+    pageHeightPt: viewportAtScale1.height,
+    renderScale,
+    disableFontFace: false,
+  });
 
   return {
     pngBuffer: canvas.toBuffer("image/png"),
@@ -54,5 +180,6 @@ export async function rasterizePdfPageToPng(
     pageWidthPt: viewportAtScale1.width,
     pageHeightPt: viewportAtScale1.height,
     renderScale,
+    renderer: "pdfjs-dist",
   };
 }

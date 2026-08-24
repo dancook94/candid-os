@@ -27,7 +27,7 @@ export async function embedArtworkPreview(
   targetDoc: PDFDocument,
   sourceBuffer: Buffer,
   fileName: string,
-  options?: { previewBuffer?: Buffer; rasterizePdf?: boolean }
+  options?: { previewBuffer?: Buffer; rasterizePdf?: boolean; requireVisibleText?: boolean }
 ): Promise<ArtworkPreview> {
   const previewBuffer = options?.previewBuffer ?? sourceBuffer;
   const detectedKind = assertValidSourceArtworkBuffer(previewBuffer, fileName);
@@ -42,8 +42,27 @@ export async function embedArtworkPreview(
   });
 
   if (detectedKind === "pdf" && rasterizePdf) {
-    const { rasterizePdfPageToPng } = await import("@/lib/proof-generator/rasterize-pdf-page");
+    const { rasterizePdfPageToPng, validateFlattenedArtworkPreview } = await import(
+      "@/lib/proof-generator/rasterize-pdf-page"
+    );
     const raster = await rasterizePdfPageToPng(sourceBuffer, 0);
+    const previewValidation = await validateFlattenedArtworkPreview({
+      sourceBuffer,
+      pngBuffer: raster.pngBuffer,
+      requireVisibleText: options?.requireVisibleText,
+    });
+
+    if (!previewValidation.ok) {
+      throw new Error(previewValidation.reason);
+    }
+
+    if (!previewValidation.skipped) {
+      logProofGeneratorDebug("artwork_preview_text_validation_passed", {
+        fileName,
+        darkPixels: previewValidation.darkPixels,
+      });
+    }
+
     const image = await targetDoc.embedPng(raster.pngBuffer);
 
     logProofGeneratorDebug("artwork_preview_rasterized", {

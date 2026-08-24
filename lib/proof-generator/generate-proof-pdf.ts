@@ -14,8 +14,6 @@ import {
   drawCutPathOverlayLegend,
 } from "@/lib/proof-generator/cut-path-overlay";
 import { cutPathGeometryHasContent } from "@/lib/proof-generator/extract-cut-path-geometry";
-import { createCustomerPreviewPdfBuffer } from "@/lib/proof-generator/suppress-cut-path-preview";
-import type { SuppressCutPathPreviewResult } from "@/lib/proof-generator/suppress-cut-path-preview";
 import {
   PROOF_PDF_MARGIN,
   PROOF_PDF_PAGE_HEIGHT,
@@ -119,45 +117,9 @@ export async function generateCustomerProofPdf(input: {
     const previewBoxHeight = Math.max(260, y - 8 - previewBoxBottom);
     const previewBoxWidth = contentWidth();
 
-    let previewSource: SuppressCutPathPreviewResult = {
-      buffer: input.sourceBuffer,
-      originalCutPathSuppressed: false,
-      method: "none",
-    };
-
-    if (overlayRequestedInitial) {
-      logDiagnosticStage("20", "original cut-path suppression started", {
-        sourceFileName: input.sourceFileName,
-      });
-      try {
-        previewSource = await createCustomerPreviewPdfBuffer(
-          input.sourceBuffer,
-          input.preflight.productionFeatures.confirmedCutPath ?? null
-        );
-      } catch (error) {
-        logProofGeneratorDebug("cut_path_preview_suppression_failed", {
-          sourceFileName: input.sourceFileName,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        previewSource = {
-          buffer: input.sourceBuffer,
-          originalCutPathSuppressed: false,
-          method: "none",
-          suppressionReason:
-            error instanceof Error ? error.message : "content stream could not be safely parsed",
-        };
-      }
-      logDiagnosticStage("21", "original cut-path suppression completed/fallback", {
-        sourceFileName: input.sourceFileName,
-        method: previewSource.method,
-        suppressed: previewSource.originalCutPathSuppressed,
-        suppressionReason: previewSource.suppressionReason ?? null,
-      });
-    }
-
     logProofGeneratorStage("preview render started", {
       sourceFileName: input.sourceFileName,
-      suppressionMethod: previewSource.method,
+      previewPipeline: "flattened_raster",
     });
 
     logDiagnosticStage("18", "artwork preview rendering started", {
@@ -170,6 +132,7 @@ export async function generateCustomerProofPdf(input: {
       () =>
         embedArtworkPreview(doc, input.sourceBuffer, input.sourceFileName, {
           rasterizePdf: true,
+          requireVisibleText: (input.preflight.fonts.names?.length ?? 0) > 0,
         })
     );
 
@@ -222,7 +185,7 @@ export async function generateCustomerProofPdf(input: {
       features.showCutPathOnProof && features.confirmedCutPath
     );
     features.cutPathOverlayRequested = overlayRequested;
-    features.originalCutPathSuppressed = previewSource.originalCutPathSuppressed;
+    features.originalCutPathSuppressed = false;
 
     if (overlayRequested && features.confirmedCutPath) {
       logDiagnosticStage("22", "overlay drawing started", {
@@ -252,8 +215,7 @@ export async function generateCustomerProofPdf(input: {
         extracted: extraction.ok,
         geometryAvailable: cutPathOverlayGeometryAvailable,
         rendered: cutPathOverlayRendered,
-        originalCutPathSuppressed: previewSource.originalCutPathSuppressed,
-        previewSuppressionMethod: previewSource.method,
+        previewPipeline: "flattened_raster",
       });
 
       logProofGeneratorStage("overlay rendered", {

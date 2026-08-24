@@ -463,7 +463,7 @@ describe("generateCustomerProofPdf", () => {
 
     assert.ok(pdf.byteLength > 1000);
     assert.equal(preflight.productionFeatures.cutPathOverlayRendered, true);
-    assert.equal(preflight.productionFeatures.originalCutPathSuppressed, true);
+    assert.equal(preflight.productionFeatures.originalCutPathSuppressed, false);
 
     const validation = await validateGeneratedProofPdf(pdf);
     assert.equal(validation.ok, true);
