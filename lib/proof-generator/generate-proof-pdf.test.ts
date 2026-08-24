@@ -463,7 +463,7 @@ describe("generateCustomerProofPdf", () => {
 
     assert.ok(pdf.byteLength > 1000);
     assert.equal(preflight.productionFeatures.cutPathOverlayRendered, true);
-    assert.equal(preflight.productionFeatures.originalCutPathSuppressed, false);
+    assert.equal(preflight.productionFeatures.originalCutPathSuppressed, true);
     assert.equal(
       preflight.checks.some((check) => check.key === "cut_path_candidates"),
       false
@@ -536,6 +536,75 @@ describe("generateCustomerProofPdf", () => {
       preflight.checks.filter((check) => check.key === "cut_path_confirmed").length,
       1
     );
+    assert.equal(preflight.productionFeatures.cutPathOverlayRendered, true);
+  });
+
+  it("suppresses the original CutContour and preserves Test text on J-4-like artwork", async () => {
+    const sourceBuffer = (
+      await import("@/lib/proof-generator/cut-path-test-pdfs")
+    ).buildJ4LikeContourCutPdfBuffer({ cutWidthMm: 400, cutHeightMm: 400 });
+
+    const preflight = buildPreflight({
+      metadata: {
+        ...buildPreflight().metadata,
+        fileName: "artwork.pdf",
+        mimeType: "application/pdf",
+        inputType: "pdf",
+        pageCount: 1,
+        pageSize: {
+          value: { widthPt: 1488, heightPt: 1488, widthMm: 523.28, heightMm: 523.28 },
+          confidence: "high",
+          source: "test",
+        },
+        fonts: {
+          value: ["Helvetica"],
+          confidence: "high",
+          source: "test",
+        },
+      },
+      fonts: {
+        status: "live_fonts_detected",
+        names: ["Helvetica"],
+        confidence: "high",
+        message: "Helvetica detected",
+      },
+      productionFeatures: {
+        cutPathCandidates: [],
+        whiteInkCandidates: [],
+        layers: [],
+        spotColourGroups: { productionSeparations: ["CutContour"], otherSpotColours: [] },
+        expectsCutPath: true,
+        cutPathOverlayAvailable: true,
+        confirmedCutPath: {
+          name: "CutContour",
+          sourceType: "separation",
+          confirmedAt: "2026-01-01T00:00:00.000Z",
+          confirmedByProfileId: "user-1",
+        },
+        showCutPathOnProof: true,
+        cutPathSize: { widthMm: 400, heightMm: 400, widthPt: 0, heightPt: 0 },
+        resolvedProductionFinishedSize: {
+          widthMm: 400,
+          heightMm: 400,
+          widthPt: 0,
+          heightPt: 0,
+        },
+        resolvedProductionFinishedSizeSource: "cut_path",
+      },
+    });
+
+    const pdf = await generateCustomerProofPdf({
+      jobReference: "J-4",
+      projectName: "Foamex Panels",
+      proofReference: "J-4 Proof v13",
+      versionNumber: 13,
+      preflight,
+      sourceBuffer,
+      sourceFileName: "artwork.pdf",
+    });
+
+    assert.ok(pdf.byteLength > 1000);
+    assert.equal(preflight.productionFeatures.originalCutPathSuppressed, true);
     assert.equal(preflight.productionFeatures.cutPathOverlayRendered, true);
   });
 });

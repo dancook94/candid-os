@@ -32,6 +32,15 @@ describe("tokenizeContentStreamSafe", () => {
     }
   });
 
+  it("preserves literal string operands such as Test labels", () => {
+    const result = tokenizeContentStreamSafe("BT /F1 56 Tf 10 20 Td (Test) Tj ET");
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.ok(result.tokens.includes("(Test)"));
+      assert.ok(result.tokens.includes("Tj"));
+    }
+  });
+
   it("fails safely on unterminated literal string", () => {
     const result = tokenizeContentStreamSafe("q (hello Q");
     assert.equal(result.ok, false);

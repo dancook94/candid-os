@@ -75,6 +75,7 @@ export function tokenizeContentStreamSafe(content: string): TokenizeContentStrea
     }
 
     if (char === "(") {
+      const literalStart = index;
       index += 1;
       let depth = 1;
       while (index < content.length && depth > 0) {
@@ -96,6 +97,7 @@ export function tokenizeContentStreamSafe(content: string): TokenizeContentStrea
       if (depth > 0) {
         return abort("unterminated literal string");
       }
+      tokens.push(content.slice(literalStart, index));
       const progressError = ensureProgress(previousIndex);
       if (progressError) {
         return progressError;
@@ -104,6 +106,7 @@ export function tokenizeContentStreamSafe(content: string): TokenizeContentStrea
     }
 
     if (char === "<") {
+      const tokenStart = index;
       index += 1;
       if (content[index] === "<") {
         index += 1;
@@ -133,6 +136,7 @@ export function tokenizeContentStreamSafe(content: string): TokenizeContentStrea
         }
         index += 1;
       }
+      tokens.push(content.slice(tokenStart, index));
       const progressError = ensureProgress(previousIndex);
       if (progressError) {
         return progressError;
@@ -141,6 +145,7 @@ export function tokenizeContentStreamSafe(content: string): TokenizeContentStrea
     }
 
     if (char === "[") {
+      const arrayStart = index;
       index += 1;
       let depth = 1;
       while (index < content.length && depth > 0) {
@@ -158,6 +163,7 @@ export function tokenizeContentStreamSafe(content: string): TokenizeContentStrea
       if (depth > 0) {
         return abort("unterminated array");
       }
+      tokens.push(content.slice(arrayStart, index));
       const progressError = ensureProgress(previousIndex);
       if (progressError) {
         return progressError;

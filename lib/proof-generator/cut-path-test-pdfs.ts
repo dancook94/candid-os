@@ -131,6 +131,58 @@ function buildTrimmedCutPathPdfBuffer(input: {
   ]);
 }
 
+/** J-4-like layout: red trim artwork, black Test label, CutContour separation circle. */
+export function buildJ4LikeContourCutPdfBuffer(input?: {
+  cutWidthMm?: number;
+  cutHeightMm?: number;
+}) {
+  const pageSizeMm = 523.28;
+  const trimSizeMm = 500;
+  const pagePt = mmToPt(pageSizeMm);
+  const trimPt = mmToPt(trimSizeMm);
+  const insetPt = (pagePt - trimPt) / 2;
+  const cutPathStream = buildPathStreamForMmShape({
+    shape: "circle",
+    pageSizeMm,
+    trimSizeMm,
+    cutWidthMm: input?.cutWidthMm ?? 400,
+    cutHeightMm: input?.cutHeightMm ?? 400,
+  });
+  const label = "Test";
+  const fontSize = 56;
+  const textWidth = label.length * fontSize * 0.55;
+  const textX = insetPt + (trimPt - textWidth) / 2;
+  const textY = insetPt + trimPt / 2 - fontSize / 3;
+  const artworkStream = `q 0.86 0.08 0.08 rg ${insetPt} ${insetPt} ${trimPt} ${trimPt} re f Q`;
+  const textStream = `BT /F1 ${fontSize} Tf ${textX} ${textY} Td (${label}) Tj ET`;
+  const contentStream = [artworkStream, textStream, cutPathStream].join("\n");
+  const streamBytes = Buffer.from(contentStream, "latin1");
+
+  const prefix = [
+    "%PDF-1.4",
+    "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+    "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj",
+    `3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${pagePt} ${pagePt}]/CropBox[0 0 ${pagePt} ${pagePt}]/BleedBox[0 0 ${pagePt} ${pagePt}]/TrimBox[${insetPt} ${insetPt} ${insetPt + trimPt} ${insetPt + trimPt}]/Contents 4 0 R/Resources<</ColorSpace<</CutContour 5 0 R>>/Font<</F1 7 0 R>>>>>>endobj`,
+    `4 0 obj<</Length ${streamBytes.length}>>stream\n`,
+  ].join("\n");
+
+  const suffix = [
+    "endstream",
+    "endobj",
+    buildSeparationObject("CutContour"),
+    buildTintFunctionObject(),
+    "7 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>endobj",
+    "trailer<</Size 8/Root 1 0 R>>",
+    "%%EOF",
+  ].join("\n");
+
+  return Buffer.concat([
+    Buffer.from(prefix, "latin1"),
+    streamBytes,
+    Buffer.from(`\n${suffix}`, "latin1"),
+  ]);
+}
+
 /** 500 x 500 mm trim artboard with centred contour cut path. */
 export function buildContourCutTestPdfBuffer(input?: {
   shape?: CutPathShape;

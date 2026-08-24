@@ -4,11 +4,16 @@ import { describe, it } from "node:test";
 import {
   buildContourCutTestPdfBuffer,
   buildCutPathTestPdfBuffer,
+  buildJ4LikeContourCutPdfBuffer,
   buildOcgCutPathPdfBuffer,
   buildOcgCutPathWithArtworkPdfBuffer,
   buildOcgArtworkInsideCutContourPdfBuffer,
 } from "@/lib/proof-generator/cut-path-test-pdfs";
 import { createCustomerPreviewPdfBuffer } from "@/lib/proof-generator/suppress-cut-path-preview";
+import {
+  rasterizePdfPageToPng,
+  validateFlattenedArtworkPreview,
+} from "@/lib/proof-generator/rasterize-pdf-page";
 
 describe("createCustomerPreviewPdfBuffer", () => {
   it("suppresses OCG CutContour content from preview copy", async () => {
@@ -63,6 +68,27 @@ describe("createCustomerPreviewPdfBuffer", () => {
 
     assert.match(result.buffer.toString("latin1"), /0\.9 0\.9 0\.9 rg/);
     assert.match(result.buffer.toString("latin1"), /re f/);
+  });
+
+  it("suppresses CutContour separation while preserving red artwork and Test text", async () => {
+    const sourceBuffer = buildJ4LikeContourCutPdfBuffer();
+    const result = await createCustomerPreviewPdfBuffer(sourceBuffer, {
+      name: "CutContour",
+      sourceType: "separation",
+    });
+
+    assert.equal(result.originalCutPathSuppressed, true);
+    assert.match(result.buffer.toString("latin1"), /0\.86 0\.08 0\.08 rg/);
+    assert.match(result.buffer.toString("latin1"), /\(Test\) Tj/);
+
+    const raster = await rasterizePdfPageToPng(result.buffer, 0);
+    const validation = await validateFlattenedArtworkPreview({
+      sourceBuffer,
+      pngBuffer: raster.pngBuffer,
+      requireVisibleText: true,
+    });
+
+    assert.equal(validation.ok, true);
   });
 
   it("preserves artwork when suppressing OCG CutContour beside artwork", async () => {

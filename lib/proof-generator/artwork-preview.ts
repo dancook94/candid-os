@@ -45,7 +45,7 @@ export async function embedArtworkPreview(
     const { rasterizePdfPageToPng, validateFlattenedArtworkPreview } = await import(
       "@/lib/proof-generator/rasterize-pdf-page"
     );
-    const raster = await rasterizePdfPageToPng(sourceBuffer, 0);
+    const raster = await rasterizePdfPageToPng(previewBuffer, 0);
     const previewValidation = await validateFlattenedArtworkPreview({
       sourceBuffer,
       pngBuffer: raster.pngBuffer,

@@ -36,6 +36,7 @@ import {
 } from "@/lib/proof-generator/pdf-spec-pages";
 import { joinPdfParts, PDF_NOT_SPECIFIED } from "@/lib/proof-generator/pdf-text";
 import type { PreflightResult } from "@/lib/proof-generator/types";
+import { resolveCustomerArtworkPreviewBuffer } from "@/lib/proof-generator/suppress-cut-path-preview";
 import { validateGeneratedProofPdf } from "@/lib/proof-generator/validate-proof-pdf";
 import { resolvePreflightChecksAfterProductionConfirmation } from "@/lib/proof-generator/warnings";
 import { buildCustomerProofPdfFileName } from "@/lib/proofs/dropbox";
@@ -127,13 +128,33 @@ export async function generateCustomerProofPdf(input: {
       sourceFileName: input.sourceFileName,
     });
 
+    const requireVisibleText = (input.preflight.fonts.names?.length ?? 0) > 0;
+    const confirmedCutPathForPreview = input.preflight.productionFeatures.confirmedCutPath ?? null;
+
+    const previewSource = await withProofGeneratorTimeout(
+      "Cut-path preview suppression",
+      PROOF_GENERATOR_TIMEOUTS.ocgSuppressionMs,
+      () =>
+        resolveCustomerArtworkPreviewBuffer(input.sourceBuffer, confirmedCutPathForPreview, {
+          requireVisibleText,
+        })
+    );
+
+    logProofGeneratorDebug("cut_path_preview_suppression", {
+      sourceFileName: input.sourceFileName,
+      originalCutPathSuppressed: previewSource.originalCutPathSuppressed,
+      method: previewSource.method,
+      suppressionReason: previewSource.suppressionReason ?? null,
+    });
+
     const preview = await withProofGeneratorTimeout(
       "Preview render",
       PROOF_GENERATOR_TIMEOUTS.previewRenderMs,
       () =>
         embedArtworkPreview(doc, input.sourceBuffer, input.sourceFileName, {
+          previewBuffer: previewSource.previewBuffer,
           rasterizePdf: true,
-          requireVisibleText: (input.preflight.fonts.names?.length ?? 0) > 0,
+          requireVisibleText,
         })
     );
 
@@ -186,7 +207,7 @@ export async function generateCustomerProofPdf(input: {
       features.showCutPathOnProof && features.confirmedCutPath
     );
     features.cutPathOverlayRequested = overlayRequested;
-    features.originalCutPathSuppressed = false;
+    features.originalCutPathSuppressed = previewSource.originalCutPathSuppressed;
 
     if (overlayRequested && features.confirmedCutPath) {
       logDiagnosticStage("22", "overlay drawing started", {

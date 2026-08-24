@@ -360,7 +360,12 @@ const PATH_PAINT_OPERATORS = new Set(["S", "s", "f", "F", "f*", "B", "B*", "b", 
 const PATH_BUILD_OPERATORS = new Set(["m", "l", "c", "v", "y", "re", "h"]);
 
 function isContentOperandToken(token: string) {
-  return !Number.isNaN(Number.parseFloat(token)) || token.startsWith("/");
+  return (
+    !Number.isNaN(Number.parseFloat(token)) ||
+    token.startsWith("/") ||
+    token.startsWith("(") ||
+    token.startsWith("<")
+  );
 }
 
 const ARTWORK_CONTENT_PATTERNS = [
@@ -734,6 +739,75 @@ function findFirstPageObject(objects: Map<string, ParsedPdfObject>) {
   }
 
   return null;
+}
+
+export async function resolveCustomerArtworkPreviewBuffer(
+  sourceBuffer: Buffer,
+  confirmedCutPath: { name: string; sourceType: ProductionFeatureSourceType } | null,
+  options?: { requireVisibleText?: boolean }
+): Promise<SuppressCutPathPreviewResult & { previewBuffer: Buffer }> {
+  const suppression = await createCustomerPreviewPdfBuffer(sourceBuffer, confirmedCutPath);
+
+  if (!suppression.originalCutPathSuppressed) {
+    return { ...suppression, previewBuffer: sourceBuffer };
+  }
+
+  const { rasterizePdfPageToPng, validateFlattenedArtworkPreview } = await import(
+    "@/lib/proof-generator/rasterize-pdf-page"
+  );
+
+  const [originalRaster, suppressedRaster] = await Promise.all([
+    rasterizePdfPageToPng(sourceBuffer, 0),
+    rasterizePdfPageToPng(suppression.buffer, 0),
+  ]);
+
+  if (
+    Math.abs(originalRaster.pageWidthPt - suppressedRaster.pageWidthPt) > 0.5 ||
+    Math.abs(originalRaster.pageHeightPt - suppressedRaster.pageHeightPt) > 0.5
+  ) {
+    const reason = "suppressed preview changed page dimensions";
+    logProofGeneratorStage("cut-path suppression skipped/fallback", { reason });
+    logProofGeneratorDebug("cut_path_preview_suppression_rejected", { reason });
+    return {
+      buffer: sourceBuffer,
+      previewBuffer: sourceBuffer,
+      originalCutPathSuppressed: false,
+      method: suppression.method,
+      suppressionReason: reason,
+    };
+  }
+
+  const previewValidation = await validateFlattenedArtworkPreview({
+    sourceBuffer,
+    pngBuffer: suppressedRaster.pngBuffer,
+    requireVisibleText: options?.requireVisibleText,
+  });
+
+  if (!previewValidation.ok) {
+    logProofGeneratorStage("cut-path suppression skipped/fallback", {
+      reason: previewValidation.reason,
+    });
+    logProofGeneratorDebug("cut_path_preview_suppression_rejected", {
+      reason: previewValidation.reason,
+    });
+    return {
+      buffer: sourceBuffer,
+      previewBuffer: sourceBuffer,
+      originalCutPathSuppressed: false,
+      method: suppression.method,
+      suppressionReason: previewValidation.reason,
+    };
+  }
+
+  logProofGeneratorStage("cut-path suppression applied", {
+    cutPathName: confirmedCutPath?.name,
+    method: suppression.method,
+  });
+
+  return {
+    ...suppression,
+    previewBuffer: suppression.buffer,
+  };
 }
 
 export async function createCustomerPreviewPdfBuffer(
