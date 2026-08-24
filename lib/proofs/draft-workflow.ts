@@ -25,6 +25,8 @@ export type DraftProgressSummary = {
   sourceArtwork: string;
   preflight: string;
   generatedPdf: string;
+  generatedPdfFileName: string | null;
+  generatedPdfStatus: "not_generated" | "current" | "needs_regeneration";
   generatedPdfStale: boolean;
   internalReview: string;
 };
@@ -93,6 +95,30 @@ export function isGeneratedPdfStale(proof: JobProofView): boolean {
     }
   }
 
+  const fingerprint = preflight?.generatedProofFingerprint;
+  if (fingerprint) {
+    if (
+      fingerprint.sourceDropboxPath &&
+      normalizeDropboxPath(fingerprint.sourceDropboxPath) !==
+        normalizeDropboxPath(source.dropbox_path)
+    ) {
+      return true;
+    }
+
+    if (
+      fingerprint.sourceContentHash &&
+      source.content_hash &&
+      fingerprint.sourceContentHash !== source.content_hash
+    ) {
+      return true;
+    }
+
+    const currentCustomerMessage = proof.customer_message ?? null;
+    if (fingerprint.customerMessage !== currentCustomerMessage) {
+      return true;
+    }
+  }
+
   return false;
 }
 
@@ -111,15 +137,20 @@ export function getDraftProgressSummary(proof: JobProofView): DraftProgressSumma
     preflightLabel = "Waiting for source artwork";
   }
 
+  const generatedPdfFileName = customerProof?.file_name ?? null;
+  let generatedPdfStatus: DraftProgressSummary["generatedPdfStatus"] = "not_generated";
   let generatedPdfLabel = "Not generated";
-  if (customerProof?.file_name) {
+
+  if (generatedPdfFileName) {
+    generatedPdfStatus = generatedPdfStale ? "needs_regeneration" : "current";
     generatedPdfLabel = generatedPdfStale
-      ? `${customerProof.file_name} (stale — regenerate required)`
-      : customerProof.file_name;
+      ? `${generatedPdfFileName} · Needs regeneration`
+      : `${generatedPdfFileName} · Current`;
   } else if (proof.brandedPdfGeneratedAt) {
+    generatedPdfStatus = generatedPdfStale ? "needs_regeneration" : "current";
     generatedPdfLabel = generatedPdfStale
-      ? "Generated PDF record (stale — regenerate required)"
-      : "Generated PDF on record";
+      ? "Generated PDF on record · Needs regeneration"
+      : "Generated PDF on record · Current";
   }
 
   let internalReviewLabel = "Not submitted";
@@ -135,6 +166,8 @@ export function getDraftProgressSummary(proof: JobProofView): DraftProgressSumma
     sourceArtwork: source?.file_name ? `Attached (${source.file_name})` : "Not attached",
     preflight: preflightLabel,
     generatedPdf: generatedPdfLabel,
+    generatedPdfFileName,
+    generatedPdfStatus,
     generatedPdfStale,
     internalReview: internalReviewLabel,
   };

@@ -61,7 +61,10 @@ function mapGenerationErrorMessage(payload: { error?: string }, response: Respon
   }
 
   if (response.status === 409) {
-    return "This proof version cannot be updated. Create a revised proof if you need a new version.";
+    return (
+      payload.error ??
+      "This proof version cannot be updated safely. Refresh the job page or contact support if the problem persists."
+    );
   }
 
   if (response.status === 504) {
@@ -99,6 +102,8 @@ export function ProofBrandedPdfPanel({
   const hasCustomerProof = hasGeneratedCustomerProof(proof.files ?? []);
   const generatedPdfStale = isGeneratedPdfStale(proof);
   const isEditableDraft = ["draft", "internal_review"].includes(proof.status);
+  const hasValidPdf = hasCustomerProof && !generatedPdfStale;
+  const showRegenerateFlow = hasCustomerProof && generatedPdfStale;
 
   const warningChecks = useMemo(
     () =>
@@ -268,11 +273,14 @@ export function ProofBrandedPdfPanel({
         <div>
           <dt className="text-muted-foreground">Customer proof</dt>
           <dd className="font-medium">
-            {customerProof?.file_name
-              ? generatedPdfStale
-                ? `${customerProof.file_name} (stale — regenerate required)`
-                : customerProof.file_name
-              : "Not generated yet"}
+            {customerProof?.file_name ? (
+              <span className={generatedPdfStale ? "text-amber-800" : undefined}>
+                {customerProof.file_name}
+                {generatedPdfStale ? " · Needs regeneration" : " · Current"}
+              </span>
+            ) : (
+              "Not generated yet"
+            )}
           </dd>
         </div>
         <div>
@@ -300,7 +308,7 @@ export function ProofBrandedPdfPanel({
       {hasCustomerProof ? (
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" onClick={downloadCustomerProof}>
-            View/download generated proof
+            View generated proof
           </Button>
         </div>
       ) : null}
@@ -311,7 +319,25 @@ export function ProofBrandedPdfPanel({
             <Button type="button" variant="outline" size="sm" onClick={onRequestAttach}>
               Attach proof artwork
             </Button>
-          ) : (
+          ) : showRegenerateFlow ? (
+            <Button
+              type="button"
+              size="sm"
+              disabled={pending || generating}
+              onClick={() => void analyseArtwork()}
+            >
+              Regenerate branded PDF
+            </Button>
+          ) : !hasCustomerProof ? (
+            <Button
+              type="button"
+              size="sm"
+              disabled={pending || generating}
+              onClick={() => void analyseArtwork()}
+            >
+              Generate branded PDF
+            </Button>
+          ) : hasValidPdf ? (
             <Button
               type="button"
               variant="outline"
@@ -319,11 +345,9 @@ export function ProofBrandedPdfPanel({
               disabled={pending || generating}
               onClick={() => void analyseArtwork()}
             >
-              {hasCustomerProof && !generatedPdfStale
-                ? "Re-analyse artwork & review preflight"
-                : "Analyse artwork & review preflight"}
+              Re-analyse artwork & review preflight
             </Button>
-          )}
+          ) : null}
         </div>
       ) : null}
 
@@ -347,6 +371,13 @@ export function ProofBrandedPdfPanel({
       {hasAttachment && !hasCustomerProof ? (
         <p className="text-xs text-amber-800">
           Generate the branded customer proof PDF before sending this proof to the customer.
+        </p>
+      ) : null}
+
+      {showRegenerateFlow && step === "idle" ? (
+        <p className="text-xs text-amber-800">
+          Source artwork or preflight changed after the last PDF was generated. Regenerate
+          before submitting internal review or sending to the customer.
         </p>
       ) : null}
     </div>

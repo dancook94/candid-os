@@ -70,6 +70,12 @@ export type JobProofView = JobProofRecord & {
     updatedAt: string | null;
     generatedAt: string | null;
     sourceDropboxPath: string | null;
+    generatedProofFingerprint: {
+      sourceDropboxPath: string | null;
+      sourceContentHash: string | null;
+      customerMessage: string | null;
+      operatorConfirmationJson: string | null;
+    } | null;
   } | null;
   manifestItems: Array<{
     id: string;

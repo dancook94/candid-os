@@ -847,6 +847,16 @@ export function AdminJobProofsPanel({
                           View generated proof
                         </Button>
                       ) : null}
+                      {currentProofActions?.isCurrentEditableDraft &&
+                      generatedPdfStale &&
+                      draftProgress?.generatedPdfFileName ? (
+                        <Button
+                          type="button"
+                          onClick={() => continueProof(currentProof)}
+                        >
+                          Regenerate branded PDF
+                        </Button>
+                      ) : null}
                       {currentProofActions?.canSendToCustomer ? (
                         <Button
                           type="button"

@@ -73,9 +73,13 @@ export async function finishDropboxUploadSession({
 export async function uploadSmallDropboxFile({
   dropboxPath,
   body,
+  mode = "add",
+  autorename = true,
 }: {
   dropboxPath: string;
   body: ArrayBuffer;
+  mode?: "add" | "overwrite";
+  autorename?: boolean;
 }): Promise<DropboxFileMetadata> {
   const response = await dropboxContentUpload<
     DropboxFileMetadata | { metadata: DropboxFileMetadata }
@@ -84,8 +88,8 @@ export async function uploadSmallDropboxFile({
     {
       arg: {
         path: dropboxPath,
-        mode: "add",
-        autorename: true,
+        mode,
+        autorename: mode === "overwrite" ? false : autorename,
         mute: false,
         strict_conflict: false,
       },

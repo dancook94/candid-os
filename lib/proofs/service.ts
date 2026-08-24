@@ -23,9 +23,13 @@ import {
 } from "@/lib/proofs/constants";
 import { logProofActivity } from "@/lib/proofs/activity";
 import {
+  fetchDropboxGeneratedProofMetadata,
+  isEditableDraftForRegeneration,
+  resolveGeneratedProofUploadStrategy,
+} from "@/lib/proofs/generated-proof-upload";
+import {
   copyProofFileToProofsFolder,
   assertDropboxPathInJobSubfolder,
-  assertVersionedProofPathAvailable,
   buildProofUploadTargetFileName,
   ensureJobProofsFolder,
   isPathInProofsFolder,
@@ -313,12 +317,25 @@ export async function invalidateGeneratedCustomerProof(
     await adminClient.from("job_proof_files").delete().eq("id", customerProof.id);
   }
 
+  const { data: existingPreflight } = await adminClient
+    .from("job_proof_preflight")
+    .select("metadata")
+    .eq("proof_id", proofId)
+    .maybeSingle();
+
+  const existingMetadata =
+    (existingPreflight?.metadata as Record<string, unknown> | null) ?? {};
+
   const { error } = await adminClient
     .from("job_proof_preflight")
     .update({
       generated_at: null,
       generated_dropbox_path: null,
       generated_file_name: null,
+      metadata: {
+        ...existingMetadata,
+        generatedProofFingerprint: null,
+      },
       updated_at: new Date().toISOString(),
     })
     .eq("proof_id", proofId);
@@ -326,6 +343,168 @@ export async function invalidateGeneratedCustomerProof(
   if (error && error.code !== "42703" && error.code !== "42P01") {
     throw new ProofError(error.message, 500);
   }
+}
+
+async function persistGeneratedProofFingerprint(
+  adminClient: SupabaseClient,
+  proofId: string,
+  fingerprint: {
+    sourceDropboxPath: string | null;
+    sourceContentHash: string | null;
+    customerMessage: string | null;
+    operatorConfirmationJson: string | null;
+  }
+) {
+  const { data: existingPreflight } = await adminClient
+    .from("job_proof_preflight")
+    .select("metadata")
+    .eq("proof_id", proofId)
+    .maybeSingle();
+
+  const existingMetadata =
+    (existingPreflight?.metadata as Record<string, unknown> | null) ?? {};
+
+  await adminClient
+    .from("job_proof_preflight")
+    .update({
+      metadata: {
+        ...existingMetadata,
+        generatedProofFingerprint: fingerprint,
+      },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("proof_id", proofId);
+}
+
+export async function recognizeGeneratedProofFromDropbox(
+  adminClient: SupabaseClient,
+  {
+    jobId,
+    proofId,
+    dropboxPath,
+    targetFileName,
+    mimeType = "application/pdf",
+    generatedAt,
+  }: {
+    jobId: string;
+    proofId: string;
+    dropboxPath: string;
+    targetFileName: string;
+    mimeType?: string | null;
+    generatedAt?: string | null;
+  }
+) {
+  const verified = await fetchDropboxGeneratedProofMetadata(dropboxPath);
+
+  await upsertProofFileRecord(adminClient, proofId, "customer_proof", {
+    jobFileId: null,
+    dropboxFileId: verified.id,
+    dropboxPath: verified.path_lower ?? verified.path_display,
+    dropboxRevision: verified.rev,
+    fileName: verified.name,
+    mimeType,
+    fileSizeBytes: verified.size,
+    contentHash: verified.content_hash ?? null,
+  });
+
+  const resolvedGeneratedAt = generatedAt ?? new Date().toISOString();
+
+  await adminClient
+    .from("job_proof_preflight")
+    .upsert(
+      {
+        proof_id: proofId,
+        generated_at: resolvedGeneratedAt,
+        generated_dropbox_path: verified.path_lower ?? verified.path_display,
+        generated_file_name: verified.name,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "proof_id" }
+    );
+
+  await adminClient
+    .from("job_proofs")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", proofId)
+    .eq("job_id", jobId);
+
+  return {
+    ok: true,
+    fileName: verified.name,
+    dropboxPath: verified.path_lower ?? verified.path_display,
+    generatedAt: resolvedGeneratedAt,
+  };
+}
+
+export async function tryRecognizeExistingGeneratedProof(
+  adminClient: SupabaseClient,
+  {
+    jobId,
+    proofId,
+  }: {
+    jobId: string;
+    proofId: string;
+  }
+) {
+  const job = await loadJobContext(adminClient, jobId);
+  const proof = await loadMutableProof(adminClient, jobId, proofId);
+
+  if (!isEditableDraftForRegeneration(proof.status as string)) {
+    return null;
+  }
+
+  if (!job.dropbox_folder_path) {
+    return null;
+  }
+
+  const proofsFolderPath = await ensureJobProofsFolder(
+    normalizeDropboxApiPath(job.dropbox_folder_path)
+  );
+
+  const { data: itemLinks } = await adminClient
+    .from("job_proof_manifest_items")
+    .select("production_item_id, production_items(item_reference)")
+    .eq("proof_id", proofId);
+
+  const itemReferences = (itemLinks ?? [])
+    .map(
+      (link) =>
+        (link.production_items as { item_reference?: string | null } | null)
+          ?.item_reference ?? null
+    )
+    .filter(Boolean) as string[];
+
+  const itemReference = itemReferences.length === 1 ? itemReferences[0] : null;
+  const targetFileName = buildProofUploadTargetFileName({
+    itemReference,
+    jobReference: job.job_reference,
+    versionNumber: proof.version_number as number,
+    extension: "pdf",
+  });
+  const dropboxPath = joinDropboxPathWithFile(proofsFolderPath, targetFileName);
+
+  const existingCustomerProof = await loadProofFileRecord(adminClient, proofId, "customer_proof");
+  const uploadStrategy = await resolveGeneratedProofUploadStrategy(adminClient, {
+    jobId,
+    proofId,
+    proofStatus: proof.status as string,
+    versionNumber: proof.version_number as number,
+    targetFileName,
+    dropboxPath,
+    hasDbCustomerProof: Boolean(existingCustomerProof?.dropbox_path),
+    allowRegeneration: false,
+  });
+
+  if (uploadStrategy.action !== "recognize_existing") {
+    return null;
+  }
+
+  return recognizeGeneratedProofFromDropbox(adminClient, {
+    jobId,
+    proofId,
+    dropboxPath: uploadStrategy.dropboxPath,
+    targetFileName: uploadStrategy.targetFileName,
+  });
 }
 
 function proofStatusAllowsSourceInvalidation(status: string) {
@@ -492,21 +671,42 @@ export async function loadProofsForJob(
 
   const preflightResult = await adminClient
     .from("job_proof_preflight")
-    .select("proof_id, generated_at, overall_status, updated_at, source_dropbox_path")
+    .select("proof_id, generated_at, overall_status, updated_at, source_dropbox_path, metadata")
     .in("proof_id", proofIds);
 
   const preflightByProofId = new Map(
     preflightResult.error?.code === "42703"
       ? []
-      : (preflightResult.data ?? []).map((row) => [
-          row.proof_id as string,
-          {
-            generatedAt: (row.generated_at as string | null) ?? null,
-            overallStatus: (row.overall_status as string | null) ?? null,
-            updatedAt: (row.updated_at as string | null) ?? null,
-            sourceDropboxPath: (row.source_dropbox_path as string | null) ?? null,
-          },
-        ])
+      : (preflightResult.data ?? []).map((row) => {
+          const metadata = (row.metadata as Record<string, unknown> | null) ?? null;
+          const fingerprint =
+            (metadata?.generatedProofFingerprint as
+              | {
+                  sourceDropboxPath?: string | null;
+                  sourceContentHash?: string | null;
+                  customerMessage?: string | null;
+                  operatorConfirmationJson?: string | null;
+                }
+              | undefined) ?? null;
+
+          return [
+            row.proof_id as string,
+            {
+              generatedAt: (row.generated_at as string | null) ?? null,
+              overallStatus: (row.overall_status as string | null) ?? null,
+              updatedAt: (row.updated_at as string | null) ?? null,
+              sourceDropboxPath: (row.source_dropbox_path as string | null) ?? null,
+              generatedProofFingerprint: fingerprint
+                ? {
+                    sourceDropboxPath: fingerprint.sourceDropboxPath ?? null,
+                    sourceContentHash: fingerprint.sourceContentHash ?? null,
+                    customerMessage: fingerprint.customerMessage ?? null,
+                    operatorConfirmationJson: fingerprint.operatorConfirmationJson ?? null,
+                  }
+                : null,
+            },
+          ];
+        })
   );
 
   const manifestById = new Map((manifestItems ?? []).map((item) => [item.id, item]));
@@ -1594,6 +1794,8 @@ export async function uploadProofFileToProofsFolder(
     mimeType,
     fileBuffer,
     actorProfileId,
+    allowRegeneration = false,
+    generatedProofFingerprint,
   }: {
     jobId: string;
     proofId: string;
@@ -1601,6 +1803,13 @@ export async function uploadProofFileToProofsFolder(
     mimeType: string | null;
     fileBuffer: ArrayBuffer;
     actorProfileId: string;
+    allowRegeneration?: boolean;
+    generatedProofFingerprint?: {
+      sourceDropboxPath: string | null;
+      sourceContentHash: string | null;
+      customerMessage: string | null;
+      operatorConfirmationJson: string | null;
+    } | null;
   }
 ) {
   const job = await loadJobContext(adminClient, jobId);
@@ -1658,12 +1867,46 @@ export async function uploadProofFileToProofsFolder(
     generatedDestinationFileName: targetFileName,
     dropboxPath,
     dropboxApi: "/2/files/upload",
+    allowRegeneration,
   });
 
-  await assertVersionedProofPathAvailable(dropboxPath, {
-    versionNumber: proof.version_number,
+  const existingCustomerProof = await loadProofFileRecord(adminClient, proofId, "customer_proof");
+  const uploadStrategy = await resolveGeneratedProofUploadStrategy(adminClient, {
+    jobId,
+    proofId,
+    proofStatus: proof.status as string,
+    versionNumber: proof.version_number as number,
     targetFileName,
+    dropboxPath,
+    hasDbCustomerProof: Boolean(existingCustomerProof?.dropbox_path),
+    allowRegeneration,
   });
+
+  if (uploadStrategy.action === "conflict") {
+    throw new ProofError(uploadStrategy.message, 409);
+  }
+
+  if (uploadStrategy.action === "recognize_existing") {
+    const recognized = await recognizeGeneratedProofFromDropbox(adminClient, {
+      jobId,
+      proofId,
+      dropboxPath: uploadStrategy.dropboxPath,
+      targetFileName: uploadStrategy.targetFileName,
+      mimeType,
+      generatedAt: null,
+    });
+
+    if (generatedProofFingerprint) {
+      await persistGeneratedProofFingerprint(adminClient, proofId, generatedProofFingerprint);
+    }
+
+    return {
+      ok: true,
+      fileName: recognized.fileName,
+      dropboxPath: recognized.dropboxPath,
+      recognizedExisting: true as const,
+    };
+  }
 
   const uploaded = await runDropboxProofOperation(
     {
@@ -1676,6 +1919,8 @@ export async function uploadProofFileToProofsFolder(
       uploadSmallDropboxFile({
         dropboxPath,
         body: fileBuffer,
+        mode: uploadStrategy.action === "overwrite" ? "overwrite" : "add",
+        autorename: uploadStrategy.action !== "overwrite",
       })
   );
 
@@ -1696,6 +1941,10 @@ export async function uploadProofFileToProofsFolder(
     fileSizeBytes: verified.size,
     contentHash: verified.content_hash ?? null,
   });
+
+  if (generatedProofFingerprint) {
+    await persistGeneratedProofFingerprint(adminClient, proofId, generatedProofFingerprint);
+  }
 
   await adminClient
     .from("job_proofs")

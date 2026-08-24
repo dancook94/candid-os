@@ -81,6 +81,7 @@ describe("isGeneratedPdfStale", () => {
         updatedAt: "2026-01-01T10:00:00.000Z",
         generatedAt: "2026-01-01T10:00:00.000Z",
         sourceDropboxPath: "/old/path.pdf",
+        generatedProofFingerprint: null,
       },
       files: [
         {
@@ -137,6 +138,7 @@ describe("getDraftProgressSummary", () => {
           updatedAt: "2026-01-01T09:00:00.000Z",
           generatedAt: "2026-01-01T10:00:00.000Z",
           sourceDropboxPath: "/art.pdf",
+          generatedProofFingerprint: null,
         },
         files: [
           {
@@ -181,7 +183,70 @@ describe("getDraftProgressSummary", () => {
 
     assert.match(summary.sourceArtwork, /Attached/);
     assert.equal(summary.preflight, "Complete — manual review");
-    assert.equal(summary.generatedPdf, "J-4-01-Proof-v6.pdf");
+    assert.equal(summary.generatedPdf, "J-4-01-Proof-v6.pdf · Current");
+    assert.equal(summary.generatedPdfStatus, "current");
     assert.equal(summary.internalReview, "Not submitted");
+  });
+
+  it("marks generated PDF as needs regeneration when customer message changed", () => {
+    const proof = buildProof({
+      customer_message: "Updated message",
+      brandedPdfGeneratedAt: "2026-01-01T10:00:00.000Z",
+      preflightSummary: {
+        overallStatus: "pass",
+        updatedAt: "2026-01-01T10:00:00.000Z",
+        generatedAt: "2026-01-01T10:00:00.000Z",
+        sourceDropboxPath: "/art.pdf",
+        generatedProofFingerprint: {
+          sourceDropboxPath: "/art.pdf",
+          sourceContentHash: null,
+          customerMessage: "Original message",
+          operatorConfirmationJson: null,
+        },
+      },
+      files: [
+        {
+          id: "source",
+          proof_id: "proof-1",
+          file_role: "source_artwork",
+          job_file_id: null,
+          dropbox_file_id: null,
+          dropbox_path: "/art.pdf",
+          dropbox_revision: null,
+          file_name: "art.pdf",
+          mime_type: "application/pdf",
+          file_size_bytes: 100,
+          content_hash: null,
+          preview_dropbox_path: null,
+          preview_metadata: null,
+          created_at: "2026-01-01T08:00:00.000Z",
+          location_type: null,
+          is_customer_facing: false,
+        },
+        {
+          id: "customer",
+          proof_id: "proof-1",
+          file_role: "customer_proof",
+          job_file_id: null,
+          dropbox_file_id: null,
+          dropbox_path: "/proofs/proof.pdf",
+          dropbox_revision: null,
+          file_name: "J-4-01-Proof-v6.pdf",
+          mime_type: "application/pdf",
+          file_size_bytes: 100,
+          content_hash: null,
+          preview_dropbox_path: null,
+          preview_metadata: null,
+          created_at: "2026-01-01T10:00:00.000Z",
+          location_type: null,
+          is_customer_facing: true,
+        },
+      ],
+    });
+
+    assert.equal(isGeneratedPdfStale(proof), true);
+    const summary = getDraftProgressSummary(proof);
+    assert.equal(summary.generatedPdfStatus, "needs_regeneration");
+    assert.match(summary.generatedPdf, /Needs regeneration/);
   });
 });

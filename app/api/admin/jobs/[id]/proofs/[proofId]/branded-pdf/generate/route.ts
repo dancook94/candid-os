@@ -13,11 +13,6 @@ import type {
 } from "@/lib/proof-generator/types";
 import { mapDropboxErrorToProofError } from "@/lib/proofs/dropbox-errors";
 import { ProofError } from "@/lib/proofs/errors";
-import { isGeneratedPdfStale } from "@/lib/proofs/draft-workflow";
-import {
-  invalidateGeneratedCustomerProof,
-  loadProofsForJob,
-} from "@/lib/proofs/service";
 import {
   ProofGeneratorTimeoutError,
   proofGeneratorTimeoutMessage,
@@ -73,12 +68,6 @@ export async function POST(request: Request, context: RouteContext) {
     const adminClient = createAdminClient();
     await requireAdminJobAccess(adminClient, jobId);
     logDiagnosticStage("03", "authorization passed", { jobId, proofId });
-
-    const { proofs } = await loadProofsForJob(adminClient, jobId);
-    const proofView = proofs.find((candidate) => candidate.id === proofId);
-    if (proofView && isGeneratedPdfStale(proofView)) {
-      await invalidateGeneratedCustomerProof(adminClient, proofId);
-    }
 
     const body = (await request.json()) as {
       manualOverrides?: PreflightManualOverrides;

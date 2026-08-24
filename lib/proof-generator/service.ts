@@ -53,7 +53,13 @@ import {
 } from "@/lib/proofs/dropbox";
 import { buildCustomerProofPdfFileName } from "@/lib/proofs/dropbox";
 import {
-  proofHasGeneratedCustomerArtifact,
+  hasValidGeneratedCustomerProof,
+  isGeneratedPdfStale,
+} from "@/lib/proofs/draft-workflow";
+import { getCustomerProofFile, getSourceArtworkFile } from "@/lib/proofs/proof-files";
+import {
+  loadProofsForJob,
+  tryRecognizeExistingGeneratedProof,
   uploadProofFileToProofsFolder,
 } from "@/lib/proofs/service";
 
@@ -560,11 +566,48 @@ export async function generateBrandedPdfForExistingProof(
     status: proof.status,
   });
 
-  if (await proofHasGeneratedCustomerArtifact(adminClient, proofId)) {
-    throw new ProofError(
-      "This proof version already has a generated customer PDF. Use Create revised proof to start the next version, then attach artwork and generate again.",
-      409
-    );
+  const { proofs } = await loadProofsForJob(adminClient, jobId);
+  const proofView = proofs.find((candidate) => candidate.id === proofId);
+
+  if (proofView && hasValidGeneratedCustomerProof(proofView)) {
+    const customerProof = getCustomerProofFile(proofView.files ?? []);
+    logProofGeneratorStage("existing generated proof recognized", {
+      proofId,
+      generatedFileName: customerProof?.file_name ?? null,
+    });
+    return {
+      proofId,
+      proofReference: proof.proof_reference as string,
+      generatedFileName: customerProof?.file_name ?? null,
+      generatedDropboxPath: customerProof?.dropbox_path ?? null,
+      generatedAt: proofView.brandedPdfGeneratedAt,
+      recognizedExisting: true as const,
+    };
+  }
+
+  const allowRegeneration = proofView ? isGeneratedPdfStale(proofView) : false;
+
+  if (proofView && !allowRegeneration) {
+    const recognized = await tryRecognizeExistingGeneratedProof(adminClient, {
+      jobId,
+      proofId,
+    });
+
+    if (recognized) {
+      logProofGeneratorStage("dropbox generated proof linked", {
+        proofId,
+        generatedFileName: recognized.fileName,
+        generatedDropboxPath: recognized.dropboxPath,
+      });
+      return {
+        proofId,
+        proofReference: proof.proof_reference as string,
+        generatedFileName: recognized.fileName,
+        generatedDropboxPath: recognized.dropboxPath,
+        generatedAt: recognized.generatedAt,
+        recognizedExisting: true as const,
+      };
+    }
   }
 
   const { data: job, error: jobError } = await adminClient
@@ -775,6 +818,15 @@ export async function generateBrandedPdfForExistingProof(
   });
   logDiagnosticStage("26", "Dropbox upload started", { proofId, generatedFileName });
 
+  const generatedProofFingerprint = {
+    sourceDropboxPath,
+    sourceContentHash: getSourceArtworkFile(proofView?.files ?? [])?.content_hash ?? null,
+    customerMessage: (proof.customer_message as string | null) ?? null,
+    operatorConfirmationJson: operatorConfirmation
+      ? JSON.stringify(operatorConfirmation)
+      : null,
+  };
+
   const uploadResult = await withProofGeneratorTimeout(
     "Dropbox upload",
     PROOF_GENERATOR_TIMEOUTS.dropboxUploadMs,
@@ -786,6 +838,8 @@ export async function generateBrandedPdfForExistingProof(
         mimeType: "application/pdf",
         fileBuffer: pdfBuffer.buffer,
         actorProfileId,
+        allowRegeneration,
+        generatedProofFingerprint,
       })
   );
 
