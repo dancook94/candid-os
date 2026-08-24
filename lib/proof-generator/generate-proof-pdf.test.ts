@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import { generateCustomerProofPdf } from "@/lib/proof-generator/generate-proof-pdf";
 import type { PreflightResult } from "@/lib/proof-generator/types";
+import { validateGeneratedProofPdf } from "@/lib/proof-generator/validate-proof-pdf";
 import { PDFDocument } from "pdf-lib";
 
 const MINIMAL_PNG = Buffer.from(
@@ -463,5 +464,8 @@ describe("generateCustomerProofPdf", () => {
     assert.ok(pdf.byteLength > 1000);
     assert.equal(preflight.productionFeatures.cutPathOverlayRendered, true);
     assert.equal(preflight.productionFeatures.originalCutPathSuppressed, true);
+
+    const validation = await validateGeneratedProofPdf(pdf);
+    assert.equal(validation.ok, true);
   });
 });

@@ -8,7 +8,13 @@ import {
 import { PROOF_PDF_PREVIEW_MAX_PX } from "@/lib/proof-generator/constants";
 
 export type ArtworkPreview =
-  | { kind: "image"; image: PDFImage; previewMethod: "sharp_embed_png" | "sharp_embed_jpeg" }
+  | {
+      kind: "image";
+      image: PDFImage;
+      previewMethod: "sharp_embed_png" | "sharp_embed_jpeg" | "pdf_raster_png";
+      sourceWidthPt: number;
+      sourceHeightPt: number;
+    }
   | {
       kind: "page";
       page: PDFEmbeddedPage;
@@ -21,17 +27,42 @@ export async function embedArtworkPreview(
   targetDoc: PDFDocument,
   sourceBuffer: Buffer,
   fileName: string,
-  options?: { previewBuffer?: Buffer }
+  options?: { previewBuffer?: Buffer; rasterizePdf?: boolean }
 ): Promise<ArtworkPreview> {
   const previewBuffer = options?.previewBuffer ?? sourceBuffer;
   const detectedKind = assertValidSourceArtworkBuffer(previewBuffer, fileName);
+  const rasterizePdf = options?.rasterizePdf ?? true;
 
   logProofGeneratorDebug("artwork_preview_start", {
     fileName,
     detectedKind,
     byteLength: sourceBuffer.length,
-    previewByteLength: previewBuffer.length,
+    previewByteLength: previewBuffer.byteLength,
+    rasterizePdf,
   });
+
+  if (detectedKind === "pdf" && rasterizePdf) {
+    const { rasterizePdfPageToPng } = await import("@/lib/proof-generator/rasterize-pdf-page");
+    const raster = await rasterizePdfPageToPng(sourceBuffer, 0);
+    const image = await targetDoc.embedPng(raster.pngBuffer);
+
+    logProofGeneratorDebug("artwork_preview_rasterized", {
+      fileName,
+      widthPx: raster.widthPx,
+      heightPx: raster.heightPx,
+      pageWidthPt: raster.pageWidthPt,
+      pageHeightPt: raster.pageHeightPt,
+      renderScale: raster.renderScale,
+    });
+
+    return {
+      kind: "image",
+      image,
+      previewMethod: "pdf_raster_png",
+      sourceWidthPt: raster.pageWidthPt,
+      sourceHeightPt: raster.pageHeightPt,
+    };
+  }
 
   if (detectedKind === "pdf") {
     const buffersToTry =
@@ -92,6 +123,8 @@ export async function embedArtworkPreview(
       kind: "image",
       image,
       previewMethod: detectedKind === "jpeg" ? "sharp_embed_jpeg" : "sharp_embed_png",
+      sourceWidthPt: image.width,
+      sourceHeightPt: image.height,
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown image preview error.";

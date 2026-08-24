@@ -7,12 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:proof-generator": "node --import tsx --test lib/proof-generator/compare-specification.test.ts lib/proof-generator/pdf-text.test.ts lib/proof-generator/generate-proof-pdf.test.ts lib/proof-generator/quoted-specification.test.ts lib/proof-generator/extract-cut-path-geometry.test.ts lib/proof-generator/production-features.test.ts lib/proof-generator/resolve-pdf-geometry.test.ts lib/proof-generator/resolve-finished-size.test.ts lib/proof-generator/suppress-cut-path-preview.test.ts lib/proofs/workflow-policy.test.ts lib/proofs/versioning.test.ts"
+    "test:proof-generator": "node --import tsx --test lib/proof-generator/compare-specification.test.ts lib/proof-generator/pdf-text.test.ts lib/proof-generator/generate-proof-pdf.test.ts lib/proof-generator/quoted-specification.test.ts lib/proof-generator/extract-cut-path-geometry.test.ts lib/proof-generator/production-features.test.ts lib/proof-generator/resolve-pdf-geometry.test.ts lib/proof-generator/resolve-finished-size.test.ts lib/proof-generator/suppress-cut-path-preview.test.ts lib/proof-generator/rasterize-pdf-page.test.ts lib/proof-generator/validate-proof-pdf.test.ts lib/proofs/workflow-policy.test.ts lib/proofs/versioning.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/utilities": "^3.2.2",
+    "@napi-rs/canvas": "^1.0.8",
     "@supabase/ssr": "^0.12.4",
     "@supabase/supabase-js": "^2.111.0",
     "class-variance-authority": "^0.7.1",
@@ -21,6 +22,7 @@
     "lucide-react": "^1.28.0",
     "next": "16.2.12",
     "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^6.2.108",
     "pdfkit": "^0.19.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",

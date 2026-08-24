@@ -38,10 +38,14 @@ import {
 } from "@/lib/proof-generator/pdf-spec-pages";
 import { joinPdfParts, PDF_NOT_SPECIFIED } from "@/lib/proof-generator/pdf-text";
 import type { PreflightResult } from "@/lib/proof-generator/types";
+import { validateGeneratedProofPdf } from "@/lib/proof-generator/validate-proof-pdf";
 import { buildCustomerProofPdfFileName } from "@/lib/proofs/dropbox";
 
 const FOOTER_BAR_HEIGHT = 34;
 const FOOTER_GAP = 8;
+const CUSTOMER_MESSAGE_FOOTER_GAP = 8;
+const CUT_PATH_LEGEND_HEIGHT = 24;
+const CUT_PATH_LEGEND_PREVIEW_GAP = 6;
 
 function contentWidth() {
   return PROOF_PDF_PAGE_WIDTH - PROOF_PDF_MARGIN * 2;
@@ -99,16 +103,19 @@ export async function generateCustomerProofPdf(input: {
       input.preflight.productionFeatures.showCutPathOnProof &&
         input.preflight.productionFeatures.confirmedCutPath
     );
-    const cutPathLegendHeight = overlayRequestedInitial ? 28 : 0;
+    const cutPathLegendReserved = overlayRequestedInitial
+      ? CUT_PATH_LEGEND_HEIGHT + CUT_PATH_LEGEND_PREVIEW_GAP
+      : 0;
 
     const footerTop = PROOF_PDF_MARGIN + FOOTER_BAR_HEIGHT + FOOTER_GAP;
     const customerMessageLines = customerMessage
       ? estimateWrappedLineCount(customerMessage, contentWidth() - 24, regular, 10)
       : 0;
     const customerMessageHeight = customerMessage
-      ? 32 + customerMessageLines * 12 + 8
+      ? 32 + customerMessageLines * 12 + CUSTOMER_MESSAGE_FOOTER_GAP
       : 0;
-    const previewBoxBottom = footerTop + customerMessageHeight + 6 + cutPathLegendHeight;
+    const previewBoxBottom =
+      footerTop + customerMessageHeight + cutPathLegendReserved;
     const previewBoxHeight = Math.max(260, y - 8 - previewBoxBottom);
     const previewBoxWidth = contentWidth();
 
@@ -162,7 +169,7 @@ export async function generateCustomerProofPdf(input: {
       PROOF_GENERATOR_TIMEOUTS.previewRenderMs,
       () =>
         embedArtworkPreview(doc, input.sourceBuffer, input.sourceFileName, {
-          previewBuffer: previewSource.buffer,
+          rasterizePdf: true,
         })
     );
 
@@ -200,8 +207,8 @@ export async function generateCustomerProofPdf(input: {
           ? {
               kind: "image",
               image: preview.image,
-              imageWidth: preview.image.width,
-              imageHeight: preview.image.height,
+              imageWidth: preview.sourceWidthPt,
+              imageHeight: preview.sourceHeightPt,
             }
           : {
               kind: "page",
@@ -212,7 +219,7 @@ export async function generateCustomerProofPdf(input: {
     });
 
     const overlayRequested = Boolean(
-      features.showCutPathOnProof && features.confirmedCutPath && preview.kind === "page"
+      features.showCutPathOnProof && features.confirmedCutPath
     );
     features.cutPathOverlayRequested = overlayRequested;
     features.originalCutPathSuppressed = previewSource.originalCutPathSuppressed;
@@ -266,7 +273,9 @@ export async function generateCustomerProofPdf(input: {
 
     if (overlayRequestedInitial && features.confirmedCutPath && features.showCutPathOnProof) {
       const cutPathSize = features.cutPathSize ?? features.resolvedProductionFinishedSize;
-      drawCutPathOverlayLegend(page1, fonts, PROOF_PDF_MARGIN + 8, footerTop + customerMessageHeight + 8, {
+      const customerMessageTop = footerTop + customerMessageHeight;
+      const legendBaselineY = customerMessageTop + CUT_PATH_LEGEND_PREVIEW_GAP + 18;
+      drawCutPathOverlayLegend(page1, fonts, PROOF_PDF_MARGIN + 8, legendBaselineY, {
         finishedCutSizeLabel: cutPathSize
           ? `${cutPathSize.widthMm} × ${cutPathSize.heightMm} mm`
           : null,
@@ -296,7 +305,19 @@ export async function generateCustomerProofPdf(input: {
     input.preflight.productionFeatures = features;
 
     const bytes = await doc.save();
-    return Buffer.from(bytes);
+    const pdfBuffer = Buffer.from(bytes);
+
+    const validation = await validateGeneratedProofPdf(pdfBuffer);
+    if (!validation.ok) {
+      throw new Error(`Generated proof PDF failed validation: ${validation.reason}`);
+    }
+
+    logProofGeneratorDebug("proof_pdf_validated", {
+      sourceFileName: input.sourceFileName,
+      pageCount: validation.pageCount,
+    });
+
+    return pdfBuffer;
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown PDF generation error.";
     throw new Error(`Branded proof PDF generation failed: ${detail}`);
