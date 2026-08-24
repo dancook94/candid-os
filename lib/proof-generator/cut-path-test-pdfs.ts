@@ -344,6 +344,64 @@ export function buildOcgCutPathPdfBuffer(input?: {
   ]);
 }
 
+/** OCG cut path with separate artwork block outside the CutContour OCG (J-4-like layout). */
+export function buildOcgCutPathWithArtworkPdfBuffer(input?: { shape?: CutPathShape }) {
+  const shape = input?.shape ?? "rectangle";
+  const pathOps =
+    shape === "rectangle"
+      ? "50 50 100 100 re S"
+      : "150 200 m 200 150 200 100 150 100 c 100 150 100 200 150 200 c h S";
+  const artworkStream = "q 0.9 0.9 0.9 rg 0 0 200 200 re f Q";
+  const cutPathStream = `q /OC /MC0 BDC q ${pathOps} Q EMC Q`;
+  const contentStream = `${artworkStream}\n${cutPathStream}`;
+  const streamBytes = Buffer.from(contentStream, "latin1");
+
+  const prefix = [
+    "%PDF-1.5",
+    "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+    "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj",
+    "5 0 obj<</Type/OCG/Name(CutContour)>>endobj",
+    "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R/Resources<</Properties<</MC0 5 0 R>>>>>>endobj",
+    `4 0 obj<</Length ${streamBytes.length}>>stream\n`,
+  ].join("\n");
+
+  const suffix = ["endstream", "endobj", "trailer<</Size 6/Root 1 0 R>>", "%%EOF"].join("\n");
+
+  return Buffer.concat([
+    Buffer.from(prefix, "latin1"),
+    streamBytes,
+    Buffer.from(`\n${suffix}`, "latin1"),
+  ]);
+}
+
+/** Artwork and cut path both inside the CutContour OCG — suppression must fall back safely. */
+export function buildOcgArtworkInsideCutContourPdfBuffer(input?: { shape?: CutPathShape }) {
+  const shape = input?.shape ?? "rectangle";
+  const pathOps =
+    shape === "rectangle"
+      ? "50 50 100 100 re S"
+      : "150 200 m 200 150 200 100 150 100 c 100 150 100 200 150 200 c h S";
+  const contentStream = `q /OC /MC0 BDC q 0.9 0.9 0.9 rg 0 0 200 200 re f q ${pathOps} Q Q EMC Q`;
+  const streamBytes = Buffer.from(contentStream, "latin1");
+
+  const prefix = [
+    "%PDF-1.5",
+    "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+    "2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj",
+    "5 0 obj<</Type/OCG/Name(CutContour)>>endobj",
+    "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 200]/Contents 4 0 R/Resources<</Properties<</MC0 5 0 R>>>>>>endobj",
+    `4 0 obj<</Length ${streamBytes.length}>>stream\n`,
+  ].join("\n");
+
+  const suffix = ["endstream", "endobj", "trailer<</Size 6/Root 1 0 R>>", "%%EOF"].join("\n");
+
+  return Buffer.concat([
+    Buffer.from(prefix, "latin1"),
+    streamBytes,
+    Buffer.from(`\n${suffix}`, "latin1"),
+  ]);
+}
+
 /** CutContour OCG path inside a Form XObject; page invokes /Fm0 Do */
 export function buildOcgFormXObjectCutPathPdfBuffer(input?: { shape?: CutPathShape }) {
   const shape = input?.shape ?? "rectangle";

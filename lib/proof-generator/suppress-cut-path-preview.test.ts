@@ -2,8 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  buildContourCutTestPdfBuffer,
   buildCutPathTestPdfBuffer,
   buildOcgCutPathPdfBuffer,
+  buildOcgCutPathWithArtworkPdfBuffer,
+  buildOcgArtworkInsideCutContourPdfBuffer,
 } from "@/lib/proof-generator/cut-path-test-pdfs";
 import { createCustomerPreviewPdfBuffer } from "@/lib/proof-generator/suppress-cut-path-preview";
 
@@ -49,5 +52,39 @@ describe("createCustomerPreviewPdfBuffer", () => {
 
     assert.equal(result.originalCutPathSuppressed, false);
     assert.equal(result.method, "unsupported_source");
+  });
+
+  it("preserves artwork when suppressing separation CutContour on J-4-like PDF", async () => {
+    const sourceBuffer = buildContourCutTestPdfBuffer({ shape: "circle" });
+    const result = await createCustomerPreviewPdfBuffer(sourceBuffer, {
+      name: "CutContour",
+      sourceType: "separation",
+    });
+
+    assert.match(result.buffer.toString("latin1"), /0\.9 0\.9 0\.9 rg/);
+    assert.match(result.buffer.toString("latin1"), /re f/);
+  });
+
+  it("preserves artwork when suppressing OCG CutContour beside artwork", async () => {
+    const sourceBuffer = buildOcgCutPathWithArtworkPdfBuffer({ shape: "rectangle" });
+    const result = await createCustomerPreviewPdfBuffer(sourceBuffer, {
+      name: "CutContour",
+      sourceType: "optional_content_group",
+    });
+
+    assert.match(result.buffer.toString("latin1"), /0\.9 0\.9 0\.9 rg/);
+    assert.match(result.buffer.toString("latin1"), /re f/);
+  });
+
+  it("falls back when artwork lives inside the CutContour OCG", async () => {
+    const sourceBuffer = buildOcgArtworkInsideCutContourPdfBuffer({ shape: "rectangle" });
+    const result = await createCustomerPreviewPdfBuffer(sourceBuffer, {
+      name: "CutContour",
+      sourceType: "optional_content_group",
+    });
+
+    assert.equal(result.originalCutPathSuppressed, false);
+    assert.match(result.suppressionReason ?? "", /artwork|content/i);
+    assert.match(result.buffer.toString("latin1"), /0\.9 0\.9 0\.9 rg/);
   });
 });

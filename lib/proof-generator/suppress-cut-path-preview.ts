@@ -359,6 +359,101 @@ function resolveStreamResourceMaps(input: {
 const PATH_PAINT_OPERATORS = new Set(["S", "s", "f", "F", "f*", "B", "B*", "b", "b*"]);
 const PATH_BUILD_OPERATORS = new Set(["m", "l", "c", "v", "y", "re", "h"]);
 
+function isContentOperandToken(token: string) {
+  return !Number.isNaN(Number.parseFloat(token)) || token.startsWith("/");
+}
+
+const ARTWORK_CONTENT_PATTERNS = [
+  /\brg\b/,
+  /\bRG\b/,
+  /\bk\b/,
+  /\bK\b/,
+  /\bre\s+f\b/,
+  /\bre\s+f\*\b/,
+  /\bDo\b/,
+  /\bTj\b/,
+  /\bTJ\b/,
+  /\bsh\b/,
+];
+
+const ARTWORK_PAINT_PATTERNS = [
+  /\bre\s+f\b/,
+  /\bre\s+f\*\b/,
+  /\bf\b/,
+  /\bF\b/,
+  /\bDo\b/,
+  /\bTj\b/,
+  /\bTJ\b/,
+  /\bsh\b/,
+];
+
+function estimatePreviewContentScore(buffer: Buffer) {
+  const objects = parsePdfObjects(buffer);
+  const pageObject = findFirstPageObject(objects);
+  if (!pageObject) {
+    return { totalBytes: 0, artworkSignals: 0, artworkPaintSignals: 0 };
+  }
+
+  let totalBytes = 0;
+  let artworkSignals = 0;
+  let artworkPaintSignals = 0;
+
+  for (const streamKey of collectStreamObjectKeys(pageObject.header, objects)) {
+    const object = objects.get(streamKey);
+    if (!object?.stream) {
+      continue;
+    }
+
+    const content = decompressStream(object.header, object.stream).toString("latin1");
+    totalBytes += content.replace(/\s+/g, "").length;
+
+    for (const pattern of ARTWORK_CONTENT_PATTERNS) {
+      if (pattern.test(content)) {
+        artworkSignals += 1;
+      }
+    }
+
+    for (const pattern of ARTWORK_PAINT_PATTERNS) {
+      if (pattern.test(content)) {
+        artworkPaintSignals += 1;
+      }
+    }
+  }
+
+  return { totalBytes, artworkSignals, artworkPaintSignals };
+}
+
+function validateSuppressionPreservesArtwork(
+  originalBuffer: Buffer,
+  suppressedBuffer: Buffer
+): { ok: true } | { ok: false; reason: string } {
+  const originalScore = estimatePreviewContentScore(originalBuffer);
+  const suppressedScore = estimatePreviewContentScore(suppressedBuffer);
+
+  if (originalScore.artworkPaintSignals === 0) {
+    return { ok: true };
+  }
+
+  if (suppressedScore.artworkPaintSignals === 0) {
+    return {
+      ok: false,
+      reason: "suppression removed all visible artwork paint operators from the preview",
+    };
+  }
+
+  if (
+    originalScore.totalBytes > 80 &&
+    suppressedScore.totalBytes < originalScore.totalBytes * 0.08
+  ) {
+    return {
+      ok: false,
+      reason: "suppression removed an unreasonable share of page content",
+    };
+  }
+
+  return { ok: true };
+}
+
 function filterContentStream(input: {
   content: string;
   targetCutPathName: string;
@@ -386,27 +481,26 @@ function filterContentStream(input: {
   }
 
   function flushPath(asPaint: boolean) {
-    const suppressSeparation =
-      input.mode === "separation" && (strokeUsesTarget || fillUsesTarget) && asPaint;
-    const suppressOcg = input.mode === "optional_content_group" && activeOcgSuppressed();
+    if (pendingPath.length === 0) {
+      return;
+    }
 
-    if (!suppressSeparation && !suppressOcg) {
-      output.push(...pendingPath);
-    } else if (pendingPath.length > 0) {
+    const suppressSeparation =
+      asPaint && input.mode === "separation" && (strokeUsesTarget || fillUsesTarget);
+    const suppressOcg =
+      asPaint && input.mode === "optional_content_group" && activeOcgSuppressed();
+
+    if (suppressSeparation || suppressOcg) {
       changed = true;
+    } else {
+      output.push(...pendingPath);
     }
 
     pendingPath = [];
   }
 
   for (const token of tokens) {
-    if (!Number.isNaN(Number.parseFloat(token)) || token.startsWith("/")) {
-      if (activeOcgSuppressed() || (input.mode === "separation" && (strokeUsesTarget || fillUsesTarget))) {
-        operands.push(token);
-        continue;
-      }
-
-      pendingPath.push(token);
+    if (isContentOperandToken(token)) {
       operands.push(token);
       continue;
     }
@@ -415,22 +509,14 @@ function filterContentStream(input: {
 
     if (operator === "q") {
       flushPath(false);
-      if (!activeOcgSuppressed()) {
-        output.push("q");
-      } else {
-        changed = true;
-      }
+      output.push("q");
       operands.length = 0;
       continue;
     }
 
     if (operator === "Q") {
       flushPath(false);
-      if (!activeOcgSuppressed()) {
-        output.push("Q");
-      } else {
-        changed = true;
-      }
+      output.push("Q");
       operands.length = 0;
       continue;
     }
@@ -439,11 +525,7 @@ function filterContentStream(input: {
       flushPath(false);
       const colorSpace = resolveColorSpaceName(operands.at(-1) ?? "", input.colorSpaceMap);
       strokeUsesTarget = cutPathNamesMatch(colorSpace, input.targetCutPathName);
-      if (!activeOcgSuppressed() && !(input.mode === "separation" && strokeUsesTarget)) {
-        output.push(...operands, operator);
-      } else {
-        changed = true;
-      }
+      output.push(...operands, operator);
       operands.length = 0;
       continue;
     }
@@ -452,22 +534,14 @@ function filterContentStream(input: {
       flushPath(false);
       const colorSpace = resolveColorSpaceName(operands.at(-1) ?? "", input.colorSpaceMap);
       fillUsesTarget = cutPathNamesMatch(colorSpace, input.targetCutPathName);
-      if (!activeOcgSuppressed() && !(input.mode === "separation" && fillUsesTarget)) {
-        output.push(...operands, operator);
-      } else {
-        changed = true;
-      }
+      output.push(...operands, operator);
       operands.length = 0;
       continue;
     }
 
     if (["SC", "SCN", "sc", "scn"].includes(operator)) {
       flushPath(false);
-      if (!activeOcgSuppressed() && !(input.mode === "separation" && (strokeUsesTarget || fillUsesTarget))) {
-        output.push(...operands, operator);
-      } else {
-        changed = true;
-      }
+      output.push(...operands, operator);
       operands.length = 0;
       continue;
     }
@@ -496,9 +570,7 @@ function filterContentStream(input: {
       }
 
       ocgSuppressDepth.push(suppress);
-      if (!suppress) {
-        output.push(...operands, operator);
-      }
+      output.push(...operands, operator);
       operands.length = 0;
       continue;
     }
@@ -518,9 +590,8 @@ function filterContentStream(input: {
         cutPathNamesMatch(ocgName, input.targetCutPathName);
 
       ocgSuppressDepth.push(suppress);
-      if (!suppress) {
-        output.push(...operands, operator);
-      } else {
+      output.push(...operands, operator);
+      if (suppress) {
         changed = true;
       }
       operands.length = 0;
@@ -529,23 +600,14 @@ function filterContentStream(input: {
 
     if (operator === "EMC") {
       flushPath(false);
-      const wasSuppressed = ocgSuppressDepth.pop() ?? false;
-      if (!wasSuppressed) {
-        output.push(operator);
-      } else {
-        changed = true;
-      }
+      ocgSuppressDepth.pop();
+      output.push(operator);
       operands.length = 0;
       continue;
     }
 
     if (PATH_BUILD_OPERATORS.has(operator)) {
-      if (activeOcgSuppressed() || (input.mode === "separation" && (strokeUsesTarget || fillUsesTarget))) {
-        pendingPath = [];
-        changed = true;
-      } else {
-        pendingPath.push(...operands, operator);
-      }
+      pendingPath.push(...operands, operator);
       operands.length = 0;
       continue;
     }
@@ -558,11 +620,7 @@ function filterContentStream(input: {
     }
 
     flushPath(false);
-    if (!activeOcgSuppressed() && !(input.mode === "separation" && (strokeUsesTarget || fillUsesTarget))) {
-      output.push(...operands, operator);
-    } else if (operands.length > 0) {
-      changed = true;
-    }
+    output.push(...operands, operator);
     operands.length = 0;
   }
 
@@ -833,6 +891,24 @@ function createCustomerPreviewPdfBufferInternalUnsafe(
       buffer: sourceBuffer,
       originalCutPathSuppressed: false,
       method: mode === "optional_content_group" ? "ocg_content_filter" : "separation_content_filter",
+    };
+  }
+
+  const validation = validateSuppressionPreservesArtwork(sourceBuffer, workingBuffer);
+  if (!validation.ok) {
+    logProofGeneratorStage("cut-path suppression skipped/fallback", {
+      reason: validation.reason,
+    });
+    logProofGeneratorDebug("cut_path_preview_suppression_rejected", {
+      reason: validation.reason,
+      cutPathName: confirmedCutPath.name,
+      mode,
+    });
+    return {
+      buffer: sourceBuffer,
+      originalCutPathSuppressed: false,
+      method: fallbackMethod,
+      suppressionReason: validation.reason,
     };
   }
 

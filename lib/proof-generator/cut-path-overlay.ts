@@ -306,7 +306,7 @@ export function drawCutPathOverlayLegend(
 
   if (options?.finishedCutSizeLabel) {
     page.drawText(sanitizePdfText(`Finished cut size: ${options.finishedCutSizeLabel}`), {
-      x,
+      x: x + 28,
       y: y - 11,
       size: 7,
       font: fonts.regular,

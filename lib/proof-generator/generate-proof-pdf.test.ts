@@ -397,4 +397,71 @@ describe("generateCustomerProofPdf", () => {
 
     assert.ok(pdf.byteLength > 1000);
   });
+
+  it("preserves artwork and renders cut-line legend for J-4-like contour PDF", async () => {
+    const sourceBuffer = (
+      await import("@/lib/proof-generator/cut-path-test-pdfs")
+    ).buildContourCutTestPdfBuffer({ shape: "circle", cutWidthMm: 400, cutHeightMm: 400 });
+
+    const preflight = buildPreflight({
+      metadata: {
+        ...buildPreflight().metadata,
+        fileName: "artwork.pdf",
+        mimeType: "application/pdf",
+        inputType: "pdf",
+        pageCount: 1,
+        pageSize: {
+          value: { widthPt: 1488, heightPt: 1488, widthMm: 523.28, heightMm: 523.28 },
+          confidence: "high",
+          source: "test",
+        },
+      },
+      productionFeatures: {
+        cutPathCandidates: [
+          {
+            name: "CutContour",
+            sourceType: "separation",
+            confidence: "high",
+            reason: "Separation name",
+          },
+        ],
+        whiteInkCandidates: [],
+        layers: [],
+        spotColourGroups: { productionSeparations: ["CutContour"], otherSpotColours: [] },
+        expectsCutPath: true,
+        cutPathOverlayAvailable: true,
+        cutPathOverlayReason: null,
+        confirmedCutPath: {
+          name: "CutContour",
+          sourceType: "separation",
+          confirmedAt: "2026-01-01T00:00:00.000Z",
+          confirmedByProfileId: "user-1",
+        },
+        showCutPathOnProof: true,
+        cutPathSize: { widthMm: 400, heightMm: 400, widthPt: 0, heightPt: 0 },
+        resolvedProductionFinishedSize: {
+          widthMm: 400,
+          heightMm: 400,
+          widthPt: 0,
+          heightPt: 0,
+        },
+        resolvedProductionFinishedSizeSource: "cut_path",
+      },
+    });
+
+    const pdf = await generateCustomerProofPdf({
+      jobReference: "J-4",
+      projectName: "Foamex Panels",
+      proofReference: "J-4 Proof v6",
+      versionNumber: 6,
+      customerMessage: "Foamex Panels Proof v1",
+      preflight,
+      sourceBuffer,
+      sourceFileName: "artwork.pdf",
+    });
+
+    assert.ok(pdf.byteLength > 1000);
+    assert.equal(preflight.productionFeatures.cutPathOverlayRendered, true);
+    assert.equal(preflight.productionFeatures.originalCutPathSuppressed, true);
+  });
 });

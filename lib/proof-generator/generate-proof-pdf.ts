@@ -95,6 +95,12 @@ export async function generateCustomerProofPdf(input: {
       },
     ]);
 
+    const overlayRequestedInitial = Boolean(
+      input.preflight.productionFeatures.showCutPathOnProof &&
+        input.preflight.productionFeatures.confirmedCutPath
+    );
+    const cutPathLegendHeight = overlayRequestedInitial ? 28 : 0;
+
     const footerTop = PROOF_PDF_MARGIN + FOOTER_BAR_HEIGHT + FOOTER_GAP;
     const customerMessageLines = customerMessage
       ? estimateWrappedLineCount(customerMessage, contentWidth() - 24, regular, 10)
@@ -102,14 +108,9 @@ export async function generateCustomerProofPdf(input: {
     const customerMessageHeight = customerMessage
       ? 32 + customerMessageLines * 12 + 8
       : 0;
-    const previewBoxBottom = footerTop + customerMessageHeight + 6;
+    const previewBoxBottom = footerTop + customerMessageHeight + 6 + cutPathLegendHeight;
     const previewBoxHeight = Math.max(260, y - 8 - previewBoxBottom);
     const previewBoxWidth = contentWidth();
-
-    const overlayRequestedInitial = Boolean(
-      input.preflight.productionFeatures.showCutPathOnProof &&
-        input.preflight.productionFeatures.confirmedCutPath
-    );
 
     let previewSource: SuppressCutPathPreviewResult = {
       buffer: input.sourceBuffer,
@@ -236,20 +237,6 @@ export async function generateCustomerProofPdf(input: {
 
       if (cutPathOverlayGeometryAvailable && extraction.ok) {
         cutPathOverlayRendered = drawCutPathOverlay(page1, extraction.geometry, placement);
-        if (cutPathOverlayRendered) {
-          const cutPathSize = features.cutPathSize ?? features.resolvedProductionFinishedSize;
-          drawCutPathOverlayLegend(
-            page1,
-            fonts,
-            PROOF_PDF_MARGIN + 8,
-            previewBoxBottom - 14,
-            {
-              finishedCutSizeLabel: cutPathSize
-                ? `${cutPathSize.widthMm} x ${cutPathSize.heightMm} mm`
-                : null,
-            }
-          );
-        }
       }
 
       logProofGeneratorDebug("cut_path_overlay_render", {
@@ -276,6 +263,15 @@ export async function generateCustomerProofPdf(input: {
     features.cutPathOverlayRendered =
       overlayRequested && cutPathOverlayGeometryAvailable && cutPathOverlayRendered;
     preflight.productionFeatures = features;
+
+    if (overlayRequestedInitial && features.confirmedCutPath && features.showCutPathOnProof) {
+      const cutPathSize = features.cutPathSize ?? features.resolvedProductionFinishedSize;
+      drawCutPathOverlayLegend(page1, fonts, PROOF_PDF_MARGIN + 8, footerTop + customerMessageHeight + 8, {
+        finishedCutSizeLabel: cutPathSize
+          ? `${cutPathSize.widthMm} × ${cutPathSize.heightMm} mm`
+          : null,
+      });
+    }
 
     if (customerMessage) {
       drawCustomerMessagePanel(page1, fonts, {
