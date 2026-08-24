@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { validateOperatorConfirmation } from "@/lib/proof-generator/operator-confirmation";
+import { logDiagnosticStage } from "@/lib/proof-generator/diagnostic-stage-log";
 import type { PreflightResult, PreflightOperatorConfirmation } from "@/lib/proof-generator/types";
 import type { JobProofView } from "@/lib/proofs/types";
 import { getProofActions, requiresGeneratedCustomerProof } from "@/lib/proofs/workflow-policy";
@@ -183,6 +184,7 @@ export function ProofBrandedPdfPanel({
 
     onPendingChange(true);
     setGenerating(true);
+    logDiagnosticStage("01", "click received", { jobId, proofId: proof.id });
 
     try {
       const response = await fetchWithTimeout(

@@ -17,6 +17,7 @@ import {
   ProofGeneratorTimeoutError,
   proofGeneratorTimeoutMessage,
 } from "@/lib/proof-generator/runtime";
+import { logDiagnosticStage } from "@/lib/proof-generator/diagnostic-stage-log";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -52,6 +53,7 @@ export const maxDuration = 180;
 
 export async function POST(request: Request, context: RouteContext) {
   try {
+    logDiagnosticStage("02", "server/API action entered");
     const { id: jobId, proofId } = await context.params;
     const supabase = await createClient();
     const authResult = await verifyApprovedAdmin(supabase);
@@ -65,6 +67,7 @@ export async function POST(request: Request, context: RouteContext) {
 
     const adminClient = createAdminClient();
     await requireAdminJobAccess(adminClient, jobId);
+    logDiagnosticStage("03", "authorization passed", { jobId, proofId });
 
     const body = (await request.json()) as {
       manualOverrides?: PreflightManualOverrides;
@@ -79,6 +82,7 @@ export async function POST(request: Request, context: RouteContext) {
       operatorConfirmation: body.operatorConfirmation,
     });
 
+    logDiagnosticStage("30", "API response returned", { proofId, jobId });
     return NextResponse.json(result);
   } catch (error) {
     console.error("[proofs:branded-pdf:generate]", error);

@@ -1,6 +1,7 @@
 import { PDFDocument, StandardFonts } from "pdf-lib";
 
 import { CutPathGeometryCache } from "@/lib/proof-generator/cut-path-geometry-cache";
+import { logDiagnosticStage } from "@/lib/proof-generator/diagnostic-stage-log";
 import { embedArtworkPreview } from "@/lib/proof-generator/artwork-preview";
 import { logProofGeneratorDebug } from "@/lib/proof-generator/artwork-buffer";
 import {
@@ -117,6 +118,9 @@ export async function generateCustomerProofPdf(input: {
     };
 
     if (overlayRequestedInitial) {
+      logDiagnosticStage("20", "original cut-path suppression started", {
+        sourceFileName: input.sourceFileName,
+      });
       try {
         previewSource = await createCustomerPreviewPdfBuffer(
           input.sourceBuffer,
@@ -133,11 +137,20 @@ export async function generateCustomerProofPdf(input: {
           method: "none",
         };
       }
+      logDiagnosticStage("21", "original cut-path suppression completed/fallback", {
+        sourceFileName: input.sourceFileName,
+        method: previewSource.method,
+        suppressed: previewSource.originalCutPathSuppressed,
+      });
     }
 
     logProofGeneratorStage("preview render started", {
       sourceFileName: input.sourceFileName,
       suppressionMethod: previewSource.method,
+    });
+
+    logDiagnosticStage("18", "artwork preview rendering started", {
+      sourceFileName: input.sourceFileName,
     });
 
     const preview = await withProofGeneratorTimeout(
@@ -150,6 +163,10 @@ export async function generateCustomerProofPdf(input: {
     );
 
     logProofGeneratorStage("preview render complete", {
+      sourceFileName: input.sourceFileName,
+      previewMethod: preview.previewMethod,
+    });
+    logDiagnosticStage("19", "artwork preview rendering completed", {
       sourceFileName: input.sourceFileName,
       previewMethod: preview.previewMethod,
     });
@@ -197,6 +214,10 @@ export async function generateCustomerProofPdf(input: {
     features.originalCutPathSuppressed = previewSource.originalCutPathSuppressed;
 
     if (overlayRequested && features.confirmedCutPath) {
+      logDiagnosticStage("22", "overlay drawing started", {
+        sourceFileName: input.sourceFileName,
+        cutPathName: features.confirmedCutPath.name,
+      });
       const confirmedCutPath = features.confirmedCutPath;
       const geometryCache = input.cutPathGeometryCache ?? new CutPathGeometryCache();
       const extraction = await geometryCache.extract(
@@ -242,6 +263,10 @@ export async function generateCustomerProofPdf(input: {
         sourceFileName: input.sourceFileName,
         rendered: cutPathOverlayRendered,
         geometryAvailable: cutPathOverlayGeometryAvailable,
+      });
+      logDiagnosticStage("23", "overlay drawing completed", {
+        sourceFileName: input.sourceFileName,
+        rendered: cutPathOverlayRendered,
       });
     }
 

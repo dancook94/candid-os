@@ -21,6 +21,7 @@ import {
 } from "@/lib/proof-generator/constants";
 import { applyAuthoritativeFinishedSizeToPreflight } from "@/lib/proof-generator/resolve-finished-size";
 import { CutPathGeometryCache } from "@/lib/proof-generator/cut-path-geometry-cache";
+import { logDiagnosticStage } from "@/lib/proof-generator/diagnostic-stage-log";
 import { generateCustomerProofPdf } from "@/lib/proof-generator/generate-proof-pdf";
 import {
   logProofGeneratorStage,
@@ -169,6 +170,12 @@ async function loadProofSourceArtwork(
     );
   }
 
+  logDiagnosticStage("06", "source artwork metadata loaded", {
+    proofId,
+    fileName: proofFile.file_name,
+    jobFileId: proofFile.job_file_id,
+  });
+
   const dropboxPath = normalizeDropboxApiPath(proofFile.dropbox_path as string);
   let fileName = proofFile.file_name as string;
   let mimeType = (proofFile.mime_type as string | null) ?? null;
@@ -284,6 +291,9 @@ async function loadProofSourceArtwork(
     dropboxApi: "/2/files/download",
   });
 
+  logDiagnosticStage("07", "source Dropbox path resolved", { proofId, dropboxPath, fileName });
+  logDiagnosticStage("08", "source artwork download started", { proofId, dropboxPath });
+
   const downloaded = await runDropboxProofOperation(
     {
       operation: "download_source_artwork",
@@ -310,6 +320,12 @@ async function loadProofSourceArtwork(
     mimeType: mimeType ?? downloaded.contentType,
     detectedKind,
     byteLength: downloaded.buffer.length,
+  });
+
+  logDiagnosticStage("09", "source artwork download finished", {
+    proofId,
+    byteLength: downloaded.buffer.length,
+    detectedKind,
   });
 
   return {
@@ -354,6 +370,14 @@ async function buildPreflightForSourceArtwork(
     })),
   });
 
+  logDiagnosticStage("10", "preflight loaded", { proofId, productionItemIds });
+
+  logDiagnosticStage("12", "PDF box analysis started", {
+    proofId,
+    detectedKind: artwork.detectedKind,
+    fileName: artwork.fileName,
+  });
+
   const metadata =
     artwork.detectedKind === "pdf"
       ? await analysePdfBuffer(artwork.buffer, artwork.fileName, artwork.mimeType, {
@@ -390,6 +414,12 @@ async function buildPreflightForSourceArtwork(
             imageHeightPx: { value: null, confidence: "low" as const, source: "ai_scan" },
           }
         : await analyseImageBuffer(artwork.buffer, artwork.fileName, artwork.mimeType);
+
+  logDiagnosticStage("13", "PDF box analysis completed", {
+    proofId,
+    trimBox: metadata.trimBox?.value ?? null,
+    pageCount: metadata.pageCount ?? null,
+  });
 
   const basePreflight = buildPreflightResult({
     metadata,
@@ -514,9 +544,16 @@ export async function generateBrandedPdfForExistingProof(
   }
 ) {
   logProofGeneratorStage("start", { jobId, proofId });
+  logDiagnosticStage("04", "proof loaded pending", { jobId, proofId });
 
   const proof = await loadMutableProofRecord(adminClient, jobId, proofId);
   logProofGeneratorStage("proof loaded", {
+    proofId,
+    proofLineageId: proof.proof_lineage_id,
+    versionNumber: proof.version_number,
+    status: proof.status,
+  });
+  logDiagnosticStage("04", "proof loaded", {
     proofId,
     proofLineageId: proof.proof_lineage_id,
     versionNumber: proof.version_number,
@@ -548,6 +585,12 @@ export async function generateBrandedPdfForExistingProof(
     throw new ProofError("No Dropbox folder is linked to this job yet.", 409);
   }
 
+  logDiagnosticStage("05", "job loaded", {
+    jobId,
+    jobReference: job.job_reference,
+    dropboxLinked: Boolean(job.dropbox_folder_path),
+  });
+
   const artwork = await withProofGeneratorTimeout(
     "Source download",
     PROOF_GENERATOR_TIMEOUTS.dropboxDownloadMs,
@@ -578,6 +621,10 @@ export async function generateBrandedPdfForExistingProof(
     cutPathName: preflightResult.productionFeatures.confirmedCutPath?.name ?? null,
     cutOverlayEnabled: preflightResult.productionFeatures.showCutPathOnProof ?? false,
   });
+  logDiagnosticStage("11", "resolved preflight built", {
+    proofId,
+    overallStatus: preflightResult.overallStatus,
+  });
 
   const confirmationErrors = validateOperatorConfirmation(
     preflightResult,
@@ -599,6 +646,11 @@ export async function generateBrandedPdfForExistingProof(
     operatorConfirmation?.cutPath?.confirmedCandidateName ??
     null;
 
+  logDiagnosticStage("14", "cut-path geometry processing started", {
+    proofId,
+    cutPathName: confirmedCutPathName,
+  });
+
   preflightResult = {
     ...preflightResult,
     productionFeatures: await enrichProductionFeaturesWithCutPathOverlay(
@@ -609,11 +661,12 @@ export async function generateBrandedPdfForExistingProof(
     ),
   };
 
-  logProofGeneratorStage("trim/cut size resolved", {
+  logDiagnosticStage("15", "cut-path geometry processing completed", {
     proofId,
-    cutPathSize: preflightResult.productionFeatures.cutPathSize,
-    resolvedFinishedSize: preflightResult.productionFeatures.resolvedProductionFinishedSize,
+    cutPathOverlayAvailable: preflightResult.productionFeatures.cutPathOverlayAvailable,
   });
+
+  logDiagnosticStage("16", "cut-path size calculation started", { proofId });
 
   preflightResult = await applyAuthoritativeFinishedSizeToPreflight(
     preflightResult,
@@ -621,8 +674,21 @@ export async function generateBrandedPdfForExistingProof(
     cutPathGeometryCache
   );
 
+  logDiagnosticStage("17", "cut-path size calculation completed", {
+    proofId,
+    cutPathSize: preflightResult.productionFeatures.cutPathSize,
+  });
+
+  logProofGeneratorStage("trim/cut size resolved", {
+    proofId,
+    cutPathSize: preflightResult.productionFeatures.cutPathSize,
+    resolvedFinishedSize: preflightResult.productionFeatures.resolvedProductionFinishedSize,
+  });
+
   const sourceDropboxPath = artwork.dropboxPath;
   const sourceJobFileId = artwork.jobFileId;
+
+  logDiagnosticStage("24", "branded PDF document creation started", { proofId });
 
   let generatedPdf: Buffer;
   try {
@@ -643,6 +709,10 @@ export async function generateBrandedPdfForExistingProof(
         })
     );
     logProofGeneratorStage("PDF generated", {
+      proofId,
+      byteLength: generatedPdf.length,
+    });
+    logDiagnosticStage("25", "branded PDF document creation completed", {
       proofId,
       byteLength: generatedPdf.length,
     });
@@ -703,6 +773,7 @@ export async function generateBrandedPdfForExistingProof(
     generatedFileName,
     proofsFolderPath,
   });
+  logDiagnosticStage("26", "Dropbox upload started", { proofId, generatedFileName });
 
   const uploadResult = await withProofGeneratorTimeout(
     "Dropbox upload",
@@ -723,8 +794,14 @@ export async function generateBrandedPdfForExistingProof(
     generatedDropboxPath: uploadResult.dropboxPath,
     generatedFileName: uploadResult.fileName,
   });
+  logDiagnosticStage("27", "Dropbox upload completed", {
+    proofId,
+    generatedDropboxPath: uploadResult.dropboxPath,
+  });
 
   const generatedAt = new Date().toISOString();
+
+  logDiagnosticStage("28", "job_proof_files save started", { proofId });
 
   await withProofGeneratorTimeout(
     "Metadata save",
@@ -748,6 +825,7 @@ export async function generateBrandedPdfForExistingProof(
   );
 
   logProofGeneratorStage("metadata saved", { proofId, generatedAt });
+  logDiagnosticStage("29", "job_proof_files save completed", { proofId, generatedAt });
 
   await logProofActivity(adminClient, {
     activityType: PROOF_ACTIVITY_TYPES.proofBrandedPdfGenerated,
