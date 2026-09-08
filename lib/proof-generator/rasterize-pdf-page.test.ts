@@ -8,8 +8,23 @@ import {
   countDarkPixels,
   missingPdfPreviewPixelDataError,
   rasterizePdfPageToPng,
+  resolvePdfJsAssetUrls,
   validateFlattenedArtworkPreview,
 } from "@/lib/proof-generator/rasterize-pdf-page";
+
+describe("resolvePdfJsAssetUrls", () => {
+  it("resolves pdfjs asset directories from a filesystem path string, not a bundler module id", () => {
+    const assets = resolvePdfJsAssetUrls();
+
+    assert.equal(typeof assets.pdfjsRoot, "string");
+    assert.match(assets.pdfjsRoot, /pdfjs-dist/);
+    assert.match(assets.standardFontDataUrl, /^file:\/\//);
+    assert.match(assets.standardFontDataUrl, /standard_fonts/);
+    assert.match(assets.cMapUrl, /^file:\/\//);
+    assert.match(assets.cMapUrl, /cmaps/);
+    assert.doesNotMatch(assets.pdfjsRoot, /^\d+$/);
+  });
+});
 
 describe("rasterizePdfPageToPng", () => {
   it("renders a PDF page to PNG with source dimensions in points", async () => {

@@ -1,4 +1,4 @@
-import { createRequire } from "node:module";
+import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -12,8 +12,6 @@ import {
 } from "@/lib/proof-generator/canvas-image";
 import { PROOF_PDF_PREVIEW_MAX_PX } from "@/lib/proof-generator/constants";
 
-const require = createRequire(import.meta.url);
-
 export type RasterizedPdfPage = {
   pngBuffer: Buffer;
   rgbaData: Uint8ClampedArray;
@@ -25,12 +23,47 @@ export type RasterizedPdfPage = {
   renderer: "pdfjs-dist";
 };
 
-function getPdfJsAssetUrls() {
-  const pdfjsRoot = path.dirname(require.resolve("pdfjs-dist/package.json"));
+/**
+ * Resolve pdfjs-dist on disk without `require.resolve("pdfjs-dist/package.json")`.
+ * Turbopack replaces that static call with a numeric module id, which then gets
+ * passed to path.dirname and crashes with ERR_INVALID_ARG_TYPE in production.
+ */
+export function resolvePdfJsRoot(): string {
+  const nodeModulesRoot = path.join(process.cwd(), "node_modules");
+  const direct = path.join(nodeModulesRoot, "pdfjs-dist");
+
+  if (existsSync(path.join(direct, "package.json"))) {
+    return direct;
+  }
+
+  if (existsSync(nodeModulesRoot)) {
+    for (const entry of readdirSync(nodeModulesRoot)) {
+      if (entry === "pdfjs-dist" || entry.startsWith("pdfjs-dist-")) {
+        const candidate = path.join(nodeModulesRoot, entry);
+        if (existsSync(path.join(candidate, "package.json"))) {
+          return candidate;
+        }
+      }
+    }
+  }
+
+  throw new Error(
+    "pdfjs-dist package root could not be resolved from process.cwd()/node_modules."
+  );
+}
+
+export function resolvePdfJsAssetUrls() {
+  const pdfjsRoot = resolvePdfJsRoot();
   return {
     standardFontDataUrl: pathToFileURL(path.join(pdfjsRoot, "standard_fonts/")).href,
     cMapUrl: pathToFileURL(path.join(pdfjsRoot, "cmaps/")).href,
+    pdfjsRoot,
   };
+}
+
+function getPdfJsAssetUrls() {
+  const { standardFontDataUrl, cMapUrl } = resolvePdfJsAssetUrls();
+  return { standardFontDataUrl, cMapUrl };
 }
 
 async function buildFullVisibilityOptionalContentConfig(
