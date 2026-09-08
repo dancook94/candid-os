@@ -5,7 +5,7 @@ const quotePdfTracingIncludes = [
   "./public/LOGO_YELLOW.png",
 ];
 
-const proofGeneratorTracingIncludes = [
+const proofAnalyseTracingIncludes = [
   "./node_modules/sharp/**",
   "./node_modules/@img/sharp-linux-x64/**",
   "./node_modules/@img/sharp-libvips-linux-x64/**",
@@ -15,7 +15,12 @@ const proofGeneratorTracingIncludes = [
   "./node_modules/@img/sharp-libvips-linuxmusl-x64/lib/libvips-cpp.so.8.18.3",
   "./node_modules/@napi-rs/canvas-linux-x64-gnu/**",
   "./node_modules/@napi-rs/canvas-linux-x64-musl/**",
-  "./public/LOGO_YELLOW.svg",
+];
+
+const proofGenerateTracingIncludes = [
+  "./node_modules/@napi-rs/canvas-linux-x64-gnu/**",
+  "./node_modules/@napi-rs/canvas-linux-x64-musl/**",
+  "./public/LOGO_YELLOW.png",
 ];
 
 const nextConfig: NextConfig = {
@@ -24,9 +29,9 @@ const nextConfig: NextConfig = {
     "/api/admin/quotes/[id]/pdf": quotePdfTracingIncludes,
     "/api/quotes/[id]/pdf": quotePdfTracingIncludes,
     "/api/admin/jobs/[id]/proofs/[proofId]/branded-pdf/analyse":
-      proofGeneratorTracingIncludes,
+      proofAnalyseTracingIncludes,
     "/api/admin/jobs/[id]/proofs/[proofId]/branded-pdf/generate":
-      proofGeneratorTracingIncludes,
+      proofGenerateTracingIncludes,
   },
 };
 

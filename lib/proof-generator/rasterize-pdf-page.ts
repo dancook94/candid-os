@@ -4,10 +4,13 @@ import { pathToFileURL } from "node:url";
 
 import { createCanvas } from "@napi-rs/canvas";
 import { getDocument, type PDFDocumentProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
-import sharp from "sharp";
 
-import { PROOF_PDF_PREVIEW_MAX_PX } from "@/lib/proof-generator/constants";
 import { logProofGeneratorDebug } from "@/lib/proof-generator/artwork-buffer";
+import {
+  countDarkPixelsFromPng,
+  countDarkPixelsFromRgba,
+} from "@/lib/proof-generator/canvas-image";
+import { PROOF_PDF_PREVIEW_MAX_PX } from "@/lib/proof-generator/constants";
 
 const require = createRequire(import.meta.url);
 
@@ -59,26 +62,13 @@ export function sourcePdfContainsTextOperand(sourceBuffer: Buffer, label: string
 }
 
 export async function countDarkPixels(pngBuffer: Buffer, threshold = 80) {
-  const { data, info } = await sharp(pngBuffer).ensureAlpha().raw().toBuffer({
-    resolveWithObject: true,
-  });
-
-  let count = 0;
-  for (let index = 0; index < data.length; index += info.channels) {
-    const red = data[index];
-    const green = data[index + 1];
-    const blue = data[index + 2];
-    if (red < threshold && green < threshold && blue < threshold) {
-      count += 1;
-    }
-  }
-
-  return count;
+  return countDarkPixelsFromPng(pngBuffer, threshold);
 }
 
 export async function validateFlattenedArtworkPreview(input: {
   sourceBuffer: Buffer;
   pngBuffer: Buffer;
+  rgbaData?: Uint8ClampedArray;
   expectedTextLabel?: string;
   requireVisibleText?: boolean;
   minDarkPixels?: number;
@@ -91,7 +81,9 @@ export async function validateFlattenedArtworkPreview(input: {
     return { ok: true as const, skipped: true as const };
   }
 
-  const darkPixels = await countDarkPixels(input.pngBuffer);
+  const darkPixels = input.rgbaData
+    ? countDarkPixelsFromRgba(input.rgbaData)
+    : await countDarkPixels(input.pngBuffer);
   const minRequired =
     input.minDarkPixels ?? Math.max(250, Math.floor(input.pngBuffer.length / 4000));
 

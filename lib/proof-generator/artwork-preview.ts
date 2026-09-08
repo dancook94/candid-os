@@ -1,17 +1,17 @@
 import { PDFDocument, type PDFEmbeddedPage, type PDFImage } from "pdf-lib";
-import sharp from "sharp";
 
 import {
   assertValidSourceArtworkBuffer,
   logProofGeneratorDebug,
 } from "@/lib/proof-generator/artwork-buffer";
+import { resizeImageBufferToPng } from "@/lib/proof-generator/canvas-image";
 import { PROOF_PDF_PREVIEW_MAX_PX } from "@/lib/proof-generator/constants";
 
 export type ArtworkPreview =
   | {
       kind: "image";
       image: PDFImage;
-      previewMethod: "sharp_embed_png" | "sharp_embed_jpeg" | "pdf_raster_png";
+      previewMethod: "canvas_embed_png" | "canvas_embed_jpeg" | "pdf_raster_png";
       sourceWidthPt: number;
       sourceHeightPt: number;
     }
@@ -126,22 +126,13 @@ export async function embedArtworkPreview(
   }
 
   try {
-    const pngBuffer = await sharp(sourceBuffer)
-      .rotate()
-      .resize({
-        width: PROOF_PDF_PREVIEW_MAX_PX,
-        height: PROOF_PDF_PREVIEW_MAX_PX,
-        fit: "inside",
-        withoutEnlargement: true,
-      })
-      .png()
-      .toBuffer();
+    const pngBuffer = await resizeImageBufferToPng(sourceBuffer, PROOF_PDF_PREVIEW_MAX_PX);
     const image = await targetDoc.embedPng(pngBuffer);
 
     return {
       kind: "image",
       image,
-      previewMethod: detectedKind === "jpeg" ? "sharp_embed_jpeg" : "sharp_embed_png",
+      previewMethod: detectedKind === "jpeg" ? "canvas_embed_jpeg" : "canvas_embed_png",
       sourceWidthPt: image.width,
       sourceHeightPt: image.height,
     };

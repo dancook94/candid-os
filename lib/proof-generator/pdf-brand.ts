@@ -1,7 +1,6 @@
-import fs from "node:fs/promises";
 import path from "node:path";
 
-import sharp from "sharp";
+import { loadAndResizeLogoPng } from "@/lib/proof-generator/canvas-image";
 
 /** Candid yellow (#fbd12c). */
 export const CANDID_YELLOW_HEX = "#fbd12c";
@@ -16,28 +15,24 @@ export const PROOF_PDF_MARGIN = 42;
 /** Logo width drawn in PDF points (slightly smaller than original 128pt). */
 export const PROOF_PDF_LOGO_DISPLAY_WIDTH = 96;
 
-/** Rasterise SVG at this multiple of display width for crisp zoom/print. */
+/** Rasterise logo at this multiple of display width for crisp zoom/print. */
 export const PROOF_PDF_LOGO_RASTER_SCALE = 4;
 
-export const PROOF_PDF_LOGO_PATH = path.join(process.cwd(), "public", "LOGO_YELLOW.svg");
+export const PROOF_PDF_LOGO_PATH = path.join(process.cwd(), "public", "LOGO_YELLOW.png");
 
 let cachedLogoPng: Buffer | null = null;
 let cachedLogoRasterWidth = 0;
 
 /**
- * Rasterise the canonical Candid SVG logo to a high-resolution transparent PNG for pdf-lib.
- * Cached in memory so repeated proof generations do not re-degrade the asset.
+ * Load the canonical Candid PNG logo, resized for pdf-lib embedding.
+ * Cached in memory so repeated proof generations do not re-decode the asset.
  */
 export async function loadCandidLogoPng(rasterWidth: number) {
   if (cachedLogoPng && cachedLogoRasterWidth === rasterWidth) {
     return cachedLogoPng;
   }
 
-  const svg = await fs.readFile(PROOF_PDF_LOGO_PATH);
-  cachedLogoPng = await sharp(svg, { density: 300 })
-    .png()
-    .resize({ width: rasterWidth })
-    .toBuffer();
+  cachedLogoPng = await loadAndResizeLogoPng(PROOF_PDF_LOGO_PATH, rasterWidth);
   cachedLogoRasterWidth = rasterWidth;
 
   return cachedLogoPng;

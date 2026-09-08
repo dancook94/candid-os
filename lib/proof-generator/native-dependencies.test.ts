@@ -27,6 +27,17 @@ function readJsonField(source: string, field: string) {
   return `{${match[1]}\n}`;
 }
 
+const proofGenerationModules = [
+  "lib/proof-generator/generate-proof-pdf.ts",
+  "lib/proof-generator/artwork-preview.ts",
+  "lib/proof-generator/pdf-brand.ts",
+  "lib/proof-generator/rasterize-pdf-page.ts",
+  "lib/proof-generator/canvas-image.ts",
+  "lib/proof-generator/pdf-layout.ts",
+  "lib/proof-generator/pdf-spec-pages.ts",
+  "lib/proof-generator/suppress-cut-path-preview.ts",
+];
+
 describe("proof generator native dependency packaging", () => {
   it("forces Node.js runtime on branded PDF analyse and generate routes", async () => {
     const analyseRoute = await readRepoFile(
@@ -66,7 +77,7 @@ describe("proof generator native dependency packaging", () => {
     );
   });
 
-  it("includes proof route native tracing and preserves quote PDF tracing", async () => {
+  it("keeps canvas external and routes native tracing separately for analyse and generate", async () => {
     const nextConfig = await readRepoFile("next.config.ts");
     const lockfile = await readRepoFile("package-lock.json");
 
@@ -100,31 +111,21 @@ describe("proof generator native dependency packaging", () => {
       /\/api\/admin\/jobs\/\[id\]\/proofs\/\[proofId\]\/branded-pdf\/generate/
     );
 
-    assert.match(nextConfig, /\.\/node_modules\/sharp\/\*\*/);
-    assert.match(nextConfig, /\.\/node_modules\/@img\/sharp-linux-x64\/\*\*/);
-    assert.match(nextConfig, /\.\/node_modules\/@img\/sharp-libvips-linux-x64\/\*\*/);
-    assert.match(
+    assert.match(nextConfig, /proofAnalyseTracingIncludes/);
+    assert.match(nextConfig, /proofGenerateTracingIncludes/);
+    assert.match(nextConfig, /proofAnalyseTracingIncludes[\s\S]*\.\/node_modules\/sharp\/\*\*/);
+    assert.doesNotMatch(
       nextConfig,
-      /\.\/node_modules\/@img\/sharp-libvips-linux-x64\/lib\/libvips-cpp\.so\.8\.18\.3/
-    );
-    assert.match(nextConfig, /\.\/node_modules\/@img\/sharp-linuxmusl-x64\/\*\*/);
-    assert.match(
-      nextConfig,
-      /\.\/node_modules\/@img\/sharp-libvips-linuxmusl-x64\/\*\*/
+      /proofGenerateTracingIncludes[\s\S]*\.\/node_modules\/sharp\/\*\*/
     );
     assert.match(
       nextConfig,
-      /\.\/node_modules\/@img\/sharp-libvips-linuxmusl-x64\/lib\/libvips-cpp\.so\.8\.18\.3/
+      /proofGenerateTracingIncludes[\s\S]*\.\/public\/LOGO_YELLOW\.png/
     );
     assert.match(
       nextConfig,
-      /\.\/node_modules\/@napi-rs\/canvas-linux-x64-gnu\/\*\*/
+      /proofGenerateTracingIncludes[\s\S]*@napi-rs\/canvas-linux-x64-gnu/
     );
-    assert.match(
-      nextConfig,
-      /\.\/node_modules\/@napi-rs\/canvas-linux-x64-musl\/\*\*/
-    );
-    assert.match(nextConfig, /\.\/public\/LOGO_YELLOW\.svg/);
 
     assert.doesNotMatch(nextConfig, /serverExternalPackages:\s*\[[^\]]*"sharp"/);
     assert.match(nextConfig, /serverExternalPackages:\s*\[[^\]]*"pdfkit"/);
@@ -168,5 +169,23 @@ describe("proof generator native dependency packaging", () => {
     );
     assert.match(service, /generateCustomerProofPdf\(/);
     assert.match(service, /async function generateBrandedPdfForExistingProof/);
+  });
+
+  it("keeps proof generation modules free from sharp imports", async () => {
+    for (const relativePath of proofGenerationModules) {
+      const source = await readRepoFile(relativePath);
+      assert.doesNotMatch(source, /import sharp from "sharp"/);
+      assert.doesNotMatch(source, /require\(["']sharp["']\)/);
+      assert.doesNotMatch(source, /import\(["']sharp["']\)/);
+    }
+  });
+
+  it("loads the static PNG logo for branded proof PDFs", async () => {
+    const pdfBrand = await readRepoFile("lib/proof-generator/pdf-brand.ts");
+
+    assert.match(pdfBrand, /LOGO_YELLOW\.png/);
+    assert.doesNotMatch(pdfBrand, /LOGO_YELLOW\.svg/);
+    assert.doesNotMatch(pdfBrand, /import sharp from "sharp"/);
+    assert.match(pdfBrand, /loadAndResizeLogoPng/);
   });
 });
