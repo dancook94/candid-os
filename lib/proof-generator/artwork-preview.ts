@@ -50,6 +50,8 @@ export async function embedArtworkPreview(
       sourceBuffer,
       pngBuffer: raster.pngBuffer,
       rgbaData: raster.rgbaData,
+      renderedWidthPx: raster.widthPx,
+      renderedHeightPx: raster.heightPx,
       requireVisibleText: options?.requireVisibleText,
     });
 

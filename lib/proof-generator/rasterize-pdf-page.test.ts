@@ -6,6 +6,7 @@ import { buildJ4LikeArtworkPdfBuffer } from "@/lib/proof-generator/j4-artwork-fi
 import { buildContourCutTestPdfBuffer } from "@/lib/proof-generator/cut-path-test-pdfs";
 import {
   countDarkPixels,
+  missingPdfPreviewPixelDataError,
   rasterizePdfPageToPng,
   validateFlattenedArtworkPreview,
 } from "@/lib/proof-generator/rasterize-pdf-page";
@@ -39,6 +40,8 @@ describe("rasterizePdfPageToPng", () => {
       sourceBuffer,
       pngBuffer: raster.pngBuffer,
       rgbaData: raster.rgbaData,
+      renderedWidthPx: raster.widthPx,
+      renderedHeightPx: raster.heightPx,
       requireVisibleText: true,
     });
 
@@ -60,6 +63,8 @@ describe("rasterizePdfPageToPng", () => {
       sourceBuffer,
       pngBuffer: raster.pngBuffer,
       rgbaData: raster.rgbaData,
+      renderedWidthPx: raster.widthPx,
+      renderedHeightPx: raster.heightPx,
       requireVisibleText: true,
     });
 
@@ -79,6 +84,8 @@ describe("rasterizePdfPageToPng", () => {
       sourceBuffer,
       pngBuffer: raster.pngBuffer,
       rgbaData: whiteRgba,
+      renderedWidthPx: raster.widthPx,
+      renderedHeightPx: raster.heightPx,
       requireVisibleText: true,
     });
 
@@ -86,5 +93,42 @@ describe("rasterizePdfPageToPng", () => {
     if (!validation.ok) {
       assert.equal(validation.darkPixels, 0);
     }
+  });
+
+  it("throws when PDF validation requires pixels but rgbaData is missing", async () => {
+    const sourceBuffer = await buildJ4LikeArtworkPdfBuffer();
+    const raster = await rasterizePdfPageToPng(sourceBuffer, 0);
+
+    await assert.rejects(
+      () =>
+        validateFlattenedArtworkPreview({
+          sourceBuffer,
+          pngBuffer: raster.pngBuffer,
+          renderedWidthPx: raster.widthPx,
+          renderedHeightPx: raster.heightPx,
+          requireVisibleText: true,
+        }),
+      (error: Error) => {
+        assert.match(error.message, /Rendered PDF preview pixel data is unavailable/);
+        assert.match(error.message, /rgbaDataPresent=false/);
+        assert.match(error.message, /pngBufferLength=\d+/);
+        assert.match(error.message, /renderedWidthPx=\d+/);
+        assert.match(error.message, /renderedHeightPx=\d+/);
+        return true;
+      }
+    );
+  });
+
+  it("formats missing rgbaData diagnostics", () => {
+    const error = missingPdfPreviewPixelDataError({
+      pngBuffer: Buffer.alloc(55876),
+      renderedWidthPx: 384,
+      renderedHeightPx: 384,
+    });
+
+    assert.match(error.message, /rgbaDataPresent=false/);
+    assert.match(error.message, /pngBufferLength=55876/);
+    assert.match(error.message, /renderedWidthPx=384/);
+    assert.match(error.message, /renderedHeightPx=384/);
   });
 });

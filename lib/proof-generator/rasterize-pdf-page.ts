@@ -66,10 +66,30 @@ export async function countDarkPixels(pngBuffer: Buffer, threshold = 80) {
   return countDarkPixelsFromPng(pngBuffer, threshold);
 }
 
+export function missingPdfPreviewPixelDataError(input: {
+  pngBuffer: Buffer;
+  rgbaData?: Uint8ClampedArray;
+  renderedWidthPx?: number;
+  renderedHeightPx?: number;
+}) {
+  return new Error(
+    [
+      "Rendered PDF preview pixel data is unavailable.",
+      `rgbaDataPresent=${Boolean(input.rgbaData)}`,
+      `rgbaDataLength=${input.rgbaData?.length ?? 0}`,
+      `pngBufferLength=${input.pngBuffer.length}`,
+      `renderedWidthPx=${input.renderedWidthPx ?? "unknown"}`,
+      `renderedHeightPx=${input.renderedHeightPx ?? "unknown"}`,
+    ].join(" ")
+  );
+}
+
 export async function validateFlattenedArtworkPreview(input: {
   sourceBuffer: Buffer;
   pngBuffer: Buffer;
   rgbaData?: Uint8ClampedArray;
+  renderedWidthPx?: number;
+  renderedHeightPx?: number;
   expectedTextLabel?: string;
   requireVisibleText?: boolean;
   minDarkPixels?: number;
@@ -82,9 +102,11 @@ export async function validateFlattenedArtworkPreview(input: {
     return { ok: true as const, skipped: true as const };
   }
 
-  const darkPixels = input.rgbaData
-    ? countDarkPixelsFromRgba(input.rgbaData)
-    : await countDarkPixels(input.pngBuffer);
+  if (!input.rgbaData?.length) {
+    throw missingPdfPreviewPixelDataError(input);
+  }
+
+  const darkPixels = countDarkPixelsFromRgba(input.rgbaData);
   const minRequired =
     input.minDarkPixels ?? Math.max(250, Math.floor(input.pngBuffer.length / 4000));
 

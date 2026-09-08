@@ -85,6 +85,9 @@ describe("createCustomerPreviewPdfBuffer", () => {
     const validation = await validateFlattenedArtworkPreview({
       sourceBuffer,
       pngBuffer: raster.pngBuffer,
+      rgbaData: raster.rgbaData,
+      renderedWidthPx: raster.widthPx,
+      renderedHeightPx: raster.heightPx,
       requireVisibleText: true,
     });
 

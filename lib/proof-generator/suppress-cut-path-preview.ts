@@ -781,6 +781,8 @@ export async function resolveCustomerArtworkPreviewBuffer(
     sourceBuffer,
     pngBuffer: suppressedRaster.pngBuffer,
     rgbaData: suppressedRaster.rgbaData,
+    renderedWidthPx: suppressedRaster.widthPx,
+    renderedHeightPx: suppressedRaster.heightPx,
     requireVisibleText: options?.requireVisibleText,
   });
 

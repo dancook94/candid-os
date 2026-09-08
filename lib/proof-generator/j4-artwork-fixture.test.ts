@@ -79,6 +79,8 @@ describe("J-4 artwork fixture", () => {
       sourceBuffer,
       pngBuffer: flattened.pngBuffer,
       rgbaData: flattened.rgbaData,
+      renderedWidthPx: flattened.widthPx,
+      renderedHeightPx: flattened.heightPx,
     });
 
     assert.equal(flattenedValidation.ok, true);

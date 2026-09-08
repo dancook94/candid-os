@@ -607,4 +607,59 @@ describe("generateCustomerProofPdf", () => {
     assert.equal(preflight.productionFeatures.originalCutPathSuppressed, true);
     assert.equal(preflight.productionFeatures.cutPathOverlayRendered, true);
   });
+
+  it("generates a PDF proof with font validation and cut-path suppression without PNG re-decode fallback", async () => {
+    const sourceBuffer = (
+      await import("@/lib/proof-generator/cut-path-test-pdfs")
+    ).buildJ4LikeContourCutPdfBuffer({ cutWidthMm: 400, cutHeightMm: 400 });
+
+    const preflight = buildPreflight({
+      metadata: {
+        ...buildPreflight().metadata,
+        fileName: "artwork.pdf",
+        mimeType: "application/pdf",
+        inputType: "pdf",
+        pageCount: 1,
+        fonts: {
+          value: ["Helvetica"],
+          confidence: "high",
+          source: "test",
+        },
+      },
+      fonts: {
+        status: "live_fonts_detected",
+        names: ["Helvetica"],
+        confidence: "high",
+        message: "Helvetica detected",
+      },
+      productionFeatures: {
+        cutPathCandidates: [],
+        whiteInkCandidates: [],
+        layers: [],
+        spotColourGroups: { productionSeparations: ["CutContour"], otherSpotColours: [] },
+        expectsCutPath: true,
+        cutPathOverlayAvailable: true,
+        confirmedCutPath: {
+          name: "CutContour",
+          sourceType: "separation",
+          confirmedAt: "2026-01-01T00:00:00.000Z",
+          confirmedByProfileId: "user-1",
+        },
+        showCutPathOnProof: true,
+        cutPathSize: { widthMm: 400, heightMm: 400, widthPt: 0, heightPt: 0 },
+      },
+    });
+
+    const pdf = await generateCustomerProofPdf({
+      jobReference: "J-4",
+      projectName: "Foamex Panels",
+      proofReference: "J-4 Proof v14",
+      versionNumber: 14,
+      preflight,
+      sourceBuffer,
+      sourceFileName: "artwork.pdf",
+    });
+
+    assert.ok(pdf.byteLength > 1000);
+  });
 });
