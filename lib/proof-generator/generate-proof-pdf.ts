@@ -22,6 +22,7 @@ import {
 import {
   drawApprovalFooterBar,
   drawArtworkPreviewFrame,
+  drawArtworkPageSubtitle,
   drawCustomerMessagePanel,
   drawMetaGrid,
   drawProofHeroTitle,
@@ -58,6 +59,15 @@ function contentWidth() {
   return PROOF_PDF_PAGE_WIDTH - PROOF_PDF_MARGIN * 2;
 }
 
+function getSourcePdfPageCount(preflight: PreflightResult) {
+  if (preflight.metadata.inputType !== "pdf") {
+    return 1;
+  }
+
+  const pageCount = preflight.metadata.pageCount ?? 1;
+  return pageCount > 1 ? pageCount : 1;
+}
+
 export async function generateCustomerProofPdf(input: {
   jobReference: string;
   projectName: string;
@@ -69,6 +79,11 @@ export async function generateCustomerProofPdf(input: {
   sourceFileName: string;
   cutPathGeometryCache?: CutPathGeometryCache;
 }) {
+  const sourcePageCount = getSourcePdfPageCount(input.preflight);
+  if (sourcePageCount > 1) {
+    return generateMultiPageCustomerProofPdf(input, sourcePageCount);
+  }
+
   try {
     logProofGeneratorStageMarker("entered-generator", {
       sourceFileName: input.sourceFileName,
@@ -375,6 +390,271 @@ export async function generateCustomerProofPdf(input: {
     return pdfBuffer;
   } catch (error) {
     logOriginalGenerationError(error, { stage: "generateCustomerProofPdf-catch" });
+    const detail = error instanceof Error ? error.message : "Unknown PDF generation error.";
+    throw wrapProofGenerationError(
+      `Branded proof PDF generation failed: ${detail}`,
+      error
+    );
+  }
+}
+
+async function generateMultiPageCustomerProofPdf(
+  input: {
+    jobReference: string;
+    projectName: string;
+    proofReference: string;
+    versionNumber: number;
+    customerMessage?: string | null;
+    preflight: PreflightResult;
+    sourceBuffer: Buffer;
+    sourceFileName: string;
+    cutPathGeometryCache?: CutPathGeometryCache;
+  },
+  sourcePageCount: number
+) {
+  try {
+    logProofGeneratorStageMarker("multi-page-proof-start", {
+      sourceFileName: input.sourceFileName,
+      sourcePageCount,
+      diagnosticsVersion: PROOF_GENERATOR_DIAGNOSTICS_V2,
+    });
+
+    const doc = await PDFDocument.create();
+    const regular = await doc.embedFont(StandardFonts.Helvetica);
+    const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+    const fonts = { regular, bold };
+    const logo = await embedCandidLogo(doc);
+
+    const primaryItem = input.preflight.quotedItems[0] ?? null;
+    const customerMessage = input.customerMessage?.trim() ?? "";
+    const preflight = { ...input.preflight };
+    const features = { ...preflight.productionFeatures };
+    const requireVisibleText = (input.preflight.fonts.names?.length ?? 0) > 0;
+    const confirmedCutPathForPreview = input.preflight.productionFeatures.confirmedCutPath ?? null;
+    const overlayRequestedInitial = Boolean(
+      input.preflight.productionFeatures.showCutPathOnProof &&
+        input.preflight.productionFeatures.confirmedCutPath
+    );
+
+    for (let pageIndex = 0; pageIndex < sourcePageCount; pageIndex += 1) {
+      const pageNumber = pageIndex + 1;
+      const isFirstPage = pageIndex === 0;
+      const startedAt = Date.now();
+
+      logProofGeneratorStageMarker("artwork-page-start", {
+        pageIndex,
+        pageNumber,
+        sourcePageCount,
+        sourceFileName: input.sourceFileName,
+      });
+
+      const page = doc.addPage([PROOF_PDF_PAGE_WIDTH, PROOF_PDF_PAGE_HEIGHT]);
+      const pageHeader = drawProofPageHeader(page, fonts, logo, pageNumber, pageNumber, {
+        showPageIndicator: false,
+      });
+
+      let y = pageHeader.contentStartY;
+      if (isFirstPage) {
+        y = drawProofHeroTitle(page, fonts, pageHeader.dividerY);
+        y = drawProofVersionSubtitle(page, fonts, y, input.versionNumber);
+        y = drawMetaGrid(page, fonts, y, [
+          { label: "Job", value: input.jobReference },
+          { label: "Project", value: input.projectName },
+          { label: "Proof version", value: String(input.versionNumber) },
+          {
+            label: "Related item",
+            value: primaryItem
+              ? joinPdfParts(
+                  [primaryItem.itemReference, primaryItem.itemName],
+                  " | ",
+                  PDF_NOT_SPECIFIED
+                )
+              : PDF_NOT_SPECIFIED,
+          },
+          { label: "Artwork page", value: `${pageNumber} of ${sourcePageCount}` },
+        ]);
+      } else {
+        y = drawArtworkPageSubtitle(page, fonts, y, pageNumber, sourcePageCount);
+        y = drawMetaGrid(page, fonts, y, [
+          { label: "Job", value: input.jobReference },
+          { label: "Project", value: input.projectName },
+          { label: "Artwork page", value: `${pageNumber} of ${sourcePageCount}` },
+        ]);
+      }
+
+      const cutPathLegendReserved =
+        isFirstPage && overlayRequestedInitial
+          ? CUT_PATH_LEGEND_HEIGHT + CUT_PATH_LEGEND_PREVIEW_GAP
+          : 0;
+      const footerTop = PROOF_PDF_MARGIN + FOOTER_BAR_HEIGHT + FOOTER_GAP;
+      const customerMessageLines =
+        isFirstPage && customerMessage
+          ? estimateWrappedLineCount(customerMessage, contentWidth() - 24, regular, 10)
+          : 0;
+      const customerMessageHeight =
+        isFirstPage && customerMessage
+          ? 32 + customerMessageLines * 12 + CUSTOMER_MESSAGE_FOOTER_GAP
+          : 0;
+      const previewBoxBottom = footerTop + customerMessageHeight + cutPathLegendReserved;
+      const previewBoxHeight = Math.max(260, y - 8 - previewBoxBottom);
+      const previewBoxWidth = contentWidth();
+
+      let preview;
+      if (isFirstPage) {
+        const previewSource = await withProofGeneratorTimeout(
+          "Cut-path preview suppression",
+          PROOF_GENERATOR_TIMEOUTS.ocgSuppressionMs,
+          () =>
+            resolveCustomerArtworkPreviewBuffer(input.sourceBuffer, confirmedCutPathForPreview, {
+              requireVisibleText,
+            })
+        );
+
+        features.originalCutPathSuppressed = previewSource.originalCutPathSuppressed;
+
+        preview = await withProofGeneratorTimeout(
+          `Preview render (page ${pageNumber})`,
+          PROOF_GENERATOR_TIMEOUTS.previewRenderMs,
+          () =>
+            embedArtworkPreview(doc, input.sourceBuffer, input.sourceFileName, {
+              previewBuffer: previewSource.previewBuffer,
+              rasterizePdf: true,
+              requireVisibleText,
+              pageIndex: 0,
+            })
+        );
+      } else {
+        preview = await withProofGeneratorTimeout(
+          `Preview render (page ${pageNumber})`,
+          PROOF_GENERATOR_TIMEOUTS.previewRenderMs,
+          () =>
+            embedArtworkPreview(doc, input.sourceBuffer, input.sourceFileName, {
+              rasterizePdf: true,
+              requireVisibleText: false,
+              pageIndex,
+            })
+        );
+      }
+
+      const placement = drawArtworkPreviewFrame(page, {
+        x: PROOF_PDF_MARGIN,
+        y: previewBoxBottom,
+        width: previewBoxWidth,
+        height: previewBoxHeight,
+        preview:
+          preview.kind === "image"
+            ? {
+                kind: "image",
+                image: preview.image,
+                imageWidth: preview.sourceWidthPt,
+                imageHeight: preview.sourceHeightPt,
+              }
+            : {
+                kind: "page",
+                page: preview.page,
+                pageWidth: preview.width,
+                pageHeight: preview.height,
+              },
+      });
+
+      if (isFirstPage) {
+        const overlayRequested = Boolean(features.showCutPathOnProof && features.confirmedCutPath);
+        features.cutPathOverlayRequested = overlayRequested;
+
+        if (overlayRequested && features.confirmedCutPath) {
+          const confirmedCutPath = features.confirmedCutPath;
+          const geometryCache = input.cutPathGeometryCache ?? new CutPathGeometryCache();
+          const extraction = await geometryCache.extract(
+            input.sourceBuffer,
+            confirmedCutPath.name,
+            0,
+            { debugLabel: "customer_proof_pdf_overlay" }
+          );
+
+          const cutPathOverlayGeometryAvailable =
+            extraction.ok && cutPathGeometryHasContent(extraction.geometry);
+          features.cutPathOverlayGeometryAvailable = cutPathOverlayGeometryAvailable;
+
+          const cutPathOverlayRendered =
+            cutPathOverlayGeometryAvailable && extraction.ok
+              ? drawCutPathOverlay(page, extraction.geometry, placement)
+              : false;
+
+          features.cutPathOverlayRendered =
+            overlayRequested && cutPathOverlayGeometryAvailable && cutPathOverlayRendered;
+        }
+
+        if (overlayRequestedInitial && features.confirmedCutPath && features.showCutPathOnProof) {
+          const cutPathSize = features.cutPathSize ?? features.resolvedProductionFinishedSize;
+          const customerMessageTop = footerTop + customerMessageHeight;
+          const legendBaselineY = customerMessageTop + CUT_PATH_LEGEND_PREVIEW_GAP + 18;
+          drawCutPathOverlayLegend(page, fonts, PROOF_PDF_MARGIN + 8, legendBaselineY, {
+            finishedCutSizeLabel: cutPathSize
+              ? `${cutPathSize.widthMm} × ${cutPathSize.heightMm} mm`
+              : null,
+          });
+        }
+
+        if (customerMessage) {
+          drawCustomerMessagePanel(page, fonts, {
+            message: customerMessage,
+            x: PROOF_PDF_MARGIN,
+            y: footerTop + customerMessageHeight,
+            width: previewBoxWidth,
+          });
+        }
+
+        drawApprovalFooterBar(
+          page,
+          fonts,
+          "Please review this proof carefully before approval.",
+          "Candid Creative"
+        );
+      }
+
+      logProofGeneratorStageMarker("artwork-page-complete", {
+        pageIndex,
+        pageNumber,
+        durationMs: Date.now() - startedAt,
+        previewMethod: preview.previewMethod,
+      });
+    }
+
+    preflight.productionFeatures = features;
+    preflight.checks = resolvePreflightChecksAfterProductionConfirmation(
+      preflight.checks,
+      features
+    );
+
+    renderSpecificationPages(doc, fonts, logo, preflight);
+
+    logProofGeneratorStageMarker("spec-pages-complete", {
+      pageCount: doc.getPageCount(),
+      sourcePageCount,
+    });
+
+    updateProofPageIndicators(doc.getPages(), fonts, 1);
+
+    input.preflight.productionFeatures = features;
+    input.preflight.checks = preflight.checks;
+
+    const bytes = await doc.save();
+    const pdfBuffer = Buffer.from(bytes);
+
+    const validation = await validateGeneratedProofPdf(pdfBuffer);
+    if (!validation.ok) {
+      throw new Error(`Generated proof PDF failed validation: ${validation.reason}`);
+    }
+
+    logProofGeneratorStageMarker("multi-page-proof-complete", {
+      sourcePageCount,
+      pageCount: validation.pageCount,
+      pdfBufferByteLength: pdfBuffer.byteLength,
+    });
+
+    return pdfBuffer;
+  } catch (error) {
+    logOriginalGenerationError(error, { stage: "generateMultiPageCustomerProofPdf-catch" });
     const detail = error instanceof Error ? error.message : "Unknown PDF generation error.";
     throw wrapProofGenerationError(
       `Branded proof PDF generation failed: ${detail}`,

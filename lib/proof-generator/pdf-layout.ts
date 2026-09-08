@@ -227,6 +227,24 @@ export function drawProofVersionSubtitle(
   return y - 22;
 }
 
+export function drawArtworkPageSubtitle(
+  page: PDFPage,
+  fonts: ProofPdfFonts,
+  y: number,
+  pageNumber: number,
+  sourcePageCount: number
+) {
+  drawText(page, `Artwork Page ${pageNumber} of ${sourcePageCount}`, {
+    x: PROOF_PDF_MARGIN,
+    y,
+    size: 12,
+    font: fonts.bold,
+    color: PROOF_PDF_THEME.text,
+  });
+
+  return y - 22;
+}
+
 export function drawMetaField(
   page: PDFPage,
   fonts: ProofPdfFonts,

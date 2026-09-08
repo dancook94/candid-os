@@ -28,11 +28,17 @@ export async function embedArtworkPreview(
   targetDoc: PDFDocument,
   sourceBuffer: Buffer,
   fileName: string,
-  options?: { previewBuffer?: Buffer; rasterizePdf?: boolean; requireVisibleText?: boolean }
+  options?: {
+    previewBuffer?: Buffer;
+    rasterizePdf?: boolean;
+    requireVisibleText?: boolean;
+    pageIndex?: number;
+  }
 ): Promise<ArtworkPreview> {
   const previewBuffer = options?.previewBuffer ?? sourceBuffer;
   const detectedKind = assertValidSourceArtworkBuffer(previewBuffer, fileName);
   const rasterizePdf = options?.rasterizePdf ?? true;
+  const pageIndex = options?.pageIndex ?? 0;
 
   logProofGeneratorDebug("artwork_preview_start", {
     fileName,
@@ -46,7 +52,7 @@ export async function embedArtworkPreview(
     const { rasterizePdfPageToPng, validateFlattenedArtworkPreview } = await import(
       "@/lib/proof-generator/rasterize-pdf-page"
     );
-    const raster = await rasterizePdfPageToPng(previewBuffer, 0);
+    const raster = await rasterizePdfPageToPng(previewBuffer, pageIndex);
     const previewValidation = await validateFlattenedArtworkPreview({
       sourceBuffer,
       pngBuffer: raster.pngBuffer,
@@ -106,9 +112,9 @@ export async function embedArtworkPreview(
 
     for (const candidate of buffersToTry) {
       try {
-        const [embeddedPage] = await targetDoc.embedPdf(candidate.buffer, [0]);
+        const [embeddedPage] = await targetDoc.embedPdf(candidate.buffer, [pageIndex]);
         if (!embeddedPage) {
-          throw new Error("PDF artwork did not contain a renderable first page.");
+          throw new Error(`PDF artwork did not contain a renderable page at index ${pageIndex}.`);
         }
 
         if (candidate.method === "pdf_lib_embed_page_fallback") {
