@@ -21,7 +21,6 @@ import {
 import { applyAuthoritativeFinishedSizeToPreflight } from "@/lib/proof-generator/resolve-finished-size";
 import { CutPathGeometryCache } from "@/lib/proof-generator/cut-path-geometry-cache";
 import { logDiagnosticStage } from "@/lib/proof-generator/diagnostic-stage-log";
-import { generateCustomerProofPdf } from "@/lib/proof-generator/generate-proof-pdf";
 import {
   logProofGeneratorStage,
   proofGeneratorTimeoutMessage,
@@ -743,6 +742,9 @@ export async function generateBrandedPdfForExistingProof(
 
   let generatedPdf: Buffer;
   try {
+    const { generateCustomerProofPdf } = await import(
+      "@/lib/proof-generator/generate-proof-pdf"
+    );
     generatedPdf = await withProofGeneratorTimeout(
       "PDF generation",
       PROOF_GENERATOR_TIMEOUTS.pdfGenerationMs,

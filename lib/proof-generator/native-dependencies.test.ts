@@ -147,4 +147,24 @@ describe("proof generator native dependency packaging", () => {
     assert.match(service, /artwork\.detectedKind === "pdf"/);
     assert.match(service, /artwork\.detectedKind === "ai_unsupported"/);
   });
+
+  it("loads PDF generation dynamically so analyse does not eagerly import sharp", async () => {
+    const service = await readRepoFile("lib/proof-generator/service.ts");
+
+    assert.doesNotMatch(
+      service,
+      /import \{ generateCustomerProofPdf \} from "@\/lib\/proof-generator\/generate-proof-pdf"/
+    );
+    assert.doesNotMatch(service, /from "@\/lib\/proof-generator\/generate-proof-pdf"/);
+    assert.doesNotMatch(service, /from "@\/lib\/proof-generator\/artwork-preview"/);
+    assert.doesNotMatch(service, /from "@\/lib\/proof-generator\/pdf-brand"/);
+    assert.doesNotMatch(service, /import sharp from "sharp"/);
+
+    assert.match(
+      service,
+      /await import\(\s*"@\/lib\/proof-generator\/generate-proof-pdf"\s*\)/
+    );
+    assert.match(service, /generateCustomerProofPdf\(/);
+    assert.match(service, /async function generateBrandedPdfForExistingProof/);
+  });
 });
