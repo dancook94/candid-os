@@ -26,6 +26,73 @@ export async function listLinkedCandidJobs(
   return data ?? [];
 }
 
+export async function assignPrintfactoryToCandidJobs(
+  adminClient: SupabaseClient,
+  input: {
+    printfactoryJobId: string;
+    candidJobIds: string[];
+    actorProfileId: string;
+    linkJobs: (
+      adminClient: SupabaseClient,
+      printfactoryJobId: string,
+      candidJobId: string,
+      actorProfileId: string
+    ) => Promise<unknown>;
+  }
+) {
+  const uniqueIds = [...new Set(input.candidJobIds.map((id) => id.trim()).filter(Boolean))];
+
+  if (uniqueIds.length === 0) {
+    throw new ProductionError("At least one Candid job is required.", 400);
+  }
+
+  let lastRow: unknown = null;
+
+  for (const candidJobId of uniqueIds) {
+    lastRow = await input.linkJobs(
+      adminClient,
+      input.printfactoryJobId,
+      candidJobId,
+      input.actorProfileId
+    );
+  }
+
+  return { ok: true as const, row: lastRow };
+}
+
+export async function upsertPrintfactoryCandidJobLink(
+  adminClient: SupabaseClient,
+  input: {
+    printfactoryJobId: string;
+    candidJobId: string;
+    actorProfileId: string;
+    linkType?: "manual" | "confirmed_multi";
+    isPrimary?: boolean;
+  }
+) {
+  const { error: linkError } = await adminClient.from("printfactory_job_candid_jobs").upsert(
+    {
+      printfactory_job_id: input.printfactoryJobId,
+      candid_job_id: input.candidJobId,
+      link_type: input.linkType ?? "manual",
+      is_primary: input.isPrimary ?? false,
+      linked_by_profile_id: input.actorProfileId,
+    },
+    { onConflict: "printfactory_job_id,candid_job_id" }
+  );
+
+  if (linkError) {
+    if (linkError.code === "42P01") {
+      throw new ProductionError(
+        "Multi-job linking requires migration 20260822120000_production_board_multi_job.sql.",
+        503
+      );
+    }
+
+    throw new ProductionError(linkError.message, 500);
+  }
+}
+
 export async function addLinkedCandidJob(
   adminClient: SupabaseClient,
   input: {
@@ -45,30 +112,23 @@ export async function addLinkedCandidJob(
     throw new ProductionError(pfError?.message ?? "PrintFactory job not found.", 404);
   }
 
-  const { error: linkError } = await adminClient.from("printfactory_job_candid_jobs").upsert(
-    {
-      printfactory_job_id: input.printfactoryJobId,
-      candid_job_id: input.candidJobId,
-      link_type: input.linkType ?? "manual",
-      is_primary: !pfJob.candid_job_id,
-      linked_by_profile_id: input.actorProfileId,
-    },
-    { onConflict: "printfactory_job_id,candid_job_id" }
-  );
+  await upsertPrintfactoryCandidJobLink(adminClient, {
+    printfactoryJobId: input.printfactoryJobId,
+    candidJobId: input.candidJobId,
+    actorProfileId: input.actorProfileId,
+    linkType: input.linkType,
+    isPrimary: !pfJob.candid_job_id,
+  });
 
-  if (linkError) {
-    if (linkError.code === "42P01") {
-      throw new ProductionError(
-        "Multi-job linking requires migration 20260822120000_production_board_multi_job.sql.",
-        503
-      );
-    }
+  const { data: remaining } = await adminClient
+    .from("printfactory_job_candid_jobs")
+    .select("candid_job_id")
+    .eq("printfactory_job_id", input.printfactoryJobId);
 
-    throw new ProductionError(linkError.message, 500);
-  }
+  const linkCount = remaining?.length ?? 0;
 
   const updates: Record<string, unknown> = {
-    is_multi_job_sheet: true,
+    is_multi_job_sheet: linkCount > 1,
   };
 
   if (!pfJob.candid_job_id) {

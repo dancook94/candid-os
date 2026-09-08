@@ -56,4 +56,4 @@ export const JOB_BOARD_ACTIVITY_TYPES = {
 } as const;
 
 export const JOB_BOARD_SELECT =
-  "id, company_id, quote_id, opportunity_id, contact_id, job_reference, project_name, status, artwork_source, fulfilment_method, required_date, production_board_stage, production_board_on_hold, ready_to_print_at, ready_to_print_override_at, ready_to_print_override_reason, dropbox_folder_path, dropbox_setup_status, accepted_at, updated_at, proof_required";
+  "id, company_id, quote_id, opportunity_id, contact_id, job_reference, project_name, status, artwork_source, fulfilment_method, required_date, production_board_stage, production_board_on_hold, ready_to_print_at, ready_to_print_override_at, ready_to_print_override_reason, dropbox_folder_path, dropbox_setup_status, accepted_at, updated_at, proof_required, job_billing_type, job_origin, commercial_status";

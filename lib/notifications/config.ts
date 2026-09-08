@@ -52,7 +52,7 @@ export function getResendConfigStatus(): ResendConfigStatus {
     fromName,
     appUrl: getAppBaseUrl(),
     emailMode: emailMode.mode,
-    developmentSafetyActive: emailMode.mode !== "live",
+    developmentSafetyActive: emailMode.communicationMode !== "live",
     missing,
   };
 }

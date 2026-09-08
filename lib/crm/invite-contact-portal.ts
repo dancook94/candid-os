@@ -4,6 +4,7 @@ import type { User } from "@supabase/supabase-js";
 import { normalizeContactEmail } from "@/lib/crm/contacts";
 import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
 import { createCrmActivity } from "@/lib/crm/create-crm-activity";
+import { assertCustomerPortalInviteAllowed } from "@/lib/communications/auth-guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type InviteContactResult =
@@ -85,6 +86,16 @@ export async function inviteContactToPortal(
       ok: false,
       status: 400,
       message: "Contact must have an email address before inviting to the portal.",
+    };
+  }
+
+  const inviteGuard = assertCustomerPortalInviteAllowed(email);
+
+  if (!inviteGuard.ok) {
+    return {
+      ok: false,
+      status: 403,
+      message: inviteGuard.message,
     };
   }
 

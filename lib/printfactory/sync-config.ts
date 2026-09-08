@@ -50,16 +50,23 @@ export function getPrintfactorySyncLimits(): PrintfactorySyncLimits {
   };
 }
 
+import { clampSyncDateTimeFrom } from "@/lib/printfactory/matching-config";
+
+export type SyncWindowOptions = {
+  includeHistorical?: boolean;
+};
+
 export function buildInitialSyncWindow(
   limits: PrintfactorySyncLimits,
-  now = new Date()
+  now = new Date(),
+  options?: SyncWindowOptions
 ) {
   const dateTimeTo = now.toISOString();
   const dateTimeFrom = new Date(now);
   dateTimeFrom.setDate(dateTimeFrom.getDate() - limits.syncWindowDays);
 
   return {
-    dateTimeFrom: dateTimeFrom.toISOString(),
+    dateTimeFrom: clampSyncDateTimeFrom(dateTimeFrom.toISOString(), options),
     dateTimeTo,
   };
 }
@@ -67,14 +74,15 @@ export function buildInitialSyncWindow(
 export function buildIncrementalSyncWindow(
   lastSuccessfulSyncAt: string,
   limits: PrintfactorySyncLimits,
-  now = new Date()
+  now = new Date(),
+  options?: SyncWindowOptions
 ) {
   const overlapMs = limits.incrementalOverlapMinutes * 60 * 1000;
   const from = new Date(lastSuccessfulSyncAt);
   from.setTime(from.getTime() - overlapMs);
 
   return {
-    dateTimeFrom: from.toISOString(),
+    dateTimeFrom: clampSyncDateTimeFrom(from.toISOString(), options),
     dateTimeTo: now.toISOString(),
   };
 }

@@ -88,6 +88,8 @@ function pickPathFields(raw: Record<string, unknown>, document: Record<string, u
     document?.Path,
     document?.InputPath,
     document?.DocumentPath,
+    document?.Location,
+    document?.location,
   ];
 
   for (const candidate of pathCandidates) {
@@ -104,7 +106,7 @@ function pickPathFields(raw: Record<string, unknown>, document: Record<string, u
 /**
  * Single normalization entry point for PrintFactory list/detail records.
  * The v2 /job/list endpoint returns JobGUID, JobName, Documents[{Name}], Device, etc.
- * It does not currently include Synology/source file paths.
+ * Original source paths come from GET /api/v2/job/{JobGUID} XML Document/Location.
  */
 export function normalizePrintfactoryRawJob(
   raw: Record<string, unknown>

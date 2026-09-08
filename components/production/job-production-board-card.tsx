@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { formatCrmDateTime } from "@/lib/crm/format-datetime";
 import { StatusBadge } from "@/components/status-badge";
+import { PrintfactoryThumbnailImage } from "@/components/production/printfactory-thumbnail";
 import type { JobProductionBoardCard } from "@/lib/production/job-board-service";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Clock, ExternalLink } from "lucide-react";
@@ -57,9 +58,18 @@ export function JobProductionBoardCardView({
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-foreground">
-            {card.job_reference}
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="truncate text-sm font-semibold text-foreground">
+              {card.job_reference}
+            </p>
+            {card.billing_type_label &&
+            card.job_billing_type &&
+            card.job_billing_type !== "billable" ? (
+              <span className="inline-flex shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700 ring-1 ring-slate-600/10">
+                {card.billing_type_label}
+              </span>
+            ) : null}
+          </div>
           <p className="truncate text-xs text-muted-foreground">
             {card.company_name}
           </p>
@@ -70,6 +80,21 @@ export function JobProductionBoardCardView({
       <p className="mt-2 truncate text-xs text-muted-foreground">
         {card.project_name}
       </p>
+
+      {card.preview_thumbnail_url ? (
+        <div className="mt-3">
+          {card.preview_is_shared_print ? (
+            <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              Shared print
+            </p>
+          ) : null}
+          <PrintfactoryThumbnailImage
+            src={card.preview_thumbnail_url}
+            alt={card.preview_thumbnail_alt ?? card.job_reference}
+            maxHeightClassName="max-h-28"
+          />
+        </div>
+      ) : null}
 
       <div className="mt-3 grid gap-1 text-xs text-muted-foreground">
         {card.required_date ? (
@@ -119,12 +144,14 @@ export function JobProductionBoardCardView({
         >
           PrintFactory
         </Link>
-        <Link
-          href={`/admin/quotes/${card.quote_id}`}
-          className="text-xs font-medium text-foreground underline-offset-4 hover:underline"
-        >
-          Quote
-        </Link>
+        {card.quote_id ? (
+          <Link
+            href={`/admin/quotes/${card.quote_id}`}
+            className="text-xs font-medium text-foreground underline-offset-4 hover:underline"
+          >
+            Quote
+          </Link>
+        ) : null}
         {card.opportunity_id ? (
           <Link
             href={`/admin/opportunities/${card.opportunity_id}`}

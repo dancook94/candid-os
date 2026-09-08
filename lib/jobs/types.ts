@@ -47,7 +47,7 @@ export type DropboxSetupStatus = (typeof DROPBOX_SETUP_STATUSES)[number];
 export type JobRecord = {
   id: string;
   company_id: string;
-  quote_id: string;
+  quote_id: string | null;
   quote_version_id: string | null;
   opportunity_id: string | null;
   quote_request_id: string | null;
@@ -66,6 +66,8 @@ export type JobRecord = {
   dropbox_folder_path: string | null;
   dropbox_folder_id: string | null;
   dropbox_setup_status: DropboxSetupStatus;
+  slack_channel_id: string | null;
+  slack_channel_created_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -127,7 +129,7 @@ export type CustomerJobDetail = {
   requiredDate: string | null;
   fulfilmentMethod: string | null;
   deliveryDetails: string | null;
-  quoteId: string;
+  quoteId: string | null;
   quoteNumber: string | null;
   artworkRequired: boolean;
   customerArtworkMessage: string | null;

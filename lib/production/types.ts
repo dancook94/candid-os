@@ -89,6 +89,8 @@ export type ProductionItemFormInput = {
   synologySourcePath?: string | null;
 };
 
+export type ProductionBoardView = "active" | "archived";
+
 export type ProductionBoardFilters = {
   search: string;
   companyId: string | null;
@@ -98,4 +100,5 @@ export type ProductionBoardFilters = {
   priority: ProductionPriority | null;
   dueDate: "overdue" | "today" | "tomorrow" | null;
   jobReference: string | null;
+  boardView: ProductionBoardView;
 };

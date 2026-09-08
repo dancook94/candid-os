@@ -68,7 +68,7 @@ export const PRINTFACTORY_ACTIVITY_TYPES = {
 } as const;
 
 export const PRINTFACTORY_JOB_SELECT =
-  "id, printfactory_job_guid, job_name, source_file_path, source_file_name, document_name, device, media_type, producer, printfactory_status, progress, created_at_printfactory, updated_at_printfactory, first_seen_at, last_seen_at, candid_job_id, suggested_candid_job_id, job_match_status, job_match_method, job_match_confidence, extracted_job_reference, match_suggestion_reason, match_suggestion_details, ignored_at, ignored_by_profile_id, ignore_reason, created_at, updated_at";
+  "id, printfactory_job_guid, job_name, source_file_path, normalized_source_path, source_path_status, source_locations, source_file_name, document_name, device, media_type, producer, printfactory_status, progress, created_at_printfactory, updated_at_printfactory, first_seen_at, last_seen_at, candid_job_id, suggested_candid_job_id, job_match_status, job_match_method, job_match_confidence, extracted_job_reference, match_suggestion_reason, match_suggestion_details, ignored_at, ignored_by_profile_id, ignore_reason, created_at, updated_at";
 
 export const PRINTFACTORY_LINK_SELECT =
   "id, printfactory_job_id, production_item_id, link_status, match_method, match_confidence, suggestion_reason, suggestion_details, confirmed_by_profile_id, confirmed_at, created_at, updated_at";

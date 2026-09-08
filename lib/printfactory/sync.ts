@@ -5,6 +5,7 @@ import {
   fetchPrintfactoryJobsBounded,
   getPrintfactoryConnectionStatus,
 } from "@/lib/printfactory/client";
+import { enrichPrintfactoryJobsWithSourcePaths } from "@/lib/printfactory/source-path-enrichment";
 import {
   PRINTFACTORY_ACTIVITY_TYPES,
   PRINTFACTORY_JOB_SELECT,
@@ -23,6 +24,11 @@ import {
   type PrintfactoryDataQueryError,
 } from "@/lib/printfactory/schema-readiness";
 import {
+  filterPrintfactoryRecordsByOperationalWindow,
+  getPrintfactoryMatchingGoLiveDateString,
+  type PrintfactoryMatchingLoadFilters,
+} from "@/lib/printfactory/matching-config";
+import {
   buildIncrementalSyncWindow,
   buildInitialSyncWindow,
   getPrintfactorySyncLimits,
@@ -38,6 +44,7 @@ import {
 } from "@/lib/printfactory/sync-state";
 import {
   createSyncStageTimer,
+  logSyncErrorDev,
   type SyncStageName,
   type SyncStageTiming,
 } from "@/lib/printfactory/sync-timing";
@@ -159,9 +166,14 @@ async function countIgnored(adminClient: SupabaseClient) {
   return count ?? 0;
 }
 
+export type SyncPrintfactoryJobsOptions = {
+  includeHistorical?: boolean;
+};
+
 export async function syncPrintfactoryJobs(
   adminClient: SupabaseClient,
-  actorProfileId?: string | null
+  actorProfileId?: string | null,
+  options: SyncPrintfactoryJobsOptions = {}
 ): Promise<PrintfactorySyncResult> {
   const connectionStatus = getPrintfactoryConnectionStatus();
   const limits = getPrintfactorySyncLimits();
@@ -211,6 +223,8 @@ export async function syncPrintfactoryJobs(
   let parentJobSuggestions = 0;
   let pagesFetched = 0;
   let recordsReceived = 0;
+  let detailFetchCount = 0;
+  let detailFetchFailures = 0;
   let accountTotal: number | null = null;
   let filteredTotal: number | null = null;
   let hasMore = false;
@@ -274,11 +288,21 @@ export async function syncPrintfactoryJobs(
   }
 
   const syncState = await loadPrintfactorySyncState(adminClient);
-  const continuingBackfill = syncState.lastSkipCursor > 0 && !syncState.lastSuccessfulSyncAt;
+  const includeHistorical = options.includeHistorical ?? false;
+  const continuingBackfill =
+    includeHistorical &&
+    syncState.lastSkipCursor > 0 &&
+    !syncState.lastSuccessfulSyncAt;
+  const syncWindowOptions = { includeHistorical };
 
   const dateWindow = syncState.lastSuccessfulSyncAt
-    ? buildIncrementalSyncWindow(syncState.lastSuccessfulSyncAt, limits)
-    : buildInitialSyncWindow(limits);
+    ? buildIncrementalSyncWindow(
+        syncState.lastSuccessfulSyncAt,
+        limits,
+        new Date(),
+        syncWindowOptions
+      )
+    : buildInitialSyncWindow(limits, new Date(), syncWindowOptions);
 
   await savePrintfactorySyncState(adminClient, {
     lastAttemptedSyncAt: attemptedAt,
@@ -353,17 +377,40 @@ export async function syncPrintfactoryJobs(
       recordsReceived: fetchResult.jobs.length,
     });
 
-    timer.start("database_upsert");
-    currentStage = "database_upsert";
-
     const existingByGuid = await loadExistingPrintfactoryRows(
       adminClient,
       fetchResult.jobs.map((job) => job.guid)
     );
 
+    timer.start("detail_fetch");
+    currentStage = "detail_fetch";
+
+    const token =
+      process.env.PRINTFACTORY_API_TOKEN?.trim() ||
+      process.env.PRINTFACTORY_API_KEY?.trim() ||
+      "";
+
+    const enrichmentResult = await enrichPrintfactoryJobsWithSourcePaths(
+      fetchResult.jobs,
+      existingByGuid,
+      token
+    );
+
+    detailFetchCount = enrichmentResult.detailFetchCount;
+    detailFetchFailures = enrichmentResult.detailFetchFailures;
+
+    timer.end("detail_fetch", {
+      detailFetchCount: enrichmentResult.detailFetchCount,
+      detailFetchFailures: enrichmentResult.detailFetchFailures,
+      detailFetchSkipped: enrichmentResult.detailFetchSkipped,
+    });
+
+    timer.start("database_upsert");
+    currentStage = "database_upsert";
+
     const upsertResult = await batchUpsertPrintfactoryJobs(
       adminClient,
-      fetchResult.jobs,
+      enrichmentResult.enrichedJobs,
       existingByGuid,
       now,
       limits.upsertBatchSize
@@ -448,6 +495,8 @@ export async function syncPrintfactoryJobs(
         nextCursor,
         accountTotal,
         filteredTotal,
+        detailFetchCount,
+        detailFetchFailures,
         elapsedMs: timer.getTimings().find((entry) => entry.stage === "total")?.elapsedMs ?? 0,
       },
     });
@@ -479,6 +528,7 @@ export async function syncPrintfactoryJobs(
     });
   } catch (error) {
     failingStage = currentStage;
+    logSyncErrorDev(failingStage, error);
 
     const safeMessage =
       error instanceof PrintfactoryError
@@ -537,7 +587,8 @@ export async function syncPrintfactoryJobs(
 
 export async function loadPrintfactoryMatchingRecords(
   adminClient: SupabaseClient,
-  tab: ExceptionQueueTab
+  tab: ExceptionQueueTab,
+  filters: PrintfactoryMatchingLoadFilters = {}
 ) {
   if (process.env.NODE_ENV === "development") {
     noStore();
@@ -548,6 +599,9 @@ export async function loadPrintfactoryMatchingRecords(
   if (!schemaReadiness.ready) {
     return {
       records: [],
+      allRecordsCount: 0,
+      operationalRecordsCount: 0,
+      goLiveDate: getPrintfactoryMatchingGoLiveDateString(),
       schemaMissing: true as const,
       schemaMissingMessage: schemaReadiness.message,
       dataQueryError: null as PrintfactoryDataQueryError | null,
@@ -559,8 +613,13 @@ export async function loadPrintfactoryMatchingRecords(
     .from("printfactory_jobs")
     .select(`
     ${PRINTFACTORY_JOB_SELECT},
+    is_multi_job_sheet,
     jobs:jobs!printfactory_jobs_candid_job_id_fkey(
       id, job_reference, project_name, company_id, companies(company_name)
+    ),
+    printfactory_job_candid_jobs(
+      id, candid_job_id, link_type, is_primary,
+      jobs(id, job_reference, project_name, companies(company_name))
     ),
     printfactory_job_manifest_items(
       id, production_item_id, link_status, match_method, match_confidence,
@@ -577,6 +636,9 @@ export async function loadPrintfactoryMatchingRecords(
 
     return {
       records: [],
+      allRecordsCount: 0,
+      operationalRecordsCount: 0,
+      goLiveDate: getPrintfactoryMatchingGoLiveDateString(),
       schemaMissing: false as const,
       schemaMissingMessage: null,
       dataQueryError,
@@ -585,11 +647,18 @@ export async function loadPrintfactoryMatchingRecords(
   }
 
   const allRecords = data ?? [];
-  const tabCounts = countPrintfactoryRecordsByTab(allRecords);
-  const records = filterPrintfactoryRecordsByTab(allRecords, tab);
+  const operationalRecords = filterPrintfactoryRecordsByOperationalWindow(
+    allRecords,
+    filters
+  );
+  const tabCounts = countPrintfactoryRecordsByTab(operationalRecords);
+  const records = filterPrintfactoryRecordsByTab(operationalRecords, tab);
 
   return {
     records,
+    allRecordsCount: allRecords.length,
+    operationalRecordsCount: operationalRecords.length,
+    goLiveDate: getPrintfactoryMatchingGoLiveDateString(),
     schemaMissing: false as const,
     schemaMissingMessage: null,
     dataQueryError: null as PrintfactoryDataQueryError | null,

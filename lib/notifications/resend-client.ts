@@ -1,14 +1,17 @@
 import { Resend } from "resend";
 
+import { applyCommunicationSafety } from "@/lib/communications/safety";
 import { getResendConfigStatus } from "@/lib/notifications/config";
 import { logNotificationStage } from "@/lib/notifications/debug-log";
-import { applyEmailModeRedirect } from "@/lib/notifications/email-mode";
-import { getFromHeader, getPlainTextFromHtml } from "@/lib/notifications/templates";
+import { getFromHeader } from "@/lib/notifications/templates";
 
 export type SendEmailInput = {
   intendedRecipient: string;
+  cc?: string[];
+  bcc?: string[];
   subject: string;
   html: string;
+  text?: string;
   replyTo?: string;
 };
 
@@ -21,6 +24,8 @@ export type SendEmailResult =
       subject: string;
       providerMessageId: string | null;
       redirected: boolean;
+      communicationMode: "test" | "live" | "suppressed";
+      intendedRecipients: Array<{ role: "to" | "cc" | "bcc"; address: string }>;
       reason?: string;
     }
   | {
@@ -37,6 +42,7 @@ export type SendEmailResult =
       actualRecipient?: string;
       intendedRecipient: string;
       subject: string;
+      communicationMode: "test" | "live" | "suppressed";
     };
 
 let resendClient: Resend | null = null;
@@ -68,15 +74,20 @@ export async function sendEmailThroughResend(
       error: "Missing or invalid recipient email.",
       intendedRecipient,
       subject: input.subject,
+      communicationMode: "test",
     };
   }
 
-  const redirect = applyEmailModeRedirect({
+  const safety = applyCommunicationSafety({
     intendedRecipient,
+    cc: input.cc,
+    bcc: input.bcc,
     subject: input.subject,
+    html: input.html,
+    text: input.text,
   });
 
-  if (redirect.mode === "disabled") {
+  if (safety.mode === "suppressed") {
     return {
       ok: true,
       status: "suppressed",
@@ -85,31 +96,37 @@ export async function sendEmailThroughResend(
       subject: input.subject,
       providerMessageId: null,
       redirected: false,
-      reason: "email_disabled",
+      communicationMode: safety.mode,
+      intendedRecipients: safety.intendedRecipients,
+      reason: "communication_suppressed",
     };
   }
 
-  if ("missingTestRecipient" in redirect && redirect.missingTestRecipient) {
+  if (safety.missingTestRecipient) {
     return {
       ok: false,
       status: "failed",
       errorCode: "missing_test_recipient",
-      error: "EMAIL_MODE=test requires EMAIL_TEST_RECIPIENT.",
+      error:
+        "CANDID_COMMUNICATION_MODE=test requires CANDID_TEST_EMAIL_RECIPIENT.",
       intendedRecipient,
       subject: input.subject,
+      communicationMode: safety.mode,
     };
   }
 
-  if (!redirect.shouldSend) {
+  if (!safety.shouldSend) {
     return {
       ok: true,
       status: "skipped",
-      actualRecipient: redirect.actualRecipient,
+      actualRecipient: safety.actualRecipient,
       intendedRecipient,
-      subject: redirect.subject,
+      subject: safety.subject,
       providerMessageId: null,
-      redirected: redirect.redirected,
-      reason: "email_mode_skip",
+      redirected: safety.redirected,
+      communicationMode: safety.mode,
+      intendedRecipients: safety.intendedRecipients,
+      reason: "communication_mode_skip",
     };
   }
 
@@ -117,12 +134,13 @@ export async function sendEmailThroughResend(
 
   logNotificationStage("resend_prepare", {
     intendedRecipient,
-    actualRecipient: redirect.actualRecipient,
-    subject: redirect.subject,
-    emailMode: redirect.mode,
-    redirected: redirect.redirected,
+    actualRecipient: safety.actualRecipient,
+    subject: safety.subject,
+    communicationMode: safety.mode,
+    redirected: safety.redirected,
     from: `${config.fromName} <${config.fromEmail}>`,
-    shouldSend: redirect.shouldSend,
+    shouldSend: safety.shouldSend,
+    intendedRecipients: safety.intendedRecipients,
   });
 
   if (!config.configured) {
@@ -132,7 +150,8 @@ export async function sendEmailThroughResend(
       errorCode: "resend_not_configured",
       error: `Resend is not configured. Missing: ${config.missing.join(", ")}`,
       intendedRecipient,
-      subject: redirect.subject,
+      subject: safety.subject,
+      communicationMode: safety.mode,
     };
   }
 
@@ -145,17 +164,20 @@ export async function sendEmailThroughResend(
       errorCode: "resend_not_configured",
       error: "Resend client unavailable.",
       intendedRecipient,
-      subject: redirect.subject,
+      subject: safety.subject,
+      communicationMode: safety.mode,
     };
   }
 
   try {
     const response = await client.emails.send({
       from: getFromHeader(),
-      to: redirect.actualRecipient,
-      subject: redirect.subject,
-      html: input.html,
-      text: getPlainTextFromHtml(input.html),
+      to: safety.actualRecipient,
+      ...(safety.actualCc.length > 0 ? { cc: safety.actualCc } : {}),
+      ...(safety.actualBcc.length > 0 ? { bcc: safety.actualBcc } : {}),
+      subject: safety.subject,
+      html: safety.html,
+      text: safety.text,
       ...(input.replyTo ? { replyTo: input.replyTo } : {}),
     });
 
@@ -165,20 +187,23 @@ export async function sendEmailThroughResend(
         status: "failed",
         errorCode: "provider_rejection",
         error: response.error.message,
-        actualRecipient: redirect.actualRecipient,
+        actualRecipient: safety.actualRecipient,
         intendedRecipient,
-        subject: redirect.subject,
+        subject: safety.subject,
+        communicationMode: safety.mode,
       };
     }
 
     return {
       ok: true,
       status: "sent",
-      actualRecipient: redirect.actualRecipient,
+      actualRecipient: safety.actualRecipient,
       intendedRecipient,
-      subject: redirect.subject,
+      subject: safety.subject,
       providerMessageId: response.data?.id ?? null,
-      redirected: redirect.redirected,
+      redirected: safety.redirected,
+      communicationMode: safety.mode,
+      intendedRecipients: safety.intendedRecipients,
     };
   } catch (error) {
     return {
@@ -186,9 +211,10 @@ export async function sendEmailThroughResend(
       status: "failed",
       errorCode: "provider_request_failed",
       error: error instanceof Error ? error.message : "Resend request failed.",
-      actualRecipient: redirect.actualRecipient,
+      actualRecipient: safety.actualRecipient,
       intendedRecipient,
-      subject: redirect.subject,
+      subject: safety.subject,
+      communicationMode: safety.mode,
     };
   }
 }

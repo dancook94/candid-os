@@ -8,6 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { buildInvitePasswordSetupRedirect } from "@/lib/auth-invite-redirect";
+import {
+  extractEmailAddress,
+  isInternalEmailAddress,
+  isTestCommunicationModePublic,
+} from "@/lib/communications/config";
 import { createClient } from "@/lib/supabase/client";
 
 const SUCCESS_MESSAGE =
@@ -40,6 +45,16 @@ export default function ForgotPasswordForm() {
 
     if (!isValidEmailFormat(normalizedEmail)) {
       setError("Enter a valid email address.");
+      return;
+    }
+
+    if (
+      isTestCommunicationModePublic() &&
+      !isInternalEmailAddress(extractEmailAddress(normalizedEmail))
+    ) {
+      setError(
+        "Password reset emails to customers are disabled while Candid OS is in test communication mode."
+      );
       return;
     }
 

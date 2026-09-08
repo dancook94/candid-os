@@ -15,7 +15,7 @@ export type AdminJobListRow = {
   statusLabel: string;
   companyId: string;
   companyName: string;
-  quoteId: string;
+  quoteId: string | null;
   quoteNumber: string | null;
   artworkRequired: boolean;
   artworkSource: string;

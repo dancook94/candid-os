@@ -9,6 +9,7 @@ import { requireCrmPageAccess } from "@/lib/crm-page-access";
 import { getPrintfactoryConnectionStatus } from "@/lib/printfactory/client";
 import {
   EXCEPTION_QUEUE_TAB_LABELS,
+  normalizeExceptionQueueTab,
   type ExceptionQueueTab,
 } from "@/lib/printfactory/matching-queue";
 import { loadPrintfactoryMatchingRecords } from "@/lib/printfactory/sync";
@@ -21,20 +22,14 @@ type PrintfactoryMatchingPageProps = {
   searchParams: Promise<{
     tab?: string;
     job?: string;
+    historical?: string;
+    from?: string;
+    to?: string;
   }>;
 };
 
 function parseTab(value: string | undefined): ExceptionQueueTab {
-  if (
-    value === "suggested_matches" ||
-    value === "confirmed" ||
-    value === "ignored" ||
-    value === "all_imported"
-  ) {
-    return value;
-  }
-
-  return "needs_attention";
+  return normalizeExceptionQueueTab(value);
 }
 
 export default async function PrintfactoryMatchingPage({
@@ -43,6 +38,9 @@ export default async function PrintfactoryMatchingPage({
   const params = await searchParams;
   const tab = parseTab(params.tab);
   const jobFilter = params.job?.trim() || undefined;
+  const includeHistorical = params.historical === "1";
+  const dateFrom = params.from?.trim() || undefined;
+  const dateTo = params.to?.trim() || undefined;
 
   const supabase = await createClient();
   const profile = await requireCrmPageAccess(
@@ -53,16 +51,34 @@ export default async function PrintfactoryMatchingPage({
   const adminClient = createAdminClient();
   const connection = getPrintfactoryConnectionStatus();
 
-  const { records, schemaMissing, schemaMissingMessage, dataQueryError, tabCounts } =
-    await loadPrintfactoryMatchingRecords(adminClient, tab);
+  const {
+    records,
+    schemaMissing,
+    schemaMissingMessage,
+    dataQueryError,
+    tabCounts,
+    goLiveDate,
+    allRecordsCount,
+    operationalRecordsCount,
+  } = await loadPrintfactoryMatchingRecords(adminClient, tab, {
+    includeHistorical,
+    dateFrom,
+    dateTo,
+  });
+
+  const { data: companies } = await supabase
+    .from("companies")
+    .select("id, company_name")
+    .eq("is_active", true)
+    .order("company_name");
 
   return (
     <AppShell {...shellProps}>
       <div className="mx-auto max-w-6xl">
         <PageHeader
           eyebrow="Production"
-          title="PrintFactory Exception Queue"
-          description="Automatically matched PrintFactory jobs update existing Candid jobs. Review only genuine exceptions, suggested matches, and unrecognised files."
+          title="PrintFactory Matching"
+          description="Review unmatched PrintFactory jobs from go-live onward. Assign to existing Candid jobs, create standalone jobs, or ignore noise."
           actions={
             <Link href="/admin/production">
               <Button variant="outline">Production Board</Button>
@@ -88,6 +104,16 @@ export default async function PrintfactoryMatchingPage({
           jobFilter={jobFilter}
           connectionStatus={connection}
           tabLabels={EXCEPTION_QUEUE_TAB_LABELS}
+          goLiveDate={goLiveDate}
+          includeHistorical={includeHistorical}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          allRecordsCount={allRecordsCount ?? 0}
+          operationalRecordsCount={operationalRecordsCount ?? 0}
+          companies={(companies ?? []).map((company) => ({
+            id: company.id,
+            companyName: company.company_name ?? "Unknown company",
+          }))}
         />
       </div>
     </AppShell>

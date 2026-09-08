@@ -3,6 +3,8 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { TestCommunicationHint } from "@/components/communication-mode-banner";
+import { isTestCommunicationModePublic } from "@/lib/communications/config";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -863,7 +865,9 @@ export function AdminJobProofsPanel({
                           disabled={pending}
                           onClick={() => proofAction(currentProof.id, "send")}
                         >
-                          Send to customer
+                          {isTestCommunicationModePublic()
+                            ? "Send to customer (Test)"
+                            : "Send to customer"}
                         </Button>
                       ) : null}
                       {currentProofActions?.canCreateRevision ? (
@@ -900,6 +904,8 @@ export function AdminJobProofsPanel({
                       </p>
                     ) : null}
 
+                    <TestCommunicationHint />
+
                     {["sent", "viewed"].includes(currentProof.status) ? (
                       <Button
                         type="button"
@@ -907,7 +913,9 @@ export function AdminJobProofsPanel({
                         disabled={pending}
                         onClick={() => proofAction(currentProof.id, "resend_notification")}
                       >
-                        Resend proof notification
+                        {isTestCommunicationModePublic()
+                          ? "Resend proof notification (Test)"
+                          : "Resend proof notification"}
                       </Button>
                     ) : null}
 

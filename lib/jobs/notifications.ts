@@ -6,6 +6,7 @@ import {
   notifyCustomerArtworkReceivedSafe,
   notifyQuoteAcceptedSafe,
 } from "@/lib/notifications/triggers";
+import { provisionJobSlackChannelSafe } from "@/lib/slack/job-service";
 
 export async function prepareQuoteAcceptedNotification(input: {
   adminClient: SupabaseClient;
@@ -24,13 +25,18 @@ export async function prepareQuoteAcceptedNotification(input: {
   });
 }
 
-export function prepareJobCreatedNotification(_input: {
+export async function prepareJobCreatedNotification(input: {
+  adminClient: SupabaseClient;
   companyId: string;
   quoteId: string;
   jobId: string;
   jobReference: string;
 }) {
-  // Reserved for a future job-created notification type.
+  await provisionJobSlackChannelSafe(input.adminClient, {
+    jobId: input.jobId,
+    companyId: input.companyId,
+    quoteId: input.quoteId,
+  });
 }
 
 export function prepareArtworkRequestedNotification(_input: {

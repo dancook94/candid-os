@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 
+import { assertPublicRegistrationEnabled } from "@/lib/auth/public-registration";
 import { notifyCustomerRegistrationSafe } from "@/lib/notifications/triggers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export async function POST() {
+  const registrationGuard = assertPublicRegistrationEnabled();
+
+  if (!registrationGuard.ok) {
+    return NextResponse.json({ error: registrationGuard.message }, { status: 403 });
+  }
+
   const supabase = await createClient();
   const {
     data: { user },

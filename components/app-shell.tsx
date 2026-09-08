@@ -27,6 +27,7 @@ import {
   GlobalSearchTrigger,
   useGlobalSearchShortcut,
 } from "@/components/global-search";
+import { CommunicationModeBanner } from "@/components/communication-mode-banner";
 import { StaffAvatarDisplay } from "@/components/staff-avatar-display";
 import { getCustomerPortalStatusSubtitle } from "@/lib/customer-portal-status";
 import { createClient } from "@/lib/supabase/client";
@@ -246,6 +247,9 @@ export function AppShell({
 
   return (
     <div className="min-h-screen bg-[var(--portal-page-bg)]">
+      {userRole === "admin" || userRole === "staff" ? (
+        <CommunicationModeBanner />
+      ) : null}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[17.5rem] border-r border-border bg-card lg:flex lg:flex-col">
         <div className="border-b border-border px-5 py-5">
           <Link href={homeHref} className="group flex items-center gap-3">

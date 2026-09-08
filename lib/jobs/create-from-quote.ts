@@ -4,8 +4,19 @@ import { CRM_ACTIVITY_TYPES } from "@/lib/crm/activity-types";
 import { isDropboxConfigured } from "@/lib/dropbox/client";
 import { ensureJobDropboxFolders } from "@/lib/dropbox/job-folders";
 import { logJobActivity } from "@/lib/jobs/activity";
+import {
+  allocateNextJobNumber,
+  buildJobReferenceFromNumber,
+  resolveInitialJobReferenceForQuote,
+} from "@/lib/jobs/allocate-job-number";
 import { isMissingJobsSchemaError, JobError } from "@/lib/jobs/errors";
 import { JOB_LIST_COLUMNS } from "@/lib/jobs/job-select";
+import {
+  classifyPostgresUniqueViolation,
+  JOB_REFERENCE_INSERT_MAX_ATTEMPTS,
+  logJobCreateInsertError,
+  logJobCreateReferenceCollisionRecovery,
+} from "@/lib/jobs/reference-allocation";
 import {
   prepareArtworkRequestedNotification,
   prepareJobCreatedNotification,
@@ -44,8 +55,172 @@ export type EnsureJobResult = {
   warning: string | null;
 };
 
-function buildJobReference(quoteNumber: number) {
-  return `J-${quoteNumber}`;
+type AcceptedQuoteJobInsertInput = {
+  company_id: string;
+  quote_id: string;
+  quote_version_id: string | null;
+  opportunity_id: string | null;
+  quote_request_id: string | null;
+  contact_id: string | null;
+  project_name: string;
+  fulfilment_method: string | null;
+  required_date: string | null;
+  accepted_at: string;
+  accepted_by: string | null;
+};
+
+async function loadExistingJobForQuote(
+  adminClient: SupabaseClient,
+  quoteId: string
+) {
+  const { data: racedJob, error } = await adminClient
+    .from("jobs")
+    .select(JOB_LIST_COLUMNS)
+    .eq("quote_id", quoteId)
+    .maybeSingle();
+
+  if (error) {
+    throw new JobError(error.message, 500);
+  }
+
+  if (!racedJob) {
+    return null;
+  }
+
+  return ensureDropboxOnExistingJob(adminClient, racedJob as JobRecord);
+}
+
+async function insertAcceptedQuoteJobWithReferenceRetry(
+  adminClient: SupabaseClient,
+  input: {
+    quoteId: string;
+    quoteNumber: number;
+    payload: AcceptedQuoteJobInsertInput;
+  }
+): Promise<
+  | {
+      outcome: "created";
+      job: JobRecord;
+      preferredReference: string;
+      collisionRecovered: boolean;
+    }
+  | {
+      outcome: "existing";
+      job: JobRecord;
+    }
+> {
+  const initialReference = await resolveInitialJobReferenceForQuote(
+    adminClient,
+    input.quoteNumber
+  );
+
+  let candidateReference = initialReference.jobReference;
+  let collisionRecovered = !initialReference.usedPreferred;
+
+  if (collisionRecovered) {
+    logJobCreateReferenceCollisionRecovery({
+      quoteId: input.quoteId,
+      preferredReference: initialReference.preferredReference,
+      allocatedReference: candidateReference,
+    });
+  }
+
+  for (let attempt = 0; attempt < JOB_REFERENCE_INSERT_MAX_ATTEMPTS; attempt += 1) {
+    const { data: createdJob, error: insertError } = await adminClient
+      .from("jobs")
+      .insert({
+        ...input.payload,
+        job_reference: candidateReference,
+        status: "awaiting_artwork",
+        artwork_required: true,
+        customer_visible: true,
+        dropbox_folder_path: null,
+        dropbox_folder_id: null,
+        dropbox_setup_status: "pending",
+        production_board_stage: "accepted_quotes",
+      })
+      .select(JOB_LIST_COLUMNS)
+      .single();
+
+    if (!insertError && createdJob) {
+      return {
+        outcome: "created",
+        job: createdJob as JobRecord,
+        preferredReference: initialReference.preferredReference,
+        collisionRecovered,
+      };
+    }
+
+    if (!insertError) {
+      throw new JobError("Job insert did not return a created row.", 500);
+    }
+
+    logJobCreateInsertError({
+      quoteId: input.quoteId,
+      candidateReference,
+      error: insertError,
+    });
+
+    const violationKind = classifyPostgresUniqueViolation(insertError);
+
+    if (violationKind === "quote_id") {
+      const existingJob = await loadExistingJobForQuote(adminClient, input.quoteId);
+
+      if (existingJob) {
+        return {
+          outcome: "existing",
+          job: existingJob,
+        };
+      }
+
+      throw new JobError(
+        "A job for this quote already exists but could not be loaded.",
+        500
+      );
+    }
+
+    if (violationKind === "job_reference") {
+      const allocatedNumber = await allocateNextJobNumber(adminClient);
+      const nextReference = buildJobReferenceFromNumber(allocatedNumber);
+
+      if (!collisionRecovered) {
+        logJobCreateReferenceCollisionRecovery({
+          quoteId: input.quoteId,
+          preferredReference: initialReference.preferredReference,
+          allocatedReference: nextReference,
+        });
+      }
+
+      collisionRecovered = true;
+      candidateReference = nextReference;
+      continue;
+    }
+
+    if (insertError.code === "23505") {
+      throw new JobError(
+        `Unable to create job due to an unexpected unique constraint: ${insertError.message}`,
+        500
+      );
+    }
+
+    throw new JobError(insertError.message, 500);
+  }
+
+  throw new JobError(
+    "Unable to allocate a unique job reference after multiple attempts.",
+    500
+  );
+}
+
+function buildExistingJobResult(job: JobRecord): EnsureJobResult {
+  return {
+    job,
+    created: false,
+    dropboxReady: job.dropbox_setup_status === "ready",
+    dropboxSetupStatus: job.dropbox_setup_status,
+    schemaMissing: false,
+    warning: null,
+  };
 }
 
 async function loadQuoteForJobCreation(
@@ -385,71 +560,46 @@ export async function ensureJobForAcceptedQuote({
     quoteRequestId
   );
 
-  const jobReference = buildJobReference(quote.quote_number);
   const acceptedAt = version?.accepted_at ?? new Date().toISOString();
 
-  const { data: createdJob, error: insertError } = await adminClient
-    .from("jobs")
-    .insert({
-      company_id: quote.company_id,
-      quote_id: quote.id,
-      quote_version_id: version?.id ?? null,
-      opportunity_id: quote.opportunity_id,
-      quote_request_id: quoteRequestId,
-      contact_id: quote.contact_id,
-      job_reference: jobReference,
-      project_name: quote.project_name,
-      status: "awaiting_artwork",
-      fulfilment_method: requestContext.fulfilment_method,
-      required_date: requestContext.required_date,
-      artwork_required: true,
-      customer_visible: true,
-      accepted_at: acceptedAt,
-      accepted_by: actorProfileId ?? null,
-      dropbox_folder_path: null,
-      dropbox_folder_id: null,
-      dropbox_setup_status: "pending",
-      production_board_stage: "accepted_quotes",
-    })
-    .select(JOB_LIST_COLUMNS)
-    .single();
+  let insertResult: Awaited<ReturnType<typeof insertAcceptedQuoteJobWithReferenceRetry>>;
 
-  if (insertError) {
-    if (insertError.code === "23505") {
-      const { data: racedJob } = await adminClient
-        .from("jobs")
-        .select(JOB_LIST_COLUMNS)
-        .eq("quote_id", quoteId)
-        .maybeSingle();
-
-      const job = racedJob
-        ? await ensureDropboxOnExistingJob(adminClient, racedJob as JobRecord)
-        : null;
-
-      return {
-        job,
-        created: false,
-        dropboxReady: job?.dropbox_setup_status === "ready",
-        dropboxSetupStatus: job?.dropbox_setup_status ?? "pending",
-        schemaMissing: false,
-        warning: null,
-      };
+  try {
+    insertResult = await insertAcceptedQuoteJobWithReferenceRetry(adminClient, {
+      quoteId,
+      quoteNumber: quote.quote_number,
+      payload: {
+        company_id: quote.company_id,
+        quote_id: quote.id,
+        quote_version_id: version?.id ?? null,
+        opportunity_id: quote.opportunity_id,
+        quote_request_id: quoteRequestId,
+        contact_id: quote.contact_id,
+        project_name: quote.project_name,
+        fulfilment_method: requestContext.fulfilment_method,
+        required_date: requestContext.required_date,
+        accepted_at: acceptedAt,
+        accepted_by: actorProfileId ?? null,
+      },
+    });
+  } catch (error) {
+    if (error instanceof JobError) {
+      throw error;
     }
 
-    if (process.env.NODE_ENV === "development") {
-      console.error("[jobs] insert failed for accepted quote", {
-        quoteId,
-        code: insertError.code,
-        message: insertError.message,
-        details: insertError.details,
-        hint: insertError.hint,
-      });
-    }
-
-    throw new JobError(insertError.message, 500);
+    throw new JobError(
+      error instanceof Error ? error.message : "Unable to create job for accepted quote.",
+      500
+    );
   }
 
-  let job = createdJob as JobRecord;
+  if (insertResult.outcome === "existing") {
+    return buildExistingJobResult(insertResult.job);
+  }
+
+  let job = insertResult.job;
+  const jobReference = job.job_reference;
+  const jobCreatedFromCollision = insertResult.collisionRecovered;
 
   const dropbox = await provisionDropboxForJob({
     jobReference,
@@ -532,12 +682,19 @@ export async function ensureJobForAcceptedQuote({
     }
   }
 
-  prepareJobCreatedNotification({
-    companyId: quote.company_id,
-    quoteId: quote.id,
-    jobId: job.id,
-    jobReference: job.job_reference,
-  });
+  try {
+    await prepareJobCreatedNotification({
+      adminClient,
+      companyId: quote.company_id,
+      quoteId: quote.id,
+      jobId: job.id,
+      jobReference: job.job_reference,
+    });
+  } catch (slackError) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[jobs] Slack job channel provisioning failed", slackError);
+    }
+  }
 
   if (job.artwork_required) {
     prepareArtworkRequestedNotification({
@@ -564,11 +721,13 @@ export async function ensureJobForAcceptedQuote({
     dropboxSetupStatus: job.dropbox_setup_status,
     schemaMissing: false,
     warning:
-      job.dropbox_setup_status === "failed"
-        ? "Job created but Dropbox folder setup failed. An admin can retry later."
-        : job.dropbox_setup_status === "pending"
-          ? "Job created. Dropbox folder setup is pending."
-          : null,
+      jobCreatedFromCollision
+        ? `Job created as ${job.job_reference} because ${buildJobReferenceFromNumber(quote.quote_number)} was already in use.`
+        : job.dropbox_setup_status === "failed"
+          ? "Job created but Dropbox folder setup failed. An admin can retry later."
+          : job.dropbox_setup_status === "pending"
+            ? "Job created. Dropbox folder setup is pending."
+            : null,
   };
 }
 

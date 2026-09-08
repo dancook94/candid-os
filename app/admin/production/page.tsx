@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Factory } from "lucide-react";
 
 import { JobProductionBoard } from "@/components/production/job-production-board";
+import { JobProductionBoardArchivedList } from "@/components/production/job-production-board-archived";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
@@ -22,7 +23,10 @@ import {
   PRODUCTION_PRIORITIES,
   PRODUCTION_PRIORITY_LABELS,
 } from "@/lib/production/constants";
-import { fetchJobProductionBoard } from "@/lib/production/job-board-service";
+import {
+  fetchArchivedProductionBoardJobs,
+  fetchJobProductionBoard,
+} from "@/lib/production/job-board-service";
 import {
   loadProductionFilterOptions,
   loadProductionStaffProfiles,
@@ -42,15 +46,21 @@ export default async function AdminProductionPage({
   const rawSearchParams = await searchParams;
   const filters = parseProductionBoardFilters(rawSearchParams);
   const hasFilters = hasActiveProductionBoardFilters(filters);
+  const isArchivedView = filters.boardView === "archived";
 
   const supabase = await createClient();
   const profile = await requireCrmPageAccess(supabase, "/admin/production");
   const shellProps = await buildCrmAppShellProps(supabase, profile);
   const adminClient = createAdminClient();
 
-  const [boardResult, { data: activeCompanies }, staff, filterOptions] =
+  const [boardResult, archivedResult, { data: activeCompanies }, staff, filterOptions] =
     await Promise.all([
-      fetchJobProductionBoard(adminClient, filters),
+      isArchivedView
+        ? Promise.resolve({ data: null, queryError: null as null, detail: null as null })
+        : fetchJobProductionBoard(adminClient, filters),
+      isArchivedView
+        ? fetchArchivedProductionBoardJobs(adminClient, filters)
+        : Promise.resolve({ data: null, queryError: null as null, detail: null as null }),
       supabase
         .from("companies")
         .select("id, company_name")
@@ -60,19 +70,46 @@ export default async function AdminProductionPage({
       loadProductionFilterOptions(adminClient),
     ]);
 
-  const clearHref = "/admin/production";
+  const clearHref = buildProductionBoardHref({
+    ...filters,
+    search: "",
+    companyId: null,
+    assignedToProfileId: null,
+    machine: null,
+    material: null,
+    priority: null,
+    dueDate: null,
+    jobReference: null,
+  });
+  const activeBoardHref = buildProductionBoardHref({ ...filters, boardView: "active" });
+  const archivedBoardHref = buildProductionBoardHref({ ...filters, boardView: "archived" });
 
   return (
     <AppShell {...shellProps}>
       <div className="mx-auto max-w-[100rem]">
         <PageHeader
           eyebrow="Production"
-          title="Production Board"
-          description="Track whole jobs through production from accepted quote to dispatch."
+          title={isArchivedView ? "Completed / Archived Jobs" : "Production Board"}
+          description={
+            isArchivedView
+              ? "Internal and non-billable jobs removed from the active board after production completion. Full job history is retained."
+              : "Track whole jobs through production from accepted quote to dispatch."
+          }
           actions={
-            <Link href="/admin/production/printfactory-unmatched">
-              <Button variant="outline">PrintFactory Matching</Button>
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              {isArchivedView ? (
+                <Link href={activeBoardHref}>
+                  <Button variant="outline">Active Production Board</Button>
+                </Link>
+              ) : (
+                <Link href={archivedBoardHref}>
+                  <Button variant="outline">Completed / Archived</Button>
+                </Link>
+              )}
+              <Link href="/admin/production/printfactory-unmatched">
+                <Button variant="outline">PrintFactory Matching</Button>
+              </Link>
+            </div>
           }
         />
 
@@ -82,6 +119,9 @@ export default async function AdminProductionPage({
               method="get"
               className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8"
             >
+              {isArchivedView ? (
+                <input type="hidden" name="view" value="archived" />
+              ) : null}
               <div className="space-y-2 md:col-span-2 2xl:col-span-2">
                 <Label htmlFor="search">Search</Label>
                 <Input
@@ -207,7 +247,65 @@ export default async function AdminProductionPage({
           </CardContent>
         </Card>
 
-        {boardResult.queryError === "migration_required" ? (
+        {isArchivedView ? (
+          archivedResult.queryError === "migration_required" ? (
+            <Card className="portal-surface border-amber-300">
+              <CardContent className="py-8">
+                <EmptyState
+                  icon={<Factory className="h-5 w-5" aria-hidden />}
+                  title="Production Board migration not applied"
+                  description="Apply supabase/migrations/20260803220000_printfactory_production_board_phase2.sql (and earlier production migrations) in Supabase before using the Production Board."
+                />
+              </CardContent>
+            </Card>
+          ) : archivedResult.queryError === "query_failed" ? (
+            <Card className="portal-surface border-destructive/30">
+              <CardContent className="py-8">
+                <EmptyState
+                  title="Unable to load archived jobs"
+                  description="Something went wrong while loading completed jobs. Try again or contact support if the problem persists."
+                />
+              </CardContent>
+            </Card>
+          ) : archivedResult.data && archivedResult.data.totalCount === 0 ? (
+            <Card className="portal-surface">
+              <CardContent className="py-12">
+                <EmptyState
+                  icon={<Factory className="h-5 w-5" aria-hidden />}
+                  title={
+                    hasFilters
+                      ? "No archived jobs match your filters"
+                      : "No archived jobs yet"
+                  }
+                  description={
+                    hasFilters
+                      ? "Try adjusting your search or filters."
+                      : "Internal and non-billable jobs appear here after they are moved to Complete Job."
+                  }
+                  action={
+                    hasFilters ? (
+                      <Link href={clearHref}>
+                        <Button variant="outline">Clear filters</Button>
+                      </Link>
+                    ) : (
+                      <Link href={activeBoardHref}>
+                        <Button variant="outline">Active Production Board</Button>
+                      </Link>
+                    )
+                  }
+                />
+              </CardContent>
+            </Card>
+          ) : archivedResult.data ? (
+            <>
+              <div className="mb-4 text-sm text-muted-foreground">
+                {archivedResult.data.totalCount}{" "}
+                {archivedResult.data.totalCount === 1 ? "job" : "jobs"} archived
+              </div>
+              <JobProductionBoardArchivedList data={archivedResult.data} />
+            </>
+          ) : null
+        ) : boardResult.queryError === "migration_required" ? (
           <Card className="portal-surface border-amber-300">
             <CardContent className="py-8">
               <EmptyState

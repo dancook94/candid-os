@@ -1,3 +1,5 @@
+import { getCommunicationConfig } from "@/lib/communications/config";
+
 export type AppSettings = {
   id: string;
   company_name: string;
@@ -59,6 +61,7 @@ export type EmailConfigStatus = {
   appUrlConfigured: boolean;
   systemSender: string;
   emailMode: string;
+  communicationMode: string;
   developmentSafetyActive: boolean;
 };
 
@@ -72,22 +75,22 @@ function getSystemSenderAddress() {
 }
 
 function resolveEmailModeLabel() {
-  const explicit = process.env.EMAIL_MODE?.trim().toLowerCase();
-  if (explicit === "disabled" || explicit === "test" || explicit === "live") {
-    return explicit;
-  }
-  return process.env.NODE_ENV === "production" ? "live" : "test";
+  return getCommunicationConfig().mode === "suppressed"
+    ? "disabled"
+    : getCommunicationConfig().mode;
 }
 
 export function getEmailConfigStatus(_settings?: AppSettings): EmailConfigStatus {
   const emailMode = resolveEmailModeLabel();
+  const communicationMode = getCommunicationConfig().mode;
 
   return {
     resendConfigured: Boolean(process.env.RESEND_API_KEY?.trim()),
     appUrlConfigured: Boolean(process.env.NEXT_PUBLIC_APP_URL?.trim()),
     systemSender: getSystemSenderAddress(),
     emailMode,
-    developmentSafetyActive: emailMode !== "live",
+    communicationMode,
+    developmentSafetyActive: communicationMode !== "live",
   };
 }
 

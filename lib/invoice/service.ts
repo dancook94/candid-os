@@ -314,7 +314,7 @@ async function loadJobInvoiceContext(adminClient: SupabaseClient, jobId: string)
   const { data: job, error } = await adminClient
     .from("jobs")
     .select(
-      "id, company_id, quote_id, quote_version_id, job_reference, commercial_status, project_name"
+      "id, company_id, quote_id, quote_version_id, job_reference, commercial_status, project_name, job_billing_type"
     )
     .eq("id", jobId)
     .maybeSingle();
@@ -327,14 +327,23 @@ async function loadJobInvoiceContext(adminClient: SupabaseClient, jobId: string)
     throw new ProductionError("Job not found.", 404);
   }
 
+  if (
+    job.commercial_status === "not_invoiceable" ||
+    job.job_billing_type === "internal" ||
+    job.job_billing_type === "non_billable"
+  ) {
+    throw new ProductionError("This job is not invoiceable.", 400);
+  }
+
   return job as {
     id: string;
     company_id: string;
-    quote_id: string;
+    quote_id: string | null;
     quote_version_id: string | null;
     job_reference: string;
     commercial_status: string;
     project_name: string;
+    job_billing_type?: string | null;
   };
 }
 

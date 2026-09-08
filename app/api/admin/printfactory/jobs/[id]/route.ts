@@ -2,9 +2,12 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { verifyApprovedCrmStaff } from "@/lib/crm-auth";
+import { createJobFromPrintfactoryRecord } from "@/lib/jobs/create-from-printfactory";
+import type { JobBillingType } from "@/lib/jobs/billing-types";
 import {
   manuallyMatchPrintfactoryJob,
   ignorePrintfactoryJob,
+  restoreIgnoredPrintfactoryJob,
   confirmSuggestedJobMatch,
   clearAutomaticJobMatch,
 } from "@/lib/printfactory/job-matching";
@@ -17,6 +20,7 @@ import {
 } from "@/lib/printfactory/manifest-actions";
 import {
   addLinkedCandidJob,
+  assignPrintfactoryToCandidJobs,
   removeLinkedCandidJob,
 } from "@/lib/printfactory/multi-job-links";
 import {
@@ -31,6 +35,7 @@ import { createClient } from "@/lib/supabase/server";
 type PrintfactoryJobActionBody = {
   action?: string;
   candidJobId?: string;
+  candidJobIds?: string[];
   productionItemId?: string;
   productionItemIds?: string[];
   linkId?: string;
@@ -39,6 +44,11 @@ type PrintfactoryJobActionBody = {
   title?: string;
   material?: string | null;
   machine?: string | null;
+  billingType?: JobBillingType;
+  projectName?: string;
+  companyId?: string | null;
+  requiredDate?: string | null;
+  notes?: string | null;
 };
 
 export async function POST(
@@ -66,20 +76,24 @@ export async function POST(
   try {
     switch (body.action) {
       case "match_job": {
-        if (!body.candidJobId) {
+        const candidJobIds =
+          body.candidJobIds?.filter(Boolean) ??
+          (body.candidJobId ? [body.candidJobId] : []);
+
+        if (candidJobIds.length === 0) {
           return NextResponse.json({ error: "Candid job is required." }, { status: 400 });
         }
 
-        const row = await manuallyMatchPrintfactoryJob(
-          adminClient,
+        const result = await assignPrintfactoryToCandidJobs(adminClient, {
           printfactoryJobId,
-          body.candidJobId,
-          auth.userId
-        );
+          candidJobIds,
+          actorProfileId: auth.userId,
+          linkJobs: manuallyMatchPrintfactoryJob,
+        });
 
         revalidatePath("/admin/production/printfactory-unmatched");
         revalidatePath("/admin/production");
-        return NextResponse.json({ ok: true, row });
+        return NextResponse.json({ ok: true, row: result.row });
       }
 
       case "confirm_suggested_job": {
@@ -193,6 +207,35 @@ export async function POST(
         return NextResponse.json({ ok: true, ...result });
       }
 
+      case "create_job": {
+        if (
+          !body.billingType ||
+          !body.projectName?.trim() ||
+          !["billable", "non_billable", "internal"].includes(body.billingType)
+        ) {
+          return NextResponse.json(
+            { error: "Job type and project name are required." },
+            { status: 400 }
+          );
+        }
+
+        const result = await createJobFromPrintfactoryRecord(adminClient, {
+          printfactoryJobId,
+          billingType: body.billingType,
+          projectName: body.projectName.trim(),
+          companyId: body.companyId ?? null,
+          requiredDate: body.requiredDate ?? null,
+          notes: body.notes ?? null,
+          actorProfileId: auth.userId,
+        });
+
+        revalidatePath("/admin/production/printfactory-unmatched");
+        revalidatePath("/admin/production");
+        revalidatePath("/admin/jobs");
+        revalidatePath(`/admin/jobs/${result.job.id}`);
+        return NextResponse.json({ ok: true, ...result });
+      }
+
       case "ignore": {
         if (!body.reason?.trim()) {
           return NextResponse.json({ error: "Reason is required." }, { status: 400 });
@@ -203,6 +246,16 @@ export async function POST(
           printfactoryJobId,
           body.reason.trim(),
           auth.userId
+        );
+
+        revalidatePath("/admin/production/printfactory-unmatched");
+        return NextResponse.json({ ok: true, row });
+      }
+
+      case "restore": {
+        const row = await restoreIgnoredPrintfactoryJob(
+          adminClient,
+          printfactoryJobId
         );
 
         revalidatePath("/admin/production/printfactory-unmatched");

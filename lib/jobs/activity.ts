@@ -7,7 +7,7 @@ type JobActivityInput = {
   activityType: string;
   description: string;
   companyId: string;
-  quoteId: string;
+  quoteId?: string | null;
   opportunityId?: string | null;
   contactId?: string | null;
   actorProfileId?: string | null;
@@ -22,7 +22,7 @@ export async function logJobActivity(
     companyId: input.companyId,
     contactId: input.contactId ?? null,
     opportunityId: input.opportunityId ?? null,
-    quoteId: input.quoteId,
+    quoteId: input.quoteId ?? null,
     activityType: input.activityType,
     description: input.description,
     actorProfileId: input.actorProfileId ?? null,
@@ -31,7 +31,7 @@ export async function logJobActivity(
       companyId: input.companyId,
       contactId: input.contactId ?? null,
       opportunityId: input.opportunityId ?? null,
-      quoteId: input.quoteId,
+      quoteId: input.quoteId ?? null,
       taskId: null,
     },
   });

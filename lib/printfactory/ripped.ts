@@ -42,18 +42,28 @@ const NON_RIPPED_STATUS_VALUES = new Set([
   "pending",
 ]);
 
+export type PrintfactoryRippedCheckOptions = {
+  /** When true, ignored match status does not suppress ripped detection (e.g. matching queue UI). */
+  allowIgnored?: boolean;
+};
+
 /**
  * A PrintFactory job counts as ripped when its status indicates post-RIP readiness.
  * Status values are matched case-insensitively against DEFAULT_PRINTFACTORY_RIPPED_STATUSES
  * or PRINTFACTORY_RIPPED_STATUSES env override.
  */
-export function isPrintFactoryJobRipped(record: PrintfactoryRippableRecord): boolean {
-  if (record.ignored_at) {
-    return false;
-  }
+export function isPrintFactoryJobRipped(
+  record: PrintfactoryRippableRecord,
+  options?: PrintfactoryRippedCheckOptions
+): boolean {
+  if (!options?.allowIgnored) {
+    if (record.ignored_at) {
+      return false;
+    }
 
-  if (record.job_match_status === "ignored") {
-    return false;
+    if (record.job_match_status === "ignored") {
+      return false;
+    }
   }
 
   const status = record.printfactory_status?.trim().toLowerCase() ?? "";

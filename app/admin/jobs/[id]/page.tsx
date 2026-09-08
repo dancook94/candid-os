@@ -1,10 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AdminJobSlackPanel } from "@/components/admin-job-slack-panel";
 import { AdminJobArtworkPanel } from "@/components/admin-job-artwork-panel";
 import { AdminJobArtworkSourcePanel } from "@/components/admin-job-artwork-source-panel";
 import { AdminJobDropboxPanel } from "@/components/admin-job-dropbox-panel";
 import { AdminJobProofsPanel } from "@/components/proofs/admin-job-proofs-panel";
+import { AdminJobPrintfactoryPreviewPanel } from "@/components/production/admin-job-printfactory-preview-panel";
 import { ProductionManifestPanel } from "@/components/manifest/production-manifest-panel";
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
@@ -27,6 +29,8 @@ import { getJobProductionReadiness, loadManifestItemsForJob, reconcileProduction
 import { loadAdminJobProofingContext } from "@/lib/proofs/loaders";
 import { loadProofSelectableManifestItems } from "@/lib/proofs/manifest-items";
 import { loadJobFileManifestLinks } from "@/lib/proofs/service";
+import { loadPrintfactoryPreviewsForJob } from "@/lib/printfactory/job-previews";
+import { isSlackEnabled } from "@/lib/slack/config";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -101,7 +105,8 @@ export default async function AdminJobDetailPage({
       }
     : await loadProofSelectableManifestItems(adminClient, id);
 
-  const [readiness, proofing, fileManifestLinks] = await Promise.all([
+  const [readiness, proofing, fileManifestLinks, printfactoryPreviewBundle] =
+    await Promise.all([
     getJobProductionReadiness(adminClient, id).catch(() => ({
       activeRequiredCount: 0,
       satisfiedCount: 0,
@@ -111,6 +116,10 @@ export default async function AdminJobDetailPage({
     })),
     loadAdminJobProofingContext(id),
     loadJobFileManifestLinks(adminClient, id),
+    loadPrintfactoryPreviewsForJob(adminClient, id).catch(() => ({
+      primary: null,
+      previews: [],
+    })),
   ]);
 
   return (
@@ -207,6 +216,16 @@ export default async function AdminJobDetailPage({
             ) : null}
           </CardContent>
         </Card>
+
+        <AdminJobPrintfactoryPreviewPanel
+          jobReference={detail.job.job_reference}
+          previewBundle={printfactoryPreviewBundle}
+        />
+
+        <AdminJobSlackPanel
+          slackChannelId={detail.job.slack_channel_id}
+          slackEnabled={isSlackEnabled()}
+        />
 
         <AdminJobDropboxPanel
           jobId={detail.job.id}

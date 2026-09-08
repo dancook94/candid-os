@@ -15,11 +15,20 @@ import {
   getPrintfactorySyncLimits,
 } from "@/lib/printfactory/sync-config";
 
+import type {
+  PrintfactorySourceLocation,
+  PrintfactorySourcePathStatus,
+} from "@/lib/printfactory/source-path";
+
 export type PrintfactoryApiJob = {
   guid: string;
   name: string | null;
   sourceFilePath: string | null;
   sourceFileName: string | null;
+  normalizedSourcePath?: string | null;
+  sourcePathStatus?: PrintfactorySourcePathStatus | null;
+  sourceLocations?: PrintfactorySourceLocation[];
+  sourcePathErrorMessage?: string | null;
   documentName: string | null;
   device: string | null;
   mediaType: string | null;

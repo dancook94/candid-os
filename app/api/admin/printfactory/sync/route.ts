@@ -6,6 +6,10 @@ import { syncPrintfactoryJobs } from "@/lib/printfactory/sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
+type SyncRequestBody = {
+  includeHistorical?: boolean;
+};
+
 function syncHttpStatus(result: Awaited<ReturnType<typeof syncPrintfactoryJobs>>) {
   if (result.ok) {
     return 200;
@@ -26,7 +30,7 @@ function syncHttpStatus(result: Awaited<ReturnType<typeof syncPrintfactoryJobs>>
   return 502;
 }
 
-export async function POST() {
+export async function POST(request: Request) {
   const supabase = await createClient();
   const auth = await verifyApprovedCrmAdmin(supabase);
 
@@ -34,8 +38,19 @@ export async function POST() {
     return NextResponse.json({ error: auth.message }, { status: auth.status });
   }
 
+  let includeHistorical = false;
+
+  try {
+    const body = (await request.json()) as SyncRequestBody;
+    includeHistorical = body.includeHistorical === true;
+  } catch {
+    includeHistorical = false;
+  }
+
   const adminClient = createAdminClient();
-  const result = await syncPrintfactoryJobs(adminClient, auth.userId);
+  const result = await syncPrintfactoryJobs(adminClient, auth.userId, {
+    includeHistorical,
+  });
 
   revalidatePath("/admin/production");
   revalidatePath("/admin/production/printfactory-unmatched");

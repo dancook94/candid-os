@@ -12,6 +12,7 @@ import {
   suggestManifestItemMatches,
   type ManifestItemMatchCandidate,
 } from "@/lib/printfactory/item-matching";
+import { buildPrintfactoryMatchInput } from "@/lib/printfactory/match-input";
 import { MANIFEST_ITEM_SELECT } from "@/lib/manifest/constants";
 import { refreshJobProductionReadiness } from "@/lib/printfactory/readiness-service";
 
@@ -38,12 +39,17 @@ export async function rematchPrintfactoryJob(
     return { row, skipped: true as const };
   }
 
-  const match = await matchPrintfactoryJobToCandidJob(adminClient, {
-    sourceFilePath: row.source_file_path as string | null,
-    sourceFileName: row.source_file_name as string | null,
-    jobName: row.job_name as string | null,
-    documentName: (row.document_name as string | null) ?? null,
-  });
+  const match = await matchPrintfactoryJobToCandidJob(
+    adminClient,
+    buildPrintfactoryMatchInput({
+      source_file_path: row.source_file_path as string | null,
+      normalized_source_path: row.normalized_source_path as string | null,
+      source_locations: row.source_locations,
+      source_file_name: row.source_file_name as string | null,
+      job_name: row.job_name as string | null,
+      document_name: (row.document_name as string | null) ?? null,
+    })
+  );
 
   const { data: updated, error: updateError } = await adminClient
     .from("printfactory_jobs")
@@ -223,12 +229,21 @@ export async function createItemSuggestionsForJob(
         ?.source_file_name ?? "") || "",
   }));
 
+  const matchInput = buildPrintfactoryMatchInput({
+    source_file_path: printfactoryJob.source_file_path as string | null,
+    normalized_source_path: printfactoryJob.normalized_source_path as string | null,
+    source_locations: printfactoryJob.source_locations,
+    source_file_name: printfactoryJob.source_file_name as string | null,
+    job_name: printfactoryJob.job_name as string | null,
+    document_name: printfactoryJob.document_name as string | null,
+  });
+
   const suggestions = suggestManifestItemMatches(
     {
-      source_file_path: printfactoryJob.source_file_path as string | null,
-      source_file_name: printfactoryJob.source_file_name as string | null,
-      job_name: printfactoryJob.job_name as string | null,
-      document_name: printfactoryJob.document_name as string | null,
+      source_file_path: matchInput.sourceFilePath,
+      source_file_name: matchInput.sourceFileName,
+      job_name: matchInput.jobName,
+      document_name: matchInput.documentName,
       media_type: printfactoryJob.media_type as string | null,
     },
     (manifestItems ?? []) as ManifestItemMatchCandidate[],

@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { QuoteBuilderLineItemCard } from "@/components/quote-builder-line-item";
 import { CompanyContactSelect } from "@/components/crm/company-contact-select";
 import { Button } from "@/components/ui/button";
+import { TestCommunicationHint } from "@/components/communication-mode-banner";
+import { isTestCommunicationModePublic } from "@/lib/communications/config";
 import {
   Card,
   CardContent,
@@ -1366,15 +1368,22 @@ export function QuoteBuilderForm({
       )}
 
       {!isReadOnly && (
-        <div className="flex flex-col-reverse justify-end gap-2 sm:flex-row">
+        <div className="flex flex-col items-end gap-2">
+          <TestCommunicationHint />
+          <div className="flex w-full flex-col-reverse justify-end gap-2 sm:flex-row">
           <Button type="submit" variant="outline" disabled={isBusy}>
             {isSaving ? "Saving..." : "Save draft"}
           </Button>
           {mode === "edit" && (
             <Button type="button" disabled={isBusy} onClick={handleSendQuote}>
-              {isSending ? "Sending..." : "Send quote"}
+              {isSending
+                ? "Sending..."
+                : isTestCommunicationModePublic()
+                  ? "Send quote (Test)"
+                  : "Send quote"}
             </Button>
           )}
+          </div>
         </div>
       )}
     </form>

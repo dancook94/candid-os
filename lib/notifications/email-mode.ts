@@ -1,90 +1,66 @@
+import {
+  getCommunicationConfig,
+  type CommunicationMode,
+} from "@/lib/communications/config";
+import { applyCommunicationSafety } from "@/lib/communications/safety";
+
+/** @deprecated Use CommunicationMode from lib/communications/config */
 export type EmailMode = "disabled" | "test" | "live";
 
 export type EmailModeInfo = {
   mode: EmailMode;
+  communicationMode: CommunicationMode;
   testRecipient: string | null;
   isProduction: boolean;
 };
 
-function normalizeMode(value: string | undefined): EmailMode | null {
-  const normalized = value?.trim().toLowerCase();
-
-  if (normalized === "disabled" || normalized === "test" || normalized === "live") {
-    return normalized;
+function mapCommunicationModeToEmailMode(mode: CommunicationMode): EmailMode {
+  if (mode === "suppressed") {
+    return "disabled";
   }
 
-  return null;
+  return mode;
 }
 
 export function getEmailMode(): EmailModeInfo {
-  const isProduction = process.env.NODE_ENV === "production";
-  const explicit = normalizeMode(process.env.EMAIL_MODE);
-
-  let mode: EmailMode;
-
-  if (explicit) {
-    mode = explicit;
-  } else if (isProduction) {
-    mode = "live";
-  } else {
-    mode = "test";
-  }
-
-  if (!isProduction && mode === "live" && !explicit) {
-    mode = "test";
-  }
-
-  const testRecipient = process.env.EMAIL_TEST_RECIPIENT?.trim() || null;
+  const config = getCommunicationConfig();
 
   return {
-    mode,
-    testRecipient,
-    isProduction,
+    mode: mapCommunicationModeToEmailMode(config.mode),
+    communicationMode: config.mode,
+    testRecipient: config.testRecipient,
+    isProduction: process.env.NODE_ENV === "production",
   };
 }
 
 export function applyEmailModeRedirect(input: {
   intendedRecipient: string;
   subject: string;
+  cc?: string[];
+  bcc?: string[];
+  html?: string;
 }) {
-  const emailMode = getEmailMode();
-
-  if (emailMode.mode === "disabled") {
-    return {
-      ...emailMode,
-      shouldSend: false,
-      actualRecipient: input.intendedRecipient,
-      subject: input.subject,
-      redirected: false,
-    };
-  }
-
-  if (emailMode.mode === "test") {
-    if (!emailMode.testRecipient) {
-      return {
-        ...emailMode,
-        shouldSend: false,
-        actualRecipient: input.intendedRecipient,
-        subject: input.subject,
-        redirected: false,
-        missingTestRecipient: true as const,
-      };
-    }
-
-    return {
-      ...emailMode,
-      shouldSend: true,
-      actualRecipient: emailMode.testRecipient,
-      subject: `[TEST — intended for ${input.intendedRecipient}] ${input.subject}`,
-      redirected: true,
-    };
-  }
+  const safety = applyCommunicationSafety({
+    intendedRecipient: input.intendedRecipient,
+    cc: input.cc,
+    bcc: input.bcc,
+    subject: input.subject,
+    html: input.html ?? "",
+  });
 
   return {
-    ...emailMode,
-    shouldSend: true,
-    actualRecipient: input.intendedRecipient,
-    subject: input.subject,
-    redirected: false,
+    mode: mapCommunicationModeToEmailMode(safety.mode),
+    communicationMode: safety.mode,
+    testRecipient: getCommunicationConfig().testRecipient,
+    isProduction: process.env.NODE_ENV === "production",
+    shouldSend: safety.shouldSend,
+    actualRecipient: safety.actualRecipient,
+    actualCc: safety.actualCc,
+    actualBcc: safety.actualBcc,
+    subject: safety.subject,
+    redirected: safety.redirected,
+    intendedRecipients: safety.intendedRecipients,
+    ...(safety.missingTestRecipient ? { missingTestRecipient: true as const } : {}),
+    ...(safety.passthroughInternal ? { passthroughInternal: true as const } : {}),
   };
 }

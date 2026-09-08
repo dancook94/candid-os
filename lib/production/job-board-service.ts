@@ -17,7 +17,18 @@ import { ProductionError } from "@/lib/production/errors";
 import { computeDeadlineFlags } from "@/lib/production/board";
 import type { ProductionBoardFilters } from "@/lib/production/types";
 import { isPrintFactoryJobRipped } from "@/lib/printfactory/ripped";
+import { loadPrintfactoryPreviewsForJobIds } from "@/lib/printfactory/job-previews";
+import type { JobPrintfactoryPreviewBundle } from "@/lib/printfactory/job-previews";
 import { createCrmActivity } from "@/lib/crm/create-crm-activity";
+import {
+  JOB_BILLING_TYPE_LABELS,
+  type JobBillingType,
+} from "@/lib/jobs/billing-types";
+import {
+  buildNonBillableProductionCloseoutUpdates,
+  isJobArchivedFromProductionBoard,
+  logNonBillableProductionBoardArchive,
+} from "@/lib/production/job-board-archive";
 
 export type JobProductionBoardCard = {
   id: string;
@@ -46,12 +57,34 @@ export type JobProductionBoardCard = {
   dropbox_folder_path: string | null;
   dropbox_setup_status: string;
   opportunity_id: string | null;
-  quote_id: string;
+  quote_id: string | null;
+  job_billing_type: JobBillingType | null;
+  billing_type_label: string | null;
   updated_at: string;
   is_overdue: boolean;
   is_due_today: boolean;
   is_due_tomorrow: boolean;
   is_on_hold: boolean;
+  preview_thumbnail_url: string | null;
+  preview_thumbnail_alt: string | null;
+  preview_is_shared_print: boolean;
+};
+
+export type ArchivedProductionBoardJob = {
+  id: string;
+  job_reference: string;
+  project_name: string;
+  company_id: string;
+  company_name: string;
+  job_billing_type: JobBillingType | null;
+  billing_type_label: string | null;
+  updated_at: string;
+  required_date: string | null;
+};
+
+export type ArchivedProductionBoardData = {
+  jobs: ArchivedProductionBoardJob[];
+  totalCount: number;
 };
 
 export type JobProductionBoardData = {
@@ -59,6 +92,18 @@ export type JobProductionBoardData = {
   counts: Record<JobProductionBoardStage, number>;
   totalCount: number;
 };
+
+function matchesProductionBoardSearch(
+  searchTerm: string,
+  fields: Array<string | null | undefined>
+) {
+  if (!searchTerm) {
+    return true;
+  }
+
+  const haystack = fields.filter(Boolean).join(" ").toLowerCase();
+  return haystack.includes(searchTerm);
+}
 
 function emptyJobBoardData(): JobProductionBoardData {
   const columns = {} as Record<JobProductionBoardStage, JobProductionBoardCard[]>;
@@ -146,9 +191,16 @@ export async function fetchJobProductionBoard(
   const { data: printfactoryCounts, error: pfCountError } = jobIds.length
     ? await adminClient
         .from("printfactory_jobs")
-        .select("candid_job_id")
+        .select("id, candid_job_id")
         .in("candid_job_id", jobIds)
         .in("job_match_status", ["matched_automatically", "matched_manually"])
+    : { data: [], error: null };
+
+  const { data: junctionPfLinks, error: junctionPfError } = jobIds.length
+    ? await adminClient
+        .from("printfactory_job_candid_jobs")
+        .select("candid_job_id, printfactory_job_id")
+        .in("candid_job_id", jobIds)
     : { data: [], error: null };
 
   if (pfCountError && pfCountError.code !== "42P01") {
@@ -160,10 +212,28 @@ export async function fetchJobProductionBoard(
   }
 
   const filesDetectedByJob = new Map<string, number>();
+  const pfIdsByJob = new Map<string, Set<string>>();
 
   for (const row of printfactoryCounts ?? []) {
     const jobId = row.candid_job_id as string;
-    filesDetectedByJob.set(jobId, (filesDetectedByJob.get(jobId) ?? 0) + 1);
+    const pfId = row.id as string;
+    const ids = pfIdsByJob.get(jobId) ?? new Set<string>();
+    ids.add(pfId);
+    pfIdsByJob.set(jobId, ids);
+  }
+
+  if (!junctionPfError || junctionPfError.code === "42P01") {
+    for (const row of junctionPfLinks ?? []) {
+      const jobId = row.candid_job_id as string;
+      const pfId = row.printfactory_job_id as string;
+      const ids = pfIdsByJob.get(jobId) ?? new Set<string>();
+      ids.add(pfId);
+      pfIdsByJob.set(jobId, ids);
+    }
+  }
+
+  for (const [jobId, pfIds] of pfIdsByJob) {
+    filesDetectedByJob.set(jobId, pfIds.size);
   }
 
   const searchTerm = filters.search.toLowerCase();
@@ -198,6 +268,14 @@ export async function fetchJobProductionBoard(
       proof_required: job.proof_required as boolean | null | undefined,
     }))
   );
+
+  let previewBundles = new Map<string, JobPrintfactoryPreviewBundle>();
+
+  try {
+    previewBundles = await loadPrintfactoryPreviewsForJobIds(adminClient, jobIds);
+  } catch {
+    previewBundles = new Map();
+  }
 
   const cards: JobProductionBoardCard[] = jobRows
     .map((job) => {
@@ -262,6 +340,7 @@ export async function fetchJobProductionBoard(
       const companyRaw = job.companies as unknown;
       const companyData = Array.isArray(companyRaw) ? companyRaw[0] : companyRaw;
       const company = companyData as { company_name: string } | null | undefined;
+      const preview = previewBundles.get(job.id as string)?.primary ?? null;
 
       return {
         id: job.id as string,
@@ -298,12 +377,20 @@ export async function fetchJobProductionBoard(
         dropbox_folder_path: job.dropbox_folder_path as string | null,
         dropbox_setup_status: job.dropbox_setup_status as string,
         opportunity_id: job.opportunity_id as string | null,
-        quote_id: job.quote_id as string,
+        quote_id: (job.quote_id as string | null) ?? null,
+        job_billing_type: (job.job_billing_type as JobBillingType | null) ?? null,
+        billing_type_label: job.job_billing_type
+          ? JOB_BILLING_TYPE_LABELS[job.job_billing_type as JobBillingType]
+          : null,
         updated_at: job.updated_at as string,
         ...deadlineFlags,
         is_on_hold:
           job.production_board_stage === "on_hold" ||
           Boolean(job.production_board_on_hold),
+        preview_thumbnail_url: preview?.thumbnailUrl ?? null,
+        preview_thumbnail_alt:
+          preview?.fileName ?? preview?.jobName ?? job.project_name ?? null,
+        preview_is_shared_print: preview?.isSharedPrint ?? false,
         _items: items,
         _artwork_source: job.artwork_source as string,
       };
@@ -359,7 +446,8 @@ export async function fetchJobProductionBoard(
 
       return haystack.includes(searchTerm);
     })
-    .map(({ _items, _artwork_source: _artworkSource, ...card }) => card);
+    .map(({ _items, _artwork_source: _artworkSource, ...card }) => card)
+    .filter((card) => !isJobArchivedFromProductionBoard(card));
 
   const boardData = emptyJobBoardData();
 
@@ -373,6 +461,84 @@ export async function fetchJobProductionBoard(
 
   return {
     data: boardData,
+    queryError: null as null,
+    detail: null as null,
+  };
+}
+
+export async function fetchArchivedProductionBoardJobs(
+  adminClient: SupabaseClient,
+  filters: ProductionBoardFilters
+) {
+  let query = adminClient
+    .from("jobs")
+    .select(`${JOB_BOARD_SELECT}, companies(company_name)`)
+    .eq("production_board_stage", "complete_job")
+    .in("job_billing_type", ["internal", "non_billable"])
+    .neq("status", "cancelled")
+    .order("updated_at", { ascending: false });
+
+  if (filters.companyId) {
+    query = query.eq("company_id", filters.companyId);
+  }
+
+  if (filters.jobReference) {
+    query = query.ilike("job_reference", `%${filters.jobReference}%`);
+  }
+
+  const { data: jobs, error } = await query.limit(500);
+
+  if (error) {
+    if (error.code === "42703") {
+      return {
+        data: null,
+        queryError: "migration_required" as const,
+        detail: error.message,
+      };
+    }
+
+    return {
+      data: null,
+      queryError: "query_failed" as const,
+      detail: error.message,
+    };
+  }
+
+  const searchTerm = filters.search.toLowerCase();
+
+  const archivedJobs: ArchivedProductionBoardJob[] = (jobs ?? [])
+    .map((job) => {
+      const companyRaw = job.companies as unknown;
+      const companyData = Array.isArray(companyRaw) ? companyRaw[0] : companyRaw;
+      const company = companyData as { company_name: string } | null | undefined;
+      const billingType = (job.job_billing_type as JobBillingType | null) ?? null;
+
+      return {
+        id: job.id as string,
+        job_reference: job.job_reference as string,
+        project_name: job.project_name as string,
+        company_id: job.company_id as string,
+        company_name: company?.company_name ?? "Unknown company",
+        job_billing_type: billingType,
+        billing_type_label: billingType ? JOB_BILLING_TYPE_LABELS[billingType] : null,
+        updated_at: job.updated_at as string,
+        required_date: job.required_date as string | null,
+      };
+    })
+    .filter((job) =>
+      matchesProductionBoardSearch(searchTerm, [
+        job.job_reference,
+        job.project_name,
+        job.company_name,
+        job.billing_type_label,
+      ])
+    );
+
+  return {
+    data: {
+      jobs: archivedJobs,
+      totalCount: archivedJobs.length,
+    } satisfies ArchivedProductionBoardData,
     queryError: null as null,
     detail: null as null,
   };
@@ -417,6 +583,8 @@ export async function applyJobProductionBoardStageChange(
     );
   }
 
+  const closeoutUpdates = buildNonBillableProductionCloseoutUpdates(job, newStage);
+
   const { data: updated, error: updateError } = await adminClient
     .from("jobs")
     .update({
@@ -426,6 +594,7 @@ export async function applyJobProductionBoardStageChange(
         newStage === "ready_to_print" && !job.ready_to_print_at
           ? new Date().toISOString()
           : job.ready_to_print_at,
+      ...(closeoutUpdates ?? {}),
     })
     .eq("id", jobId)
     .select(JOB_BOARD_SELECT)
@@ -444,13 +613,29 @@ export async function applyJobProductionBoardStageChange(
     is_automatic: false,
   });
 
+  if (closeoutUpdates && updated) {
+    await logNonBillableProductionBoardArchive(
+      adminClient,
+      {
+        id: jobId,
+        job_reference: updated.job_reference as string,
+        company_id: updated.company_id as string,
+        contact_id: updated.contact_id as string | null,
+        opportunity_id: updated.opportunity_id as string | null,
+        quote_id: updated.quote_id as string | null,
+        job_billing_type: updated.job_billing_type as JobBillingType | null,
+      },
+      actorProfileId
+    );
+  }
+
   const stageLabel = JOB_PRODUCTION_BOARD_STAGE_LABELS[newStage];
 
   await createCrmActivity(adminClient, {
     companyId: job.company_id as string,
     contactId: job.contact_id as string | null,
     opportunityId: job.opportunity_id as string | null,
-    quoteId: job.quote_id as string,
+    quoteId: job.quote_id as string | null,
     activityType: JOB_BOARD_ACTIVITY_TYPES.stageChanged,
     description: `Job ${job.job_reference} moved to ${stageLabel}.`,
     actorProfileId,
@@ -464,7 +649,7 @@ export async function applyJobProductionBoardStageChange(
       companyId: job.company_id as string,
       contactId: job.contact_id as string | null,
       opportunityId: job.opportunity_id as string | null,
-      quoteId: job.quote_id as string,
+      quoteId: job.quote_id as string | null,
       taskId: null,
     },
   });

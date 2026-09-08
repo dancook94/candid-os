@@ -62,10 +62,15 @@ export function toAdminSafeNotificationFailureReason(error: unknown) {
     };
   }
 
-  if (message.includes("missing_test_recipient") || message.includes("EMAIL_TEST_RECIPIENT")) {
+  if (
+    message.includes("missing_test_recipient") ||
+    message.includes("CANDID_TEST_EMAIL_RECIPIENT") ||
+    message.includes("EMAIL_TEST_RECIPIENT")
+  ) {
     return {
       reason: "test_recipient_missing",
-      message: "EMAIL_MODE=test requires EMAIL_TEST_RECIPIENT.",
+      message:
+        "CANDID_COMMUNICATION_MODE=test requires CANDID_TEST_EMAIL_RECIPIENT.",
       code,
     };
   }
@@ -124,13 +129,12 @@ export function getSkippedReasonLabel(skippedReason: string | null | undefined) 
     case "suppressed_by_admin_setting":
       return "Notification suppressed by admin notification settings.";
     case "missing_test_recipient":
-      return "EMAIL_MODE=test requires EMAIL_TEST_RECIPIENT.";
+    case "test_recipient_missing":
+      return "CANDID_COMMUNICATION_MODE=test requires CANDID_TEST_EMAIL_RECIPIENT.";
     case "resend_not_configured":
       return "Resend is not configured for outbound notifications.";
     case "recipient_unresolved":
       return "Recipient could not be resolved for this customer.";
-    case "test_recipient_missing":
-      return "EMAIL_MODE=test requires EMAIL_TEST_RECIPIENT.";
     case "suppressed_by_settings":
       return "Notification suppressed by admin notification settings.";
     default:

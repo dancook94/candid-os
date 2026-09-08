@@ -129,6 +129,7 @@ export type ProductionBoardSearchParams = {
   priority?: string;
   due?: string;
   job_ref?: string;
+  view?: string;
 };
 
 export function parseProductionBoardFilters(
@@ -156,6 +157,7 @@ export function parseProductionBoardFilters(
         ? params.due
         : null,
     jobReference: params.job_ref?.trim() || null,
+    boardView: params.view === "archived" ? "archived" : "active",
   };
 }
 
@@ -187,6 +189,7 @@ export function buildProductionBoardHref(
   if (filters.priority) params.set("priority", filters.priority);
   if (filters.dueDate) params.set("due", filters.dueDate);
   if (filters.jobReference) params.set("job_ref", filters.jobReference);
+  if (filters.boardView === "archived") params.set("view", "archived");
 
   const query = params.toString();
   return query ? `/admin/production?${query}` : "/admin/production";

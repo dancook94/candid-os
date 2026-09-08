@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -10,9 +10,27 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { formatCrmDateTime } from "@/lib/crm/format-datetime";
+import type { JobBillingType } from "@/lib/jobs/billing-types";
+import { JOB_BILLING_TYPE_LABELS } from "@/lib/jobs/billing-types";
+import { PrintfactoryThumbnailImage } from "@/components/production/printfactory-thumbnail";
 import type { PrintfactoryConnectionStatus } from "@/lib/printfactory/client";
 import type { ExceptionQueueTab } from "@/lib/printfactory/matching-queue";
+import { isPrintFactoryJobRipped } from "@/lib/printfactory/ripped";
 import type { PrintfactoryDataQueryError } from "@/lib/printfactory/schema-readiness";
+import { buildPrintfactoryThumbnailProxyPath } from "@/lib/printfactory/thumbnail";
+
+type CompanyOption = {
+  id: string;
+  companyName: string;
+};
+
+type JobSearchResult = {
+  id: string;
+  jobReference: string;
+  projectName: string;
+  companyName: string;
+  billingType: JobBillingType | null;
+};
 
 type MatchingRecord = {
   id: string;
@@ -20,13 +38,27 @@ type MatchingRecord = {
   job_name: string | null;
   source_file_name: string | null;
   source_file_path: string | null;
+  normalized_source_path?: string | null;
+  source_path_status?: string | null;
+  source_locations?: Array<{
+    documentGuid?: string | null;
+    documentName?: string | null;
+    rawLocation?: string;
+    normalizedLocation?: string;
+    extractedJobReferences?: string[];
+  }> | null;
   document_name?: string | null;
   device: string | null;
   media_type: string | null;
   printfactory_status: string | null;
+  progress: number | null;
+  created_at_printfactory?: string | null;
   first_seen_at: string;
   job_match_status: string;
+  job_match_method?: string | null;
   job_match_confidence: number | null;
+  ignored_at?: string | null;
+  ignore_reason?: string | null;
   extracted_job_reference: string | null;
   suggested_candid_job_id?: string | null;
   match_suggestion_reason?: string | null;
@@ -42,6 +74,19 @@ type MatchingRecord = {
     project_name: string;
     companies?: { company_name: string | null } | null;
   } | null;
+  is_multi_job_sheet?: boolean | null;
+  printfactory_job_candid_jobs?: Array<{
+    id: string;
+    candid_job_id: string;
+    link_type: string;
+    is_primary: boolean;
+    jobs?: {
+      id: string;
+      job_reference: string;
+      project_name: string;
+      companies?: { company_name: string | null } | null;
+    } | null;
+  }>;
   printfactory_job_manifest_items?: Array<{
     id: string;
     link_status: string;
@@ -57,6 +102,106 @@ type MatchingRecord = {
   }>;
 };
 
+type LinkedCandidJobView = {
+  id: string;
+  jobReference: string;
+  projectName: string;
+  companyName: string | null;
+};
+
+function resolveLinkedCandidJobs(record: MatchingRecord): LinkedCandidJobView[] {
+  const fromJunction = (record.printfactory_job_candid_jobs ?? [])
+    .map((link) => link.jobs)
+    .filter(Boolean)
+    .map((job) => ({
+      id: job!.id,
+      jobReference: job!.job_reference,
+      projectName: job!.project_name,
+      companyName: job!.companies?.company_name ?? null,
+    }));
+
+  if (fromJunction.length > 0) {
+    const seen = new Set<string>();
+    return fromJunction.filter((job) => {
+      if (seen.has(job.id)) {
+        return false;
+      }
+      seen.add(job.id);
+      return true;
+    });
+  }
+
+  if (record.jobs) {
+    return [
+      {
+        id: record.jobs.id,
+        jobReference: record.jobs.job_reference,
+        projectName: record.jobs.project_name,
+        companyName: record.jobs.companies?.company_name ?? null,
+      },
+    ];
+  }
+
+  return [];
+}
+
+function PendingJobSelectionChips({
+  selectedJobs,
+  onRemove,
+  onClearAll,
+}: {
+  selectedJobs: JobSearchResult[];
+  onRemove: (jobId: string) => void;
+  onClearAll: () => void;
+}) {
+  if (selectedJobs.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <p className="text-xs font-medium text-foreground">Selected jobs:</p>
+        <span className="text-xs text-muted-foreground">
+          {selectedJobs.length} selected
+        </span>
+        {selectedJobs.length > 1 ? (
+          <button
+            type="button"
+            onClick={onClearAll}
+            className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+          >
+            Clear all
+          </button>
+        ) : null}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {selectedJobs.map((job) => (
+          <span
+            key={job.id}
+            className="inline-flex max-w-full items-center gap-0.5 rounded-full border border-border bg-muted/50 py-0.5 pl-2.5 pr-0.5 text-xs"
+          >
+            <span className="min-w-0 truncate py-1">
+              <span className="font-semibold text-foreground">{job.jobReference}</span>
+              {job.projectName ? (
+                <span className="text-muted-foreground"> · {job.projectName}</span>
+              ) : null}
+            </span>
+            <button
+              type="button"
+              aria-label={`Remove ${job.jobReference} from selection`}
+              onClick={() => onRemove(job.id)}
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-base leading-none text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              ×
+            </button>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 type PrintfactoryMatchingClientProps = {
   initialTab: ExceptionQueueTab;
   records: MatchingRecord[];
@@ -67,7 +212,43 @@ type PrintfactoryMatchingClientProps = {
   jobFilter?: string;
   connectionStatus: PrintfactoryConnectionStatus;
   tabLabels: Record<ExceptionQueueTab, string>;
+  goLiveDate: string;
+  includeHistorical: boolean;
+  dateFrom?: string;
+  dateTo?: string;
+  allRecordsCount: number;
+  operationalRecordsCount: number;
+  companies: CompanyOption[];
 };
+
+function buildMatchingHref(options: {
+  tab: ExceptionQueueTab;
+  includeHistorical: boolean;
+  dateFrom?: string;
+  dateTo?: string;
+  job?: string;
+}) {
+  const params = new URLSearchParams();
+  params.set("tab", options.tab);
+
+  if (options.includeHistorical) {
+    params.set("historical", "1");
+  }
+
+  if (options.dateFrom) {
+    params.set("from", options.dateFrom);
+  }
+
+  if (options.dateTo) {
+    params.set("to", options.dateTo);
+  }
+
+  if (options.job) {
+    params.set("job", options.job);
+  }
+
+  return `/admin/production/printfactory-unmatched?${params.toString()}`;
+}
 
 export function PrintfactoryMatchingClient({
   initialTab,
@@ -79,6 +260,13 @@ export function PrintfactoryMatchingClient({
   jobFilter,
   connectionStatus,
   tabLabels,
+  goLiveDate,
+  includeHistorical,
+  dateFrom,
+  dateTo,
+  allRecordsCount,
+  operationalRecordsCount,
+  companies,
 }: PrintfactoryMatchingClientProps) {
   const router = useRouter();
   const [tab, setTab] = useState<ExceptionQueueTab>(initialTab);
@@ -87,6 +275,10 @@ export function PrintfactoryMatchingClient({
   const [syncError, setSyncError] = useState("");
   const [actionError, setActionError] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [filterHistorical, setFilterHistorical] = useState(includeHistorical);
+  const [filterDateFrom, setFilterDateFrom] = useState(dateFrom ?? "");
+  const [filterDateTo, setFilterDateTo] = useState(dateTo ?? "");
+  const [syncHistorical, setSyncHistorical] = useState(false);
   const connection = connectionStatus;
 
   const filteredRecords = useMemo(() => {
@@ -97,17 +289,32 @@ export function PrintfactoryMatchingClient({
     const term = jobFilter.toLowerCase();
 
     return records.filter((record) => {
+      const linked = resolveLinkedCandidJobs(record);
       const jobRef = record.jobs?.job_reference?.toLowerCase() ?? "";
+      const linkedRefs = linked.map((job) => job.jobReference.toLowerCase()).join(" ");
       const extracted = record.extracted_job_reference?.toLowerCase() ?? "";
       const suggestedRef =
         record.match_suggestion_details?.jobReference?.toLowerCase() ?? "";
       return (
         jobRef.includes(term) ||
+        linkedRefs.includes(term) ||
         extracted.includes(term) ||
         suggestedRef.includes(term)
       );
     });
   }, [records, jobFilter]);
+
+  function applyFilters(nextTab = tab) {
+    router.push(
+      buildMatchingHref({
+        tab: nextTab,
+        includeHistorical: filterHistorical,
+        dateFrom: filterDateFrom || undefined,
+        dateTo: filterDateTo || undefined,
+        job: jobFilter,
+      })
+    );
+  }
 
   function toggleSelected(id: string) {
     setSelectedIds((current) => {
@@ -129,6 +336,8 @@ export function PrintfactoryMatchingClient({
     try {
       const response = await fetch("/api/admin/printfactory/sync", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ includeHistorical: syncHistorical }),
       });
       const payload = (await response.json()) as {
         ok?: boolean;
@@ -156,7 +365,8 @@ export function PrintfactoryMatchingClient({
 
   async function runAction(
     recordId: string,
-    body: Record<string, unknown>
+    body: Record<string, unknown>,
+    redirectTo?: string
   ) {
     setActionError("");
     setBusyId(recordId);
@@ -167,10 +377,18 @@ export function PrintfactoryMatchingClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as {
+        error?: string;
+        redirectPath?: string;
+      };
 
       if (!response.ok) {
         throw new Error(payload.error ?? "Action failed.");
+      }
+
+      if (redirectTo || payload.redirectPath) {
+        router.push(redirectTo ?? payload.redirectPath ?? "/admin/production");
+        return;
       }
 
       router.refresh();
@@ -243,13 +461,6 @@ export function PrintfactoryMatchingClient({
             PrintFactory matching data could not be loaded.
           </p>
           <p className="text-muted-foreground">{dataQueryError.message}</p>
-          {process.env.NODE_ENV === "development" ? (
-            <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 font-mono text-xs text-muted-foreground">
-              <p>code: {dataQueryError.code ?? "—"}</p>
-              {dataQueryError.details ? <p>details: {dataQueryError.details}</p> : null}
-              {dataQueryError.hint ? <p>hint: {dataQueryError.hint}</p> : null}
-            </div>
-          ) : null}
         </CardContent>
       </Card>
     );
@@ -258,26 +469,86 @@ export function PrintfactoryMatchingClient({
   return (
     <div className="space-y-6">
       <Card className="portal-surface">
-        <CardContent className="flex flex-wrap items-center justify-between gap-4 pt-6">
-          <div className="space-y-1 text-sm">
-            <p className="font-medium text-foreground">PrintFactory connection</p>
-            {connection.configured ? (
-              <p className="text-muted-foreground">
-                API configured at {connection.baseUrl}
-              </p>
-            ) : (
-              <p className="text-destructive">
-                Missing configuration: {connection.missing.join(", ")}
-              </p>
-            )}
+        <CardContent className="space-y-4 pt-6">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="space-y-1 text-sm">
+              <p className="font-medium text-foreground">PrintFactory connection</p>
+              {connection.configured ? (
+                <p className="text-muted-foreground">
+                  API configured at {connection.baseUrl}
+                </p>
+              ) : (
+                <p className="text-destructive">
+                  Missing configuration: {connection.missing.join(", ")}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  checked={syncHistorical}
+                  onChange={(event) => setSyncHistorical(event.target.checked)}
+                  className="h-4 w-4 rounded border-border"
+                />
+                Sync historical (debug)
+              </label>
+              <Button
+                type="button"
+                onClick={() => void runSync()}
+                disabled={busyId === "sync" || !connection.configured}
+              >
+                {busyId === "sync" ? "Syncing…" : "Sync PrintFactory"}
+              </Button>
+            </div>
           </div>
-          <Button
-            type="button"
-            onClick={() => void runSync()}
-            disabled={busyId === "sync" || !connection.configured}
-          >
-            {busyId === "sync" ? "Syncing…" : "Sync PrintFactory"}
-          </Button>
+
+          <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
+            Operational queue from <strong>{goLiveDate}</strong>:{" "}
+            {operationalRecordsCount} record{operationalRecordsCount === 1 ? "" : "s"}
+            {allRecordsCount !== operationalRecordsCount
+              ? ` (${allRecordsCount} total imported)`
+              : ""}
+            . Configure with{" "}
+            <code className="text-xs">PRINTFACTORY_MATCHING_GO_LIVE_DATE</code>.
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="portal-surface">
+        <CardContent className="grid gap-4 pt-6 md:grid-cols-4">
+          <div className="space-y-2 md:col-span-2">
+            <Label htmlFor="pf-date-from">Date from</Label>
+            <Input
+              id="pf-date-from"
+              type="date"
+              value={filterDateFrom}
+              onChange={(event) => setFilterDateFrom(event.target.value)}
+            />
+          </div>
+          <div className="space-y-2 md:col-span-2">
+            <Label htmlFor="pf-date-to">Date to</Label>
+            <Input
+              id="pf-date-to"
+              type="date"
+              value={filterDateTo}
+              onChange={(event) => setFilterDateTo(event.target.value)}
+            />
+          </div>
+          <div className="flex flex-wrap items-end gap-3 md:col-span-4">
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={filterHistorical}
+                onChange={(event) => setFilterHistorical(event.target.checked)}
+                className="h-4 w-4 rounded border-border"
+              />
+              Include historical (before {goLiveDate})
+            </label>
+            <Button type="button" size="sm" variant="outline" onClick={() => applyFilters()}>
+              Apply filters
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -306,7 +577,15 @@ export function PrintfactoryMatchingClient({
             size="sm"
             onClick={() => {
               setTab(value);
-              router.push(`/admin/production/printfactory-unmatched?tab=${value}`);
+              router.push(
+                buildMatchingHref({
+                  tab: value,
+                  includeHistorical: filterHistorical,
+                  dateFrom: filterDateFrom || undefined,
+                  dateTo: filterDateTo || undefined,
+                  job: jobFilter,
+                })
+              );
             }}
           >
             {tabLabels[value]}
@@ -339,39 +618,14 @@ export function PrintfactoryMatchingClient({
             >
               Ignore as historical
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={busyId === "bulk"}
-              onClick={() => void runBulkAction("clear_automatic_matches")}
-            >
-              Clear automatic matches
-            </Button>
           </CardContent>
         </Card>
-      ) : null}
-
-      {tab === "suggested_matches" ? (
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={busyId === "bulk"}
-            onClick={() =>
-              void runBulkAction("confirm_high_confidence_suggestions")
-            }
-          >
-            Confirm all high-confidence suggestions
-          </Button>
-        </div>
       ) : null}
 
       {filteredRecords.length === 0 ? (
         <Card className="portal-surface">
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            No PrintFactory records in this tab.
+            No PrintFactory records in this view.
           </CardContent>
         </Card>
       ) : (
@@ -382,8 +636,9 @@ export function PrintfactoryMatchingClient({
             tab={tab}
             busy={busyId === record.id}
             selected={selectedIds.has(record.id)}
+            companies={companies}
             onToggleSelected={() => toggleSelected(record.id)}
-            onAction={(body) => void runAction(record.id, body)}
+            onAction={(body, redirectTo) => void runAction(record.id, body, redirectTo)}
           />
         ))
       )}
@@ -396,6 +651,7 @@ function PrintfactoryRecordCard({
   tab,
   busy,
   selected,
+  companies,
   onToggleSelected,
   onAction,
 }: {
@@ -403,33 +659,147 @@ function PrintfactoryRecordCard({
   tab: ExceptionQueueTab;
   busy: boolean;
   selected: boolean;
+  companies: CompanyOption[];
   onToggleSelected: () => void;
-  onAction: (body: Record<string, unknown>) => void;
+  onAction: (body: Record<string, unknown>, redirectTo?: string) => void;
 }) {
-  const [candidJobId, setCandidJobId] = useState("");
-  const [selectedItemId, setSelectedItemId] = useState("");
+  const [activeAction, setActiveAction] = useState<"assign" | "create" | "add_job" | null>(null);
+  const [jobSearch, setJobSearch] = useState("");
+  const [jobResults, setJobResults] = useState<JobSearchResult[]>([]);
+  const [searchingJobs, setSearchingJobs] = useState(false);
+  const [selectedJobsById, setSelectedJobsById] = useState<Record<string, JobSearchResult>>({});
   const [ignoreReason, setIgnoreReason] = useState("");
+  const [billingType, setBillingType] = useState<JobBillingType>("billable");
+  const [projectName, setProjectName] = useState(
+    record.job_name ?? record.document_name ?? record.source_file_name ?? ""
+  );
+  const [companyId, setCompanyId] = useState("");
+  const [requiredDate, setRequiredDate] = useState("");
+  const [createNotes, setCreateNotes] = useState("");
 
   const suggestions = (record.printfactory_job_manifest_items ?? []).filter(
     (link) => link.link_status === "suggested"
   );
-
   const suggestionDetails = record.match_suggestion_details;
   const hasJobSuggestion =
     record.job_match_status === "suggested" && record.suggested_candid_job_id;
+  const sourceLocations = record.source_locations ?? [];
+  const sourcePathUnavailable =
+    record.source_path_status === "error" ||
+    record.source_path_status === "unavailable" ||
+    record.source_path_status === "missing";
+  const linkedJobs = resolveLinkedCandidJobs(record);
+  const linkedJobIds = new Set(linkedJobs.map((job) => job.id));
+  const isSharedPrint = linkedJobs.length > 1 || Boolean(record.is_multi_job_sheet);
+  const canTakeMatchingActions =
+    tab === "needs_attention" &&
+    linkedJobs.length === 0 &&
+    record.job_match_status !== "ignored";
+  const canManageLinkedJobs =
+    linkedJobs.length > 0 &&
+    record.job_match_status !== "ignored" &&
+    tab !== "ignored";
+
+  const pendingSelectedJobs = Object.values(selectedJobsById);
+
+  function removePendingSelectedJob(jobId: string) {
+    setSelectedJobsById((current) => {
+      const next = { ...current };
+      delete next[jobId];
+      return next;
+    });
+  }
+
+  function clearPendingSelectedJobs() {
+    setSelectedJobsById({});
+  }
+
+  function togglePendingSelectedJob(job: JobSearchResult) {
+    if (linkedJobIds.has(job.id)) {
+      return;
+    }
+
+    setSelectedJobsById((current) => {
+      if (current[job.id]) {
+        const next = { ...current };
+        delete next[job.id];
+        return next;
+      }
+
+      return {
+        ...current,
+        [job.id]: job,
+      };
+    });
+  }
+
+  const thumbnailUrl = isPrintFactoryJobRipped(record, { allowIgnored: true })
+    ? buildPrintfactoryThumbnailProxyPath(record.printfactory_job_guid)
+    : null;
+
+  useEffect(() => {
+    if (
+      (activeAction !== "assign" && activeAction !== "add_job") ||
+      jobSearch.trim().length < 1
+    ) {
+      setJobResults([]);
+      return;
+    }
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(async () => {
+      setSearchingJobs(true);
+
+      try {
+        const response = await fetch(
+          `/api/admin/jobs/search?q=${encodeURIComponent(jobSearch.trim())}`,
+          { signal: controller.signal }
+        );
+        const payload = (await response.json()) as {
+          jobs?: JobSearchResult[];
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(payload.error ?? "Job search failed.");
+        }
+
+        setJobResults(payload.jobs ?? []);
+      } catch (error) {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setJobResults([]);
+        }
+      } finally {
+        setSearchingJobs(false);
+      }
+    }, 250);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeout);
+    };
+  }, [activeAction, jobSearch]);
 
   return (
-    <Card className="portal-surface">
-      <CardHeader className="flex flex-row items-start justify-between gap-4">
-        <div className="space-y-1">
-          <CardTitle className="text-base">
-            {record.job_name ?? record.source_file_name ?? "Unnamed PrintFactory job"}
-          </CardTitle>
-          <p className="text-xs text-muted-foreground">
+    <Card className="portal-surface overflow-hidden">
+      <CardHeader className="flex flex-row items-start justify-between gap-4 border-b border-border/60 pb-4">
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <CardTitle className="break-words text-base">
+              {record.job_name ?? record.source_file_name ?? "Unnamed PrintFactory job"}
+            </CardTitle>
+            {isSharedPrint ? (
+              <span className="inline-flex shrink-0 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-medium text-sky-800 ring-1 ring-sky-600/10">
+                Shared print · {linkedJobs.length} jobs
+              </span>
+            ) : null}
+          </div>
+          <p className="break-words text-xs text-muted-foreground">
             Status: {record.job_match_status.replace(/_/g, " ")}
+            {record.job_match_method ? ` · ${record.job_match_method}` : ""}
           </p>
         </div>
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+        <label className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
           <input
             type="checkbox"
             checked={selected}
@@ -439,41 +809,114 @@ function PrintfactoryRecordCard({
           Select
         </label>
       </CardHeader>
-      <CardContent className="grid gap-4 md:grid-cols-2">
-        <div className="space-y-2 text-sm text-muted-foreground">
-          <p>
-            <span className="font-medium text-foreground">GUID:</span>{" "}
-            {record.printfactory_job_guid}
-          </p>
-          <p>
+      <CardContent
+        className={`grid items-start gap-6 pt-6 ${
+          thumbnailUrl
+            ? "lg:grid-cols-[minmax(0,1.5fr)_220px_minmax(280px,0.9fr)]"
+            : "lg:grid-cols-[minmax(0,1.5fr)_minmax(320px,1fr)]"
+        }`}
+      >
+        <div className="min-w-0 space-y-2 text-sm text-muted-foreground">
+          <p className="break-words">
             <span className="font-medium text-foreground">Filename:</span>{" "}
             {record.source_file_name ?? record.document_name ?? "—"}
           </p>
           <p className="break-all">
             <span className="font-medium text-foreground">Source path:</span>{" "}
-            {record.source_file_path ?? "—"}
+            {record.normalized_source_path ?? record.source_file_path ?? "—"}
           </p>
-          <p>
-            <span className="font-medium text-foreground">Device:</span>{" "}
+          {sourcePathUnavailable ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-xs text-amber-900">
+              Source path {record.source_path_status?.replace(/_/g, " ")}.
+            </p>
+          ) : null}
+          {record.extracted_job_reference ? (
+            <p className="break-words">
+              <span className="font-medium text-foreground">Extracted reference:</span>{" "}
+              {record.extracted_job_reference}
+            </p>
+          ) : null}
+          <p className="break-words">
+            <span className="font-medium text-foreground">Device / media:</span>{" "}
             {record.device ?? "—"} · {record.media_type ?? "—"}
           </p>
           <p>
-            <span className="font-medium text-foreground">PrintFactory status:</span>{" "}
-            {record.printfactory_status ?? "—"}
+            <span className="font-medium text-foreground">PrintFactory created:</span>{" "}
+            {record.created_at_printfactory
+              ? formatCrmDateTime(record.created_at_printfactory)
+              : formatCrmDateTime(record.first_seen_at)}
           </p>
-          <p>
-            <span className="font-medium text-foreground">Imported:</span>{" "}
-            {formatCrmDateTime(record.first_seen_at)}
-          </p>
-          {record.jobs ? (
-            <p>
-              <span className="font-medium text-foreground">Candid job:</span>{" "}
-              {record.jobs.job_reference} · {record.jobs.project_name}
-            </p>
+          {linkedJobs.length > 0 ? (
+            <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
+              <p className="font-medium text-foreground">
+                Linked to {linkedJobs.length} job{linkedJobs.length === 1 ? "" : "s"}
+              </p>
+              <ul className="mt-2 space-y-2">
+                {linkedJobs.map((job) => (
+                  <li
+                    key={job.id}
+                    className="flex flex-wrap items-center justify-between gap-2 text-sm"
+                  >
+                    <span className="break-words">
+                      <a
+                        href={`/admin/jobs/${job.id}`}
+                        className="font-medium text-foreground underline-offset-4 hover:underline"
+                      >
+                        {job.jobReference}
+                      </a>{" "}
+                      · {job.projectName}
+                      {job.companyName ? ` · ${job.companyName}` : ""}
+                    </span>
+                    {canManageLinkedJobs ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={busy}
+                        onClick={() => {
+                          if (
+                            !window.confirm(
+                              `Remove the link between this PrintFactory output and ${job.jobReference}?`
+                            )
+                          ) {
+                            return;
+                          }
+
+                          onAction({
+                            action: "remove_linked_job",
+                            candidJobId: job.id,
+                          });
+                        }}
+                      >
+                        Remove link
+                      </Button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
           ) : null}
         </div>
 
-        <div className="space-y-4">
+        {thumbnailUrl ? (
+          <div className="mx-auto w-[220px] max-w-full shrink-0 justify-self-center lg:mx-0 lg:justify-self-auto">
+            <PrintfactoryThumbnailImage
+              src={thumbnailUrl}
+              alt={
+                record.job_name ??
+                record.source_file_name ??
+                record.document_name ??
+                "PrintFactory preview"
+              }
+              previewWidthClassName="w-[220px]"
+              maxHeightClassName="h-40 max-h-40"
+              enlargeable
+              showEnlargeHint
+            />
+          </div>
+        ) : null}
+
+        <div className="min-w-0 space-y-4">
           {hasJobSuggestion ? (
             <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-3 text-sm">
               <p className="font-medium text-foreground">Suggested job</p>
@@ -481,20 +924,6 @@ function PrintfactoryRecordCard({
                 {suggestionDetails?.jobReference ?? "—"} —{" "}
                 {suggestionDetails?.projectName ?? "Unknown project"}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Confidence:{" "}
-                {suggestionDetails?.confidenceLevel ?? "medium"}
-              </p>
-              <p className="mt-1 text-xs">
-                Reason: {record.match_suggestion_reason ?? "Title similarity"}
-              </p>
-              {(suggestionDetails?.reasons ?? []).length > 1 ? (
-                <ul className="mt-1 list-inside list-disc text-xs text-muted-foreground">
-                  {(suggestionDetails?.reasons ?? []).map((reason) => (
-                    <li key={reason}>{reason}</li>
-                  ))}
-                </ul>
-              ) : null}
               <div className="mt-3 flex flex-wrap gap-2">
                 <Button
                   type="button"
@@ -502,7 +931,7 @@ function PrintfactoryRecordCard({
                   disabled={busy}
                   onClick={() => onAction({ action: "confirm_suggested_job" })}
                 >
-                  Confirm
+                  Confirm suggestion
                 </Button>
                 <Button
                   type="button"
@@ -517,35 +946,241 @@ function PrintfactoryRecordCard({
             </div>
           ) : null}
 
-          {(tab === "needs_attention" || tab === "all_imported") &&
-          !record.jobs &&
-          !hasJobSuggestion ? (
-            <div className="space-y-2">
-              <Label htmlFor={`job-${record.id}`}>Match to Candid job ID</Label>
-              <Input
-                id={`job-${record.id}`}
-                value={candidJobId}
-                onChange={(event) => setCandidJobId(event.target.value)}
-                placeholder="Job UUID"
-              />
-              {record.extracted_job_reference ? (
-                <p className="text-xs text-muted-foreground">
-                  Extracted reference: {record.extracted_job_reference}
-                </p>
+          {canTakeMatchingActions ? (
+            <div className="space-y-3 rounded-lg border border-border px-3 py-3">
+              <p className="text-sm font-medium text-foreground">Actions</p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={activeAction === "assign" ? "default" : "outline"}
+                  disabled={busy}
+                  onClick={() =>
+                    setActiveAction((current) => (current === "assign" ? null : "assign"))
+                  }
+                >
+                  Assign to existing job
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={activeAction === "create" ? "default" : "outline"}
+                  disabled={busy}
+                  onClick={() =>
+                    setActiveAction((current) => (current === "create" ? null : "create"))
+                  }
+                >
+                  Create job
+                </Button>
+              </div>
+
+              {activeAction === "assign" ? (
+                <div className="space-y-2">
+                  <Label htmlFor={`search-${record.id}`}>
+                    Search Candid jobs (select one or more)
+                  </Label>
+                  <Input
+                    id={`search-${record.id}`}
+                    value={jobSearch}
+                    onChange={(event) => setJobSearch(event.target.value)}
+                    placeholder="Job reference, project, or company"
+                  />
+                  <PendingJobSelectionChips
+                    selectedJobs={pendingSelectedJobs}
+                    onRemove={removePendingSelectedJob}
+                    onClearAll={clearPendingSelectedJobs}
+                  />
+                  {searchingJobs ? (
+                    <p className="text-xs text-muted-foreground">Searching…</p>
+                  ) : null}
+                  {jobResults.length > 0 ? (
+                    <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-border">
+                      {jobResults.map((job) => {
+                        const isSelected = Boolean(selectedJobsById[job.id]);
+                        const alreadyLinked = linkedJobIds.has(job.id);
+
+                        return (
+                          <button
+                            key={job.id}
+                            type="button"
+                            disabled={alreadyLinked}
+                            className={`block w-full px-3 py-2 text-left text-sm hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50 ${
+                              isSelected ? "bg-muted/60" : ""
+                            }`}
+                            onClick={() => togglePendingSelectedJob(job)}
+                          >
+                            <span className="font-medium text-foreground">
+                              {isSelected ? "✓ " : ""}
+                              {job.jobReference}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {" "}
+                              · {job.projectName} · {job.companyName}
+                              {alreadyLinked
+                                ? " · already linked"
+                                : isSelected
+                                  ? " · selected"
+                                  : ""}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={busy || pendingSelectedJobs.length === 0}
+                    onClick={() => {
+                      onAction({
+                        action: "match_job",
+                        candidJobIds: pendingSelectedJobs.map((job) => job.id),
+                      });
+                      clearPendingSelectedJobs();
+                    }}
+                  >
+                    Assign to {pendingSelectedJobs.length || 0} job
+                    {pendingSelectedJobs.length === 1 ? "" : "s"}
+                  </Button>
+                </div>
               ) : null}
+
+              {activeAction === "create" ? (
+                <div className="space-y-2">
+                  <Label htmlFor={`billing-${record.id}`}>Job type</Label>
+                  <Select
+                    id={`billing-${record.id}`}
+                    value={billingType}
+                    onChange={(event) =>
+                      setBillingType(event.target.value as JobBillingType)
+                    }
+                  >
+                    <option value="billable">Billable customer job</option>
+                    <option value="non_billable">Non-billable / FOC customer job</option>
+                    <option value="internal">Internal Candid job</option>
+                  </Select>
+                  <Label htmlFor={`project-${record.id}`}>Project name</Label>
+                  <Input
+                    id={`project-${record.id}`}
+                    value={projectName}
+                    onChange={(event) => setProjectName(event.target.value)}
+                  />
+                  {billingType !== "internal" ? (
+                    <>
+                      <Label htmlFor={`company-${record.id}`}>Company</Label>
+                      <Select
+                        id={`company-${record.id}`}
+                        value={companyId}
+                        onChange={(event) => setCompanyId(event.target.value)}
+                      >
+                        <option value="">Select company</option>
+                        {companies.map((company) => (
+                          <option key={company.id} value={company.id}>
+                            {company.companyName}
+                          </option>
+                        ))}
+                      </Select>
+                    </>
+                  ) : null}
+                  <Label htmlFor={`deadline-${record.id}`}>Deadline (optional)</Label>
+                  <Input
+                    id={`deadline-${record.id}`}
+                    type="date"
+                    value={requiredDate}
+                    onChange={(event) => setRequiredDate(event.target.value)}
+                  />
+                  <Label htmlFor={`notes-${record.id}`}>Notes (optional)</Label>
+                  <Textarea
+                    id={`notes-${record.id}`}
+                    value={createNotes}
+                    onChange={(event) => setCreateNotes(event.target.value)}
+                    rows={2}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={
+                      busy ||
+                      !projectName.trim() ||
+                      (billingType !== "internal" && !companyId)
+                    }
+                    onClick={() =>
+                      onAction({
+                        action: "create_job",
+                        billingType,
+                        projectName: projectName.trim(),
+                        companyId: billingType === "internal" ? null : companyId,
+                        requiredDate: requiredDate || null,
+                        notes: createNotes.trim() || null,
+                      })
+                    }
+                  >
+                    Create {JOB_BILLING_TYPE_LABELS[billingType]} job
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          {canManageLinkedJobs ? (
+            <div className="space-y-3 rounded-lg border border-border px-3 py-3">
+              <p className="text-sm font-medium text-foreground">Shared print links</p>
               <Button
                 type="button"
                 size="sm"
-                disabled={busy || !candidJobId.trim()}
+                variant={activeAction === "add_job" ? "default" : "outline"}
+                disabled={busy}
                 onClick={() =>
-                  onAction({
-                    action: "match_job",
-                    candidJobId: candidJobId.trim(),
-                  })
+                  setActiveAction((current) => (current === "add_job" ? null : "add_job"))
                 }
               >
-                Match to Candid job
+                Add another job
               </Button>
+              {activeAction === "add_job" ? (
+                <div className="space-y-2">
+                  <Label htmlFor={`add-search-${record.id}`}>Search Candid jobs</Label>
+                  <Input
+                    id={`add-search-${record.id}`}
+                    value={jobSearch}
+                    onChange={(event) => setJobSearch(event.target.value)}
+                    placeholder="Job reference, project, or company"
+                  />
+                  {searchingJobs ? (
+                    <p className="text-xs text-muted-foreground">Searching…</p>
+                  ) : null}
+                  {jobResults.length > 0 ? (
+                    <div className="max-h-48 space-y-1 overflow-y-auto rounded-lg border border-border">
+                      {jobResults.map((job) => {
+                        const alreadyLinked = linkedJobIds.has(job.id);
+
+                        return (
+                          <button
+                            key={job.id}
+                            type="button"
+                            disabled={alreadyLinked}
+                            className="block w-full px-3 py-2 text-left text-sm hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
+                            onClick={() =>
+                              onAction({
+                                action: "add_linked_job",
+                                candidJobId: job.id,
+                              })
+                            }
+                          >
+                            <span className="font-medium text-foreground">
+                              {job.jobReference}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {" "}
+                              · {job.projectName} · {job.companyName}
+                              {alreadyLinked ? " · already linked" : ""}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -563,9 +1198,7 @@ function PrintfactoryRecordCard({
 
           {suggestions.length > 0 ? (
             <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">
-                Suggested manifest items
-              </p>
+              <p className="text-sm font-medium text-foreground">Suggested manifest items</p>
               {suggestions.map((link) => (
                 <div
                   key={link.id}
@@ -575,25 +1208,7 @@ function PrintfactoryRecordCard({
                     {link.production_items?.item_reference ?? "—"} ·{" "}
                     {link.production_items?.item_name ?? "Unknown item"}
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    Confidence:{" "}
-                    {(link.match_confidence ?? 0) >= 0.85
-                      ? "High"
-                      : (link.match_confidence ?? 0) >= 0.6
-                        ? "Medium"
-                        : "Low"}
-                  </p>
-                  {link.suggestion_reason ? (
-                    <p className="text-xs text-muted-foreground">
-                      Reason: {link.suggestion_reason}
-                    </p>
-                  ) : null}
-                  {(link.suggestion_details?.reasons ?? []).map((reason) => (
-                    <p key={reason} className="text-xs text-muted-foreground">
-                      · {reason}
-                    </p>
-                  ))}
-                  {tab !== "confirmed" ? (
+                  {tab !== "matched" ? (
                     <Button
                       type="button"
                       size="sm"
@@ -606,9 +1221,7 @@ function PrintfactoryRecordCard({
                         })
                       }
                     >
-                      {link.match_method === "exact_item_reference"
-                        ? "One-click confirm"
-                        : "Confirm suggested item"}
+                      Confirm suggested item
                     </Button>
                   ) : null}
                 </div>
@@ -616,70 +1229,7 @@ function PrintfactoryRecordCard({
             </div>
           ) : null}
 
-          {record.jobs && suggestions.length === 0 && tab === "needs_attention" ? (
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              Unrecognised file for known job {record.jobs.job_reference}. Link to
-              an existing item or create an additional production item.
-            </p>
-          ) : null}
-
-          {record.jobs && tab !== "confirmed" ? (
-            <div className="space-y-2">
-              <Label htmlFor={`item-${record.id}`}>Link to manifest item ID</Label>
-              <Input
-                id={`item-${record.id}`}
-                value={selectedItemId}
-                onChange={(event) => setSelectedItemId(event.target.value)}
-                placeholder="Production item UUID"
-              />
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={busy || !selectedItemId.trim()}
-                onClick={() =>
-                  onAction({
-                    action: "confirm_item",
-                    productionItemId: selectedItemId.trim(),
-                  })
-                }
-              >
-                Link to item
-              </Button>
-            </div>
-          ) : null}
-
-          {record.jobs && tab !== "confirmed" && tab !== "ignored" ? (
-            <div className="space-y-2">
-              <p className="text-sm font-medium text-foreground">
-                Create additional production item
-              </p>
-              <Select defaultValue="additional_billable" id={`classification-${record.id}`}>
-                <option value="additional_billable">Additional billable item</option>
-                <option value="replacement">Replacement</option>
-                <option value="no_charge_reprint">No-charge reprint</option>
-                <option value="internal_test">Internal/test</option>
-              </Select>
-              <Button
-                type="button"
-                size="sm"
-                disabled={busy}
-                onClick={() =>
-                  onAction({
-                    action: "create_additional_item",
-                    classification: "additional_billable",
-                    title: record.job_name ?? record.source_file_name,
-                    material: record.media_type,
-                    machine: record.device,
-                  })
-                }
-              >
-                Create additional production item
-              </Button>
-            </div>
-          ) : null}
-
-          {tab !== "ignored" ? (
+          {tab !== "ignored" && record.job_match_status !== "ignored" ? (
             <div className="space-y-2">
               <Label htmlFor={`ignore-${record.id}`}>Ignore reason</Label>
               <Textarea
@@ -687,22 +1237,62 @@ function PrintfactoryRecordCard({
                 value={ignoreReason}
                 onChange={(event) => setIgnoreReason(event.target.value)}
                 rows={2}
-                placeholder="Historical import, test job, etc."
+                placeholder="Calibration, duplicate, test file, etc."
               />
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
                 disabled={busy || !ignoreReason.trim()}
-                onClick={() =>
+                onClick={() => {
+                  if (linkedJobs.length > 0) {
+                    const confirmed = window.confirm(
+                      `This PrintFactory job is currently linked to ${linkedJobs.length} Candid job${linkedJobs.length === 1 ? "" : "s"}. Ignore anyway? Existing links will remain until removed manually.`
+                    );
+
+                    if (!confirmed) {
+                      return;
+                    }
+                  }
+
                   onAction({
                     action: "ignore",
                     reason: ignoreReason.trim(),
-                  })
-                }
+                  });
+                }}
               >
                 Ignore
               </Button>
+            </div>
+          ) : null}
+
+          {(tab === "ignored" || record.job_match_status === "ignored") &&
+          record.job_match_status === "ignored" ? (
+            <div className="space-y-3 rounded-lg border border-border px-3 py-3">
+              <p className="text-sm font-medium text-foreground">Ignored</p>
+              {record.ignore_reason ? (
+                <p className="text-sm text-muted-foreground">
+                  <span className="font-medium text-foreground">Reason:</span>{" "}
+                  {record.ignore_reason}
+                </p>
+              ) : null}
+              {record.ignored_at ? (
+                <p className="text-xs text-muted-foreground">
+                  Ignored {formatCrmDateTime(record.ignored_at)}
+                </p>
+              ) : null}
+              <Button
+                type="button"
+                size="sm"
+                disabled={busy}
+                onClick={() => onAction({ action: "restore" })}
+              >
+                Restore
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Returns this record to Needs Attention without re-importing or
+                changing source paths.
+              </p>
             </div>
           ) : null}
         </div>

@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { getCommunicationConfig } from "@/lib/communications/config";
 import { applyEmailModeRedirect, getEmailMode } from "@/lib/notifications/email-mode";
 import { logNotificationStage } from "@/lib/notifications/debug-log";
 import {
@@ -242,6 +243,7 @@ function buildBaseRow(
     provider: "resend",
     metadata: {
       ...(input.metadata ?? {}),
+      communicationMode: getCommunicationConfig().mode,
       emailMode: applyEmailModeRedirect({ intendedRecipient, subject }).mode,
     },
     idempotency_key: input.idempotencyKey ?? null,
@@ -346,7 +348,10 @@ async function deliverEmailNotification(
       sent_at: status === "sent" ? now : null,
       metadata: {
         ...(input.metadata ?? {}),
+        communicationMode: sendResult.communicationMode,
         redirected: sendResult.redirected,
+        intendedRecipients:
+          "intendedRecipients" in sendResult ? sendResult.intendedRecipients : null,
         reason: sendResult.reason ?? null,
       },
     });

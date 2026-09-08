@@ -1,5 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  addLinkedCandidJob,
+  upsertPrintfactoryCandidJobLink,
+} from "@/lib/printfactory/multi-job-links";
+import { refreshJobProductionReadiness } from "@/lib/printfactory/readiness-service";
+
 import type { PrintfactoryJobMatchMethod } from "@/lib/printfactory/constants";
 import {
   extractConflictingJobReferences,
@@ -507,12 +513,39 @@ export async function manuallyMatchPrintfactoryJob(
 
   const { data: pfJob, error: pfError } = await adminClient
     .from("printfactory_jobs")
-    .select("source_file_path, job_name, source_file_name")
+    .select(
+      "source_file_path, job_name, source_file_name, candid_job_id, job_match_status"
+    )
     .eq("id", printfactoryJobId)
     .maybeSingle();
 
   if (pfError) {
     throw pfError;
+  }
+
+  const alreadyMatched =
+    Boolean(pfJob?.candid_job_id) &&
+    (pfJob?.job_match_status === "matched_manually" ||
+      pfJob?.job_match_status === "matched_automatically");
+
+  if (alreadyMatched) {
+    await addLinkedCandidJob(adminClient, {
+      printfactoryJobId,
+      candidJobId,
+      actorProfileId,
+    });
+
+    const { data: linkedRow, error: linkedError } = await adminClient
+      .from("printfactory_jobs")
+      .select("*")
+      .eq("id", printfactoryJobId)
+      .single();
+
+    if (linkedError) {
+      throw linkedError;
+    }
+
+    return linkedRow;
   }
 
   const now = new Date().toISOString();
@@ -540,6 +573,16 @@ export async function manuallyMatchPrintfactoryJob(
   if (error) {
     throw error;
   }
+
+  await upsertPrintfactoryCandidJobLink(adminClient, {
+    printfactoryJobId,
+    candidJobId,
+    actorProfileId,
+    linkType: "manual",
+    isPrimary: true,
+  });
+
+  await refreshJobProductionReadiness(adminClient, candidJobId, actorProfileId);
 
   await storeMappingHintsFromManualMatch(
     adminClient,
@@ -715,6 +758,62 @@ export async function ignorePrintfactoryJob(
       updated_at: now,
     })
     .eq("id", printfactoryJobId)
+    .select("*")
+    .single();
+
+  if (error) {
+    throw error;
+  }
+
+  return data;
+}
+
+export async function restoreIgnoredPrintfactoryJob(
+  adminClient: SupabaseClient,
+  printfactoryJobId: string
+) {
+  const { data: existing, error: loadError } = await adminClient
+    .from("printfactory_jobs")
+    .select("id, job_match_status, candid_job_id")
+    .eq("id", printfactoryJobId)
+    .maybeSingle();
+
+  if (loadError) {
+    throw loadError;
+  }
+
+  if (!existing) {
+    throw new Error("PrintFactory record not found.");
+  }
+
+  if (existing.job_match_status !== "ignored") {
+    throw new Error("Only ignored PrintFactory records can be restored.");
+  }
+
+  const now = new Date().toISOString();
+
+  const { count: linkCount, error: linkCountError } = await adminClient
+    .from("printfactory_job_candid_jobs")
+    .select("id", { count: "exact", head: true })
+    .eq("printfactory_job_id", printfactoryJobId);
+
+  const hasLinks =
+    Boolean(existing.candid_job_id) ||
+    (!linkCountError && (linkCount ?? 0) > 0);
+
+  const restoredStatus = hasLinks ? "matched_manually" : "unmatched";
+
+  const { data, error } = await adminClient
+    .from("printfactory_jobs")
+    .update({
+      job_match_status: restoredStatus,
+      ignored_at: null,
+      ignored_by_profile_id: null,
+      ignore_reason: null,
+      updated_at: now,
+    })
+    .eq("id", printfactoryJobId)
+    .eq("job_match_status", "ignored")
     .select("*")
     .single();
 

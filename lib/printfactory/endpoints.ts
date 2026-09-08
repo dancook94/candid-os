@@ -11,6 +11,12 @@ export const PRINTFACTORY_JOB_LIST_PATH = "/api/v2/job/list";
 /** GET — server/API status probe (not used to retrieve jobs). */
 export const PRINTFACTORY_SERVER_STATUS_PATH = "/api/v2";
 
+/** GET — full job ticket XML including Document/Location source paths. */
+export const PRINTFACTORY_JOB_DETAIL_PATH = "/api/v2/job";
+
+/** GET — low-resolution ripped artwork preview (page is 1-based; page 1 = first page). */
+export const PRINTFACTORY_JOB_THUMBNAIL_PATH = "/api/v2/job";
+
 /** Legacy paths that must never be used in production code. */
 export const FORBIDDEN_PRINTFACTORY_JOB_PATHS = [
   "/api/v1/jobs",
@@ -72,6 +78,42 @@ export function buildPrintfactoryJobListUrl(baseUrl: string): string {
 export function buildPrintfactoryServerStatusUrl(baseUrl: string): string {
   return new URL(
     PRINTFACTORY_SERVER_STATUS_PATH,
+    baseUrl.replace(/\/+$/, "") + "/"
+  ).toString();
+}
+
+export function buildPrintfactoryJobDetailUrl(
+  baseUrl: string,
+  jobGuid: string
+): string {
+  const trimmedGuid = jobGuid.trim();
+
+  if (!trimmedGuid) {
+    throw new Error("PrintFactory job detail requires a JobGUID.");
+  }
+
+  return new URL(
+    `${PRINTFACTORY_JOB_DETAIL_PATH}/${encodeURIComponent(trimmedGuid)}`,
+    baseUrl.replace(/\/+$/, "") + "/"
+  ).toString();
+}
+
+/** PrintFactory thumbnail pages are 1-based (page 1 = first page; page 0 returns 404). */
+export function buildPrintfactoryJobThumbnailUrl(
+  baseUrl: string,
+  jobGuid: string,
+  page = 1
+): string {
+  const trimmedGuid = jobGuid.trim();
+
+  if (!trimmedGuid) {
+    throw new Error("PrintFactory thumbnail requires a JobGUID.");
+  }
+
+  const pageNumber = Number.isFinite(page) && page >= 1 ? Math.floor(page) : 1;
+
+  return new URL(
+    `${PRINTFACTORY_JOB_THUMBNAIL_PATH}/${encodeURIComponent(trimmedGuid)}/thumbnail/${pageNumber}`,
     baseUrl.replace(/\/+$/, "") + "/"
   ).toString();
 }

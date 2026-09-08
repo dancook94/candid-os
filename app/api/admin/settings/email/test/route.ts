@@ -54,7 +54,7 @@ export async function POST(request: Request) {
       ok: true,
       status: result.status,
       message:
-        "Email delivery is disabled (EMAIL_MODE=disabled). No message was sent to Resend.",
+        "Email delivery is suppressed (CANDID_COMMUNICATION_MODE=disabled). No message was sent to Resend.",
       actualRecipient: result.actualRecipient,
       intendedRecipient: result.intendedRecipient,
       emailMode: getEmailMode(),
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
     ok: true,
     status: result.status,
     message: result.redirected
-      ? `Test email sent to ${result.actualRecipient} (redirected from ${result.intendedRecipient} by EMAIL_MODE=test).`
+      ? `Test email sent to ${result.actualRecipient} (redirected from ${result.intendedRecipient} by test communication mode).`
       : `Test email sent to ${result.actualRecipient}.`,
     providerMessageId: result.providerMessageId,
     actualRecipient: result.actualRecipient,

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { verifyApprovedCrmStaff } from "@/lib/crm-auth";
+import { isJobInvoiceExcluded, type JobBillingType } from "@/lib/jobs/billing-types";
 import {
   applyJobProductionBoardStageChange,
   isValidJobProductionBoardStage,
@@ -62,11 +63,16 @@ export async function POST(
     let commercialCloseout = null;
 
     if (newStage === "complete_job") {
-      commercialCloseout = await reconcileJobCommercialCloseout(
-        adminClient,
-        jobId,
-        auth.userId
-      );
+      const billingType = (result.job?.job_billing_type ??
+        null) as JobBillingType | null;
+
+      if (!isJobInvoiceExcluded(billingType)) {
+        commercialCloseout = await reconcileJobCommercialCloseout(
+          adminClient,
+          jobId,
+          auth.userId
+        );
+      }
     }
 
     return NextResponse.json({ ...result, commercialCloseout });
