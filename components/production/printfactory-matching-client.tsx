@@ -18,10 +18,15 @@ import type { ExceptionQueueTab } from "@/lib/printfactory/matching-queue";
 import { isPrintFactoryJobRipped } from "@/lib/printfactory/ripped";
 import type { PrintfactoryDataQueryError } from "@/lib/printfactory/schema-readiness";
 import { buildPrintfactoryThumbnailProxyPath } from "@/lib/printfactory/thumbnail";
+import {
+  formatLiveSyncHealthLabel,
+  type PrintfactorySyncHealth,
+} from "@/lib/printfactory/sync-health";
 
 type SyncResponsePayload = {
   ok?: boolean;
   partial?: boolean;
+  syncMode?: "live";
   error?: string;
   safeMessage?: string;
   failingStage?: string | null;
@@ -29,6 +34,12 @@ type SyncResponsePayload = {
   summaryMessage?: string;
   recordsReceived?: number;
   imported?: number;
+  refreshed?: number;
+  updated?: number;
+  windowCapped?: boolean;
+  hasMore?: boolean;
+  skipCursor?: number;
+  nextCursor?: number | null;
 };
 
 function formatSyncFailureMessage(payload: SyncResponsePayload): string {
@@ -279,6 +290,7 @@ type PrintfactoryMatchingClientProps = {
   allRecordsCount: number;
   operationalRecordsCount: number;
   companies: CompanyOption[];
+  syncHealth: PrintfactorySyncHealth;
 };
 
 function buildMatchingHref(options: {
@@ -327,6 +339,7 @@ export function PrintfactoryMatchingClient({
   allRecordsCount,
   operationalRecordsCount,
   companies,
+  syncHealth,
 }: PrintfactoryMatchingClientProps) {
   const router = useRouter();
   const [tab, setTab] = useState<ExceptionQueueTab>(initialTab);
@@ -338,7 +351,6 @@ export function PrintfactoryMatchingClient({
   const [filterHistorical, setFilterHistorical] = useState(includeHistorical);
   const [filterDateFrom, setFilterDateFrom] = useState(dateFrom ?? "");
   const [filterDateTo, setFilterDateTo] = useState(dateTo ?? "");
-  const [syncHistorical, setSyncHistorical] = useState(false);
   const connection = connectionStatus;
 
   const filteredRecords = useMemo(() => {
@@ -397,7 +409,7 @@ export function PrintfactoryMatchingClient({
       const response = await fetch("/api/admin/printfactory/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ includeHistorical: syncHistorical }),
+        body: JSON.stringify({}),
       });
       const payload = await parseSyncResponse(response);
 
@@ -543,15 +555,6 @@ export function PrintfactoryMatchingClient({
               )}
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  checked={syncHistorical}
-                  onChange={(event) => setSyncHistorical(event.target.checked)}
-                  className="h-4 w-4 rounded border-border"
-                />
-                Sync historical (debug)
-              </label>
               <Button
                 type="button"
                 onClick={() => void runSync()}
@@ -560,6 +563,29 @@ export function PrintfactoryMatchingClient({
                 {busyId === "sync" ? "Syncing…" : "Sync PrintFactory"}
               </Button>
             </div>
+          </div>
+
+          <div className="grid gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm">
+            <p
+              className={
+                syncHealth.liveDelayed || syncHealth.liveLastError
+                  ? "font-medium text-amber-900"
+                  : "font-medium text-emerald-800"
+              }
+            >
+              PrintFactory · {formatLiveSyncHealthLabel(syncHealth)}
+            </p>
+            {syncHealth.liveWindowCapped ? (
+              <p className="text-amber-900">
+                Live window was capped on the last run — recent jobs may remain queued until
+                the window is fully processed.
+              </p>
+            ) : null}
+            {syncHealth.syncLocked ? (
+              <p className="text-muted-foreground">
+                Sync lock active ({syncHealth.syncLockMode ?? "live"}).
+              </p>
+            ) : null}
           </div>
 
           <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-sm text-muted-foreground">

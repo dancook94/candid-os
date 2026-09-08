@@ -12,7 +12,10 @@ import {
   normalizeExceptionQueueTab,
   type ExceptionQueueTab,
 } from "@/lib/printfactory/matching-queue";
-import { loadPrintfactoryMatchingRecords } from "@/lib/printfactory/sync";
+import {
+  loadPrintfactoryMatchingRecords,
+  loadPrintfactorySyncHealth,
+} from "@/lib/printfactory/sync";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -51,6 +54,15 @@ export default async function PrintfactoryMatchingPage({
   const adminClient = createAdminClient();
   const connection = getPrintfactoryConnectionStatus();
 
+  const [matchingData, syncHealth] = await Promise.all([
+    loadPrintfactoryMatchingRecords(adminClient, tab, {
+      includeHistorical,
+      dateFrom,
+      dateTo,
+    }),
+    loadPrintfactorySyncHealth(adminClient),
+  ]);
+
   const {
     records,
     schemaMissing,
@@ -60,11 +72,7 @@ export default async function PrintfactoryMatchingPage({
     goLiveDate,
     allRecordsCount,
     operationalRecordsCount,
-  } = await loadPrintfactoryMatchingRecords(adminClient, tab, {
-    includeHistorical,
-    dateFrom,
-    dateTo,
-  });
+  } = matchingData;
 
   const { data: companies } = await supabase
     .from("companies")
@@ -114,6 +122,7 @@ export default async function PrintfactoryMatchingPage({
             id: company.id,
             companyName: company.company_name ?? "Unknown company",
           }))}
+          syncHealth={syncHealth}
         />
       </div>
     </AppShell>

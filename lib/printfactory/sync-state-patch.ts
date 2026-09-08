@@ -2,6 +2,7 @@ import type { PrintfactorySyncState } from "@/lib/printfactory/sync-state";
 
 export type PrintfactorySyncStatePatch = Partial<PrintfactorySyncState> & {
   lastError?: string | null;
+  liveLastError?: string | null;
 };
 
 export function buildPrintfactorySyncStateRow(
@@ -13,25 +14,29 @@ export function buildPrintfactorySyncStateRow(
     updated_at: now,
   };
 
-  if ("lastSuccessfulSyncAt" in update) {
-    row.last_successful_sync_at = update.lastSuccessfulSyncAt ?? null;
-  }
+  const assign = (
+    key: keyof PrintfactorySyncStatePatch,
+    column: string,
+    transform: (value: unknown) => unknown = (value) => value
+  ) => {
+    if (key in update) {
+      row[column] = transform(update[key]);
+    }
+  };
 
-  if ("lastAttemptedSyncAt" in update) {
-    row.last_attempted_sync_at = update.lastAttemptedSyncAt ?? now;
-  }
+  assign("lastSuccessfulSyncAt", "last_successful_sync_at", (v) => v ?? null);
+  assign("lastAttemptedSyncAt", "last_attempted_sync_at", (v) => v ?? null);
+  assign("lastSkipCursor", "last_skip_cursor", (v) => v ?? 0);
+  assign("lastRecordCount", "last_record_count", (v) => v ?? null);
+  assign("lastError", "last_error", (v) => v ?? null);
 
-  if ("lastSkipCursor" in update) {
-    row.last_skip_cursor = update.lastSkipCursor ?? 0;
-  }
+  assign("liveLastSuccessfulAt", "live_last_successful_at", (v) => v ?? null);
+  assign("liveLastAttemptedAt", "live_last_attempted_at", (v) => v ?? null);
+  assign("liveLastError", "live_last_error", (v) => v ?? null);
+  assign("liveWindowCapped", "live_window_capped", (v) => Boolean(v));
 
-  if ("lastRecordCount" in update) {
-    row.last_record_count = update.lastRecordCount ?? null;
-  }
-
-  if ("lastError" in update) {
-    row.last_error = update.lastError ?? null;
-  }
+  assign("syncLockedUntil", "sync_locked_until", (v) => v ?? null);
+  assign("syncLockMode", "sync_lock_mode", (v) => v ?? null);
 
   return row;
 }

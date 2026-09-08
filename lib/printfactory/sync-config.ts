@@ -6,6 +6,13 @@ export const PRINTFACTORY_SYNC_DEFAULTS = {
   incrementalOverlapMinutes: 5,
   upsertBatchSize: 100,
   matchBatchSize: 100,
+  /** Rolling lookback for live incremental sync (minutes). */
+  liveWindowMinutes: 60,
+  /** Overlap applied before the live window lower bound (minutes). */
+  liveOverlapMinutes: 10,
+  liveMaxRecordsPerSync: 100,
+  liveMaxPagesPerSync: 2,
+  livePageSize: 50,
 } as const;
 
 export type PrintfactorySyncLimits = {
@@ -14,6 +21,16 @@ export type PrintfactorySyncLimits = {
   maxPagesPerSync: number;
   pageSize: number;
   incrementalOverlapMinutes: number;
+  upsertBatchSize: number;
+  matchBatchSize: number;
+};
+
+export type PrintfactoryLiveSyncLimits = {
+  windowMinutes: number;
+  overlapMinutes: number;
+  maxRecordsPerSync: number;
+  maxPagesPerSync: number;
+  pageSize: number;
   upsertBatchSize: number;
   matchBatchSize: number;
 };
@@ -50,11 +67,53 @@ export function getPrintfactorySyncLimits(): PrintfactorySyncLimits {
   };
 }
 
+export function getPrintfactoryLiveSyncLimits(): PrintfactoryLiveSyncLimits {
+  return {
+    windowMinutes: readPositiveInt(
+      process.env.PRINTFACTORY_LIVE_SYNC_WINDOW_MINUTES,
+      PRINTFACTORY_SYNC_DEFAULTS.liveWindowMinutes
+    ),
+    overlapMinutes: readPositiveInt(
+      process.env.PRINTFACTORY_LIVE_SYNC_OVERLAP_MINUTES,
+      PRINTFACTORY_SYNC_DEFAULTS.liveOverlapMinutes
+    ),
+    maxRecordsPerSync: readPositiveInt(
+      process.env.PRINTFACTORY_LIVE_SYNC_MAX_RECORDS,
+      PRINTFACTORY_SYNC_DEFAULTS.liveMaxRecordsPerSync
+    ),
+    maxPagesPerSync: readPositiveInt(
+      process.env.PRINTFACTORY_LIVE_SYNC_MAX_PAGES,
+      PRINTFACTORY_SYNC_DEFAULTS.liveMaxPagesPerSync
+    ),
+    pageSize: readPositiveInt(
+      process.env.PRINTFACTORY_LIVE_SYNC_PAGE_SIZE,
+      PRINTFACTORY_SYNC_DEFAULTS.livePageSize
+    ),
+    upsertBatchSize: PRINTFACTORY_SYNC_DEFAULTS.upsertBatchSize,
+    matchBatchSize: PRINTFACTORY_SYNC_DEFAULTS.matchBatchSize,
+  };
+}
+
 import { clampSyncDateTimeFrom } from "@/lib/printfactory/matching-config";
 
 export type SyncWindowOptions = {
   includeHistorical?: boolean;
 };
+
+export function buildLiveSyncWindow(
+  limits: PrintfactoryLiveSyncLimits,
+  now = new Date(),
+  options?: SyncWindowOptions
+) {
+  const windowMs = limits.windowMinutes * 60 * 1000;
+  const overlapMs = limits.overlapMinutes * 60 * 1000;
+  const from = new Date(now.getTime() - windowMs - overlapMs);
+
+  return {
+    dateTimeFrom: clampSyncDateTimeFrom(from.toISOString(), options),
+    dateTimeTo: now.toISOString(),
+  };
+}
 
 export function buildInitialSyncWindow(
   limits: PrintfactorySyncLimits,
@@ -68,21 +127,5 @@ export function buildInitialSyncWindow(
   return {
     dateTimeFrom: clampSyncDateTimeFrom(dateTimeFrom.toISOString(), options),
     dateTimeTo,
-  };
-}
-
-export function buildIncrementalSyncWindow(
-  lastSuccessfulSyncAt: string,
-  limits: PrintfactorySyncLimits,
-  now = new Date(),
-  options?: SyncWindowOptions
-) {
-  const overlapMs = limits.incrementalOverlapMinutes * 60 * 1000;
-  const from = new Date(lastSuccessfulSyncAt);
-  from.setTime(from.getTime() - overlapMs);
-
-  return {
-    dateTimeFrom: clampSyncDateTimeFrom(from.toISOString(), options),
-    dateTimeTo: now.toISOString(),
   };
 }

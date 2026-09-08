@@ -6,16 +6,13 @@ import {
   logSyncFailure,
   normalizeSyncError,
 } from "@/lib/printfactory/sync-errors";
-import { syncPrintfactoryJobs } from "@/lib/printfactory/sync";
+import { syncLivePrintfactoryJobs } from "@/lib/printfactory/sync-live";
 import { getPrintfactoryConnectionStatus } from "@/lib/printfactory/client";
+import type { PrintfactorySyncResult } from "@/lib/printfactory/sync-engine";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
-type SyncRequestBody = {
-  includeHistorical?: boolean;
-};
-
-function syncHttpStatus(result: Awaited<ReturnType<typeof syncPrintfactoryJobs>>) {
+function syncHttpStatus(result: PrintfactorySyncResult) {
   if (result.ok) {
     return 200;
   }
@@ -30,6 +27,10 @@ function syncHttpStatus(result: Awaited<ReturnType<typeof syncPrintfactoryJobs>>
 
   if (result.errorCode === "migration_required") {
     return 503;
+  }
+
+  if (result.errorCode === "sync_locked") {
+    return 409;
   }
 
   return 502;
@@ -50,8 +51,10 @@ function buildUnhandledSyncFailureResponse(error: unknown) {
     {
       ok: false,
       partial: false,
+      syncMode: "live",
       imported: 0,
       updated: 0,
+      refreshed: 0,
       recordsReceived: 0,
       failingStage: null,
       error: normalized.safeMessage,
@@ -64,7 +67,9 @@ function buildUnhandledSyncFailureResponse(error: unknown) {
   );
 }
 
+/** Manual admin action — runs live incremental sync. */
 export async function POST(request: Request) {
+  void request;
   const supabase = await createClient();
   const auth = await verifyApprovedCrmAdmin(supabase);
 
@@ -72,20 +77,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: auth.message }, { status: auth.status });
   }
 
-  let includeHistorical = false;
-
-  try {
-    const body = (await request.json()) as SyncRequestBody;
-    includeHistorical = body.includeHistorical === true;
-  } catch {
-    includeHistorical = false;
-  }
-
   try {
     const adminClient = createAdminClient();
-    const result = await syncPrintfactoryJobs(adminClient, auth.userId, {
-      includeHistorical,
-    });
+    const result = await syncLivePrintfactoryJobs(adminClient, auth.userId);
 
     revalidatePath("/admin/production");
     revalidatePath("/admin/production/printfactory-unmatched");
