@@ -2,7 +2,6 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { downloadDropboxFile, getDropboxMetadata } from "@/lib/dropbox/client";
 import { resolveAiPreflightAvailability, isAiFileName } from "@/lib/proof-generator/analyse-ai";
-import { analyseImageBuffer } from "@/lib/proof-generator/analyse-image";
 import { analysePdfBuffer } from "@/lib/proof-generator/analyse-pdf";
 import {
   resolvePreflightAfterOperatorConfirmation,
@@ -419,7 +418,16 @@ async function buildPreflightForSourceArtwork(
             imageWidthPx: { value: null, confidence: "low" as const, source: "ai_scan" },
             imageHeightPx: { value: null, confidence: "low" as const, source: "ai_scan" },
           }
-        : await analyseImageBuffer(artwork.buffer, artwork.fileName, artwork.mimeType);
+        : await (async () => {
+            const { analyseImageBuffer } = await import(
+              "@/lib/proof-generator/analyse-image"
+            );
+            return analyseImageBuffer(
+              artwork.buffer,
+              artwork.fileName,
+              artwork.mimeType
+            );
+          })();
 
   logDiagnosticStage("13", "PDF box analysis completed", {
     proofId,
