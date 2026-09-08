@@ -49,6 +49,7 @@ function proofErrorResponse(error: unknown) {
   return jobErrorResponse(error);
 }
 
+export const runtime = "nodejs";
 export const maxDuration = 180;
 
 export async function POST(request: Request, context: RouteContext) {

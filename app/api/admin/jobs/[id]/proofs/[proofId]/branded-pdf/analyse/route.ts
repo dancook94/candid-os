@@ -10,6 +10,8 @@ import { createClient } from "@/lib/supabase/server";
 
 type RouteContext = { params: Promise<{ id: string; proofId: string }> };
 
+export const runtime = "nodejs";
+
 function proofErrorResponse(error: unknown) {
   if (error instanceof ProofError) {
     return NextResponse.json({ error: error.message }, { status: error.status });
