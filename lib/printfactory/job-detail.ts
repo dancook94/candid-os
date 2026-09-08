@@ -6,6 +6,11 @@ import {
   resolvePrintfactoryBaseUrl,
 } from "@/lib/printfactory/endpoints";
 import {
+  parseRippedOutputPageCountFromXml,
+  type RippedOutputPageCountResult,
+  type RippedOutputPageCountSource,
+} from "@/lib/printfactory/output-page-count";
+import {
   buildSourceLocationEntry,
   dedupeSourceLocations,
   isRipWorkingCopyPath,
@@ -19,6 +24,9 @@ export type PrintfactoryJobDetailResult = {
   errorMessage: string | null;
   locations: PrintfactorySourceLocation[];
   xmlLength: number | null;
+  rippedOutputPageCount: number | null;
+  rippedOutputPageNumbers: number[];
+  rippedOutputPageCountSource: RippedOutputPageCountSource | null;
 };
 
 const DETAIL_FETCH_TIMEOUT_MS = readPositiveInt(
@@ -130,6 +138,34 @@ export function parsePrintfactoryJobDetailXml(xml: string): PrintfactorySourceLo
   return dedupeSourceLocations(locations);
 }
 
+function emptyDetailOutputPageFields(): Pick<
+  PrintfactoryJobDetailResult,
+  "rippedOutputPageCount" | "rippedOutputPageNumbers" | "rippedOutputPageCountSource"
+> {
+  return {
+    rippedOutputPageCount: null,
+    rippedOutputPageNumbers: [],
+    rippedOutputPageCountSource: null,
+  };
+}
+
+function outputPageFieldsFromResult(
+  result: RippedOutputPageCountResult | null
+): Pick<
+  PrintfactoryJobDetailResult,
+  "rippedOutputPageCount" | "rippedOutputPageNumbers" | "rippedOutputPageCountSource"
+> {
+  if (!result) {
+    return emptyDetailOutputPageFields();
+  }
+
+  return {
+    rippedOutputPageCount: result.rippedOutputPageCount,
+    rippedOutputPageNumbers: result.rippedOutputPageNumbers,
+    rippedOutputPageCountSource: result.rippedOutputPageCountSource,
+  };
+}
+
 export async function fetchPrintfactoryJobDetail(
   jobGuid: string,
   token: string
@@ -163,6 +199,7 @@ export async function fetchPrintfactoryJobDetail(
       errorMessage: message,
       locations: [],
       xmlLength: null,
+      ...emptyDetailOutputPageFields(),
     };
   }
 
@@ -173,6 +210,7 @@ export async function fetchPrintfactoryJobDetail(
       errorMessage: "PrintFactory job detail not found.",
       locations: [],
       xmlLength: null,
+      ...emptyDetailOutputPageFields(),
     };
   }
 
@@ -193,10 +231,13 @@ export async function fetchPrintfactoryJobDetail(
       errorMessage: `PrintFactory job detail returned ${response.status}${preview ? `: ${preview}` : ""}`,
       locations: [],
       xmlLength: null,
+      ...emptyDetailOutputPageFields(),
     };
   }
 
   const xml = await response.text();
+  const outputPageResult = parseRippedOutputPageCountFromXml(xml);
+  const outputPageFields = outputPageFieldsFromResult(outputPageResult);
 
   try {
     const locations = parsePrintfactoryJobDetailXml(xml);
@@ -209,12 +250,25 @@ export async function fetchPrintfactoryJobDetail(
       });
     }
 
+    if (
+      process.env.NODE_ENV === "development" &&
+      outputPageResult?.rippedOutputPageCount
+    ) {
+      console.info("[printfactory] ripped-output-page-count", {
+        jobGuid,
+        count: outputPageResult.rippedOutputPageCount,
+        source: outputPageResult.rippedOutputPageCountSource,
+        pages: outputPageResult.rippedOutputPageNumbers,
+      });
+    }
+
     return {
       status: locations.length > 0 ? "found" : "missing",
       httpStatus: response.status,
       errorMessage: locations.length > 0 ? null : "No Document/Location in job detail XML.",
       locations,
       xmlLength: xml.length,
+      ...outputPageFields,
     };
   } catch (error) {
     const message =
@@ -230,6 +284,7 @@ export async function fetchPrintfactoryJobDetail(
       errorMessage: message,
       locations: [],
       xmlLength: xml.length,
+      ...outputPageFields,
     };
   }
 }

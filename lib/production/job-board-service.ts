@@ -68,6 +68,8 @@ export type JobProductionBoardCard = {
   preview_thumbnail_url: string | null;
   preview_thumbnail_alt: string | null;
   preview_is_shared_print: boolean;
+  preview_printfactory_job_guid: string | null;
+  preview_output_page_count: number;
 };
 
 export type ArchivedProductionBoardJob = {
@@ -391,6 +393,8 @@ export async function fetchJobProductionBoard(
         preview_thumbnail_alt:
           preview?.fileName ?? preview?.jobName ?? job.project_name ?? null,
         preview_is_shared_print: preview?.isSharedPrint ?? false,
+        preview_printfactory_job_guid: preview?.jobGuid ?? null,
+        preview_output_page_count: preview?.outputPageCount ?? 1,
         _items: items,
         _artwork_source: job.artwork_source as string,
       };

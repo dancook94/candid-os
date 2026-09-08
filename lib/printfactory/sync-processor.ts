@@ -25,6 +25,7 @@ type ExistingPrintfactoryRow = PrintfactoryExistingSourcePathRow & {
   source_file_name: string | null;
   job_name: string | null;
   document_name: string | null;
+  raw_metadata?: Record<string, unknown> | null;
 };
 
 function buildApiRow(
@@ -86,7 +87,7 @@ export async function loadExistingPrintfactoryRows(
     const { data, error } = await adminClient
       .from("printfactory_jobs")
       .select(
-        "id, printfactory_job_guid, candid_job_id, job_match_status, first_seen_at, source_file_path, normalized_source_path, source_path_status, source_locations, source_file_name, job_name, document_name, printfactory_status, updated_at_printfactory"
+        "id, printfactory_job_guid, candid_job_id, job_match_status, first_seen_at, source_file_path, normalized_source_path, source_path_status, source_locations, source_file_name, job_name, document_name, printfactory_status, updated_at_printfactory, raw_metadata"
       )
       .in("printfactory_job_guid", chunk);
 

@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Job>
+  <Pages>3</Pages>
+  <Statistics>
+    <Summary Number="0">
+      <Count>6</Count>
+      <Contents>
+        <Document GUID="doc-a" Page="0" TotalCopies="1" />
+        <Document GUID="doc-b" Page="0" TotalCopies="1" />
+        <Document GUID="doc-c" Page="0" TotalCopies="1" />
+        <Document GUID="doc-d" Page="0" TotalCopies="1" />
+        <Document GUID="doc-e" Page="0" TotalCopies="1" />
+        <Document GUID="doc-f" Page="0" TotalCopies="1" />
+      </Contents>
+    </Summary>
+    <Page Number="1" Side="A">
+      <Count>2</Count>
+    </Page>
+    <Page Number="2" Side="A">
+      <Count>2</Count>
+    </Page>
+    <Page Number="3" Side="A">
+      <Count>2</Count>
+    </Page>
+  </Statistics>
+  <Documents>
+    <Document GUID="doc-a" Name="input-a.pdf">
+      <Location>//server/path/input-a.pdf</Location>
+      <Pages><Page Number="0" Width="581" Height="581" /></Pages>
+    </Document>
+    <Document GUID="doc-b" Name="input-b.pdf">
+      <Location>//server/path/input-b.pdf</Location>
+      <Pages><Page Number="0" Width="581" Height="581" /></Pages>
+    </Document>
+    <Document GUID="doc-c" Name="input-c.pdf">
+      <Location>//server/path/input-c.pdf</Location>
+      <Pages><Page Number="0" Width="581" Height="581" /></Pages>
+    </Document>
+    <Document GUID="doc-d" Name="input-d.pdf">
+      <Location>//server/path/input-d.pdf</Location>
+      <Pages><Page Number="0" Width="581" Height="581" /></Pages>
+    </Document>
+    <Document GUID="doc-e" Name="input-e.pdf">
+      <Location>//server/path/input-e.pdf</Location>
+      <Pages><Page Number="0" Width="581" Height="581" /></Pages>
+    </Document>
+    <Document GUID="doc-f" Name="input-f.pdf">
+      <Location>//server/path/input-f.pdf</Location>
+      <Pages><Page Number="0" Width="581" Height="581" /></Pages>
+    </Document>
+  </Documents>
+</Job>

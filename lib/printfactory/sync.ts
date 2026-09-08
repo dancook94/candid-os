@@ -53,6 +53,7 @@ export async function loadPrintfactoryMatchingRecords(
     .from("printfactory_jobs")
     .select(`
     ${PRINTFACTORY_JOB_SELECT},
+    raw_metadata,
     is_multi_job_sheet,
     jobs:jobs!printfactory_jobs_candid_job_id_fkey(
       id, job_reference, project_name, company_id, companies(company_name)

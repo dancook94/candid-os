@@ -1,6 +1,11 @@
 import type { PrintfactoryApiJob } from "@/lib/printfactory/client";
 import { fetchPrintfactoryJobDetail } from "@/lib/printfactory/job-detail";
 import {
+  mergeRippedOutputPageCountIntoMetadata,
+  readRippedOutputPageCountFromMetadata,
+  type RippedOutputPageCountResult,
+} from "@/lib/printfactory/output-page-count";
+import {
   collectJobReferencesFromLocations,
   joinNormalizedLocations,
   pickPrimarySourceLocation,
@@ -15,6 +20,7 @@ export type PrintfactoryExistingSourcePathRow = {
   source_path_status: string | null;
   printfactory_status: string | null;
   updated_at_printfactory: string | null;
+  raw_metadata?: Record<string, unknown> | null;
 };
 
 export type PrintfactorySourcePathEnrichment = {
@@ -74,6 +80,10 @@ export function shouldFetchPrintfactoryJobDetail(
     return true;
   }
 
+  if (!readRippedOutputPageCountFromMetadata(existing.raw_metadata)) {
+    return true;
+  }
+
   return false;
 }
 
@@ -129,9 +139,18 @@ function buildEnrichmentFromDetail(
 
 function applyEnrichment(
   apiJob: PrintfactoryApiJob,
-  enrichment: PrintfactorySourcePathEnrichment
+  enrichment: PrintfactorySourcePathEnrichment,
+  detail?: Awaited<ReturnType<typeof fetchPrintfactoryJobDetail>>
 ): PrintfactoryApiJob {
   const joinedPaths = joinNormalizedLocations(enrichment.sourceLocations);
+  const outputPageResult: RippedOutputPageCountResult | null =
+    detail?.rippedOutputPageCount && detail.rippedOutputPageCountSource
+      ? {
+          rippedOutputPageCount: detail.rippedOutputPageCount,
+          rippedOutputPageNumbers: detail.rippedOutputPageNumbers,
+          rippedOutputPageCountSource: detail.rippedOutputPageCountSource,
+        }
+      : null;
 
   return {
     ...apiJob,
@@ -141,13 +160,16 @@ function applyEnrichment(
     normalizedSourcePath: enrichment.normalizedSourcePath,
     sourceLocations: enrichment.sourceLocations,
     sourcePathErrorMessage: enrichment.detailErrorMessage,
-    rawMetadata: {
-      ...(apiJob.rawMetadata ?? {}),
-      sourcePathStatus: enrichment.sourcePathStatus,
-      sourcePathErrorMessage: enrichment.detailErrorMessage,
-      sourceLocationCount: enrichment.sourceLocations.length,
-      sourcePathsForMatch: joinedPaths || enrichment.normalizedSourcePath,
-    },
+    rawMetadata: mergeRippedOutputPageCountIntoMetadata(
+      {
+        ...(apiJob.rawMetadata ?? {}),
+        sourcePathStatus: enrichment.sourcePathStatus,
+        sourcePathErrorMessage: enrichment.detailErrorMessage,
+        sourceLocationCount: enrichment.sourceLocations.length,
+        sourcePathsForMatch: joinedPaths || enrichment.normalizedSourcePath,
+      },
+      outputPageResult
+    ),
   };
 }
 
@@ -228,7 +250,8 @@ export async function enrichPrintfactoryJobsWithSourcePaths(
 
     return applyEnrichment(
       apiJob,
-      buildEnrichmentFromDetail(detail, apiJob, existing)
+      buildEnrichmentFromDetail(detail, apiJob, existing),
+      detail
     );
   });
 

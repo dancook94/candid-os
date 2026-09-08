@@ -12,12 +12,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatCrmDateTime } from "@/lib/crm/format-datetime";
 import type { JobBillingType } from "@/lib/jobs/billing-types";
 import { JOB_BILLING_TYPE_LABELS } from "@/lib/jobs/billing-types";
-import { PrintfactoryThumbnailImage } from "@/components/production/printfactory-thumbnail";
+import { PrintfactoryThumbnailStrip } from "@/components/production/printfactory-thumbnail-strip";
 import type { PrintfactoryConnectionStatus } from "@/lib/printfactory/client";
 import type { ExceptionQueueTab } from "@/lib/printfactory/matching-queue";
+import { resolveDisplayOutputPageCount } from "@/lib/printfactory/output-page-count";
 import { isPrintFactoryJobRipped } from "@/lib/printfactory/ripped";
 import type { PrintfactoryDataQueryError } from "@/lib/printfactory/schema-readiness";
-import { buildPrintfactoryThumbnailProxyPath } from "@/lib/printfactory/thumbnail";
 import {
   formatLiveSyncHealthLabel,
   type PrintfactorySyncHealth,
@@ -146,6 +146,7 @@ type MatchingRecord = {
     companies?: { company_name: string | null } | null;
   } | null;
   is_multi_job_sheet?: boolean | null;
+  raw_metadata?: Record<string, unknown> | null;
   printfactory_job_candid_jobs?: Array<{
     id: string;
     candid_job_id: string;
@@ -818,9 +819,15 @@ function PrintfactoryRecordCard({
     });
   }
 
-  const thumbnailUrl = isPrintFactoryJobRipped(record, { allowIgnored: true })
-    ? buildPrintfactoryThumbnailProxyPath(record.printfactory_job_guid)
-    : null;
+  const isRipped = isPrintFactoryJobRipped(record, { allowIgnored: true });
+  const outputPageCount = isRipped
+    ? resolveDisplayOutputPageCount(record.raw_metadata, 1)
+    : 0;
+  const previewAlt =
+    record.job_name ??
+    record.source_file_name ??
+    record.document_name ??
+    "PrintFactory preview";
 
   useEffect(() => {
     if (
@@ -896,7 +903,7 @@ function PrintfactoryRecordCard({
       </CardHeader>
       <CardContent
         className={`grid items-start gap-6 pt-6 ${
-          thumbnailUrl
+          isRipped
             ? "lg:grid-cols-[minmax(0,1.5fr)_220px_minmax(280px,0.9fr)]"
             : "lg:grid-cols-[minmax(0,1.5fr)_minmax(320px,1fr)]"
         }`}
@@ -983,19 +990,15 @@ function PrintfactoryRecordCard({
           ) : null}
         </div>
 
-        {thumbnailUrl ? (
+        {isRipped ? (
           <div className="mx-auto w-[220px] max-w-full shrink-0 justify-self-center lg:mx-0 lg:justify-self-auto">
-            <PrintfactoryThumbnailImage
-              src={thumbnailUrl}
-              alt={
-                record.job_name ??
-                record.source_file_name ??
-                record.document_name ??
-                "PrintFactory preview"
-              }
-              previewWidthClassName="w-[220px]"
-              maxHeightClassName="h-40 max-h-40"
-              enlargeable
+            <PrintfactoryThumbnailStrip
+              jobGuid={record.printfactory_job_guid}
+              outputPageCount={outputPageCount}
+              alt={previewAlt}
+              previewWidthClassName="w-[68px]"
+              maxHeightClassName="h-16 max-h-16"
+              showSheetCountLabel={outputPageCount > 1}
               showEnlargeHint
             />
           </div>

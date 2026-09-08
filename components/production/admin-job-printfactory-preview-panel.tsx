@@ -1,12 +1,13 @@
 import Link from "next/link";
 
-import { PrintfactoryThumbnailImage } from "@/components/production/printfactory-thumbnail";
+import { PrintfactoryThumbnailStrip } from "@/components/production/printfactory-thumbnail-strip";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PRINTFACTORY_JOB_DETAIL_INLINE_MAX } from "@/lib/printfactory/output-page-count";
 import type { JobPrintfactoryPreviewBundle } from "@/lib/printfactory/job-previews";
 
 type AdminJobPrintfactoryPreviewPanelProps = {
@@ -76,12 +77,15 @@ export function AdminJobPrintfactoryPreviewPanel({
                 Shared PrintFactory output · {preview.linkedJobCount} jobs
               </p>
             ) : null}
-            <PrintfactoryThumbnailImage
-              src={preview.thumbnailUrl}
+            <PrintfactoryThumbnailStrip
+              jobGuid={preview.jobGuid}
+              outputPageCount={preview.outputPageCount}
               alt={preview.fileName ?? preview.jobName ?? "PrintFactory preview"}
-              maxHeightClassName="max-h-48"
-              showUnavailableFallback
-              enlargeable
+              inlineMax={PRINTFACTORY_JOB_DETAIL_INLINE_MAX}
+              previewWidthClassName="w-[88px]"
+              maxHeightClassName="h-24 max-h-24"
+              showSheetCountLabel={preview.outputPageCount > 1}
+              showEnlargeHint
             />
             <div className="space-y-1 text-sm">
               <PreviewMeta label="PrintFactory job" value={preview.jobName} />

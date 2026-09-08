@@ -94,9 +94,9 @@ describe("production board mobile view", () => {
       "components/production/job-production-board-mobile-card.tsx"
     );
 
-    assert.match(mobileCardSource, /PrintfactoryThumbnailImage/);
+    assert.match(mobileCardSource, /ProductionBoardPrintfactoryPreview/);
     assert.match(mobileCardSource, /preview_thumbnail_url/);
-    assert.match(mobileCardSource, /preview_is_shared_print/);
+    assert.match(mobileCardSource, /preview_output_page_count/);
   });
 
   it("9. desktop sticky filters are desktop-only to avoid mobile overlap", async () => {

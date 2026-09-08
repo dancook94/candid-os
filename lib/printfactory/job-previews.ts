@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { isPrintFactoryJobRipped } from "@/lib/printfactory/ripped";
+import { resolveDisplayOutputPageCount } from "@/lib/printfactory/output-page-count";
 import { buildPrintfactoryThumbnailProxyPath } from "@/lib/printfactory/thumbnail";
 
 const MATCHED_JOB_STATUSES = ["matched_automatically", "matched_manually"] as const;
@@ -21,6 +22,7 @@ export type PrintfactoryJobPreviewRecord = {
   updated_at_printfactory: string | null;
   candid_job_id: string | null;
   is_multi_job_sheet?: boolean | null;
+  raw_metadata?: Record<string, unknown> | null;
 };
 
 export type PrintfactoryLinkedJobSummary = {
@@ -40,6 +42,7 @@ export type PrintfactoryJobPreview = {
   progress: number | null;
   isRipped: boolean;
   thumbnailUrl: string;
+  outputPageCount: number;
   lastSeenAt: string | null;
   isSharedPrint: boolean;
   linkedJobCount: number;
@@ -52,7 +55,7 @@ export type JobPrintfactoryPreviewBundle = {
 };
 
 const PREVIEW_SELECT =
-  "id, printfactory_job_guid, job_name, document_name, source_file_name, device, media_type, printfactory_status, progress, job_match_status, ignored_at, last_seen_at, updated_at_printfactory, candid_job_id, is_multi_job_sheet";
+  "id, printfactory_job_guid, job_name, document_name, source_file_name, device, media_type, printfactory_status, progress, job_match_status, ignored_at, last_seen_at, updated_at_printfactory, candid_job_id, is_multi_job_sheet, raw_metadata";
 
 function resolvePreviewTimestamp(record: PrintfactoryJobPreviewRecord) {
   return record.last_seen_at ?? record.updated_at_printfactory ?? "";
@@ -65,6 +68,9 @@ function toPreviewRecord(
 ): PrintfactoryJobPreview {
   const isRipped = isPrintFactoryJobRipped(row);
   const linkedJobCount = Math.max(linkSummaries.length, row.candid_job_id ? 1 : 0);
+  const outputPageCount = isRipped
+    ? resolveDisplayOutputPageCount(row.raw_metadata, 1)
+    : 1;
 
   return {
     id: row.id,
@@ -79,6 +85,7 @@ function toPreviewRecord(
     thumbnailUrl: isRipped
       ? buildPrintfactoryThumbnailProxyPath(row.printfactory_job_guid)
       : "",
+    outputPageCount,
     lastSeenAt: resolvePreviewTimestamp(row),
     isSharedPrint: linkedJobCount > 1 || Boolean(row.is_multi_job_sheet),
     linkedJobCount,

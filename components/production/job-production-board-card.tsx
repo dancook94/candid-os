@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { formatCrmDateTime } from "@/lib/crm/format-datetime";
 import { StatusBadge } from "@/components/status-badge";
-import { PrintfactoryThumbnailImage } from "@/components/production/printfactory-thumbnail";
+import { ProductionBoardPrintfactoryPreview } from "@/components/production/production-board-printfactory-preview";
 import type { JobProductionBoardCard } from "@/lib/production/job-board-service";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Clock, ExternalLink } from "lucide-react";
@@ -88,10 +88,11 @@ export function JobProductionBoardCardView({
               Shared print
             </p>
           ) : null}
-          <PrintfactoryThumbnailImage
-            src={card.preview_thumbnail_url}
+          <ProductionBoardPrintfactoryPreview
+            jobGuid={card.preview_printfactory_job_guid}
+            thumbnailUrl={card.preview_thumbnail_url}
             alt={card.preview_thumbnail_alt ?? card.job_reference}
-            maxHeightClassName="max-h-28"
+            outputPageCount={card.preview_output_page_count}
           />
         </div>
       ) : null}

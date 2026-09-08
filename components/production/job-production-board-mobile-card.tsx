@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { AlertTriangle, Clock } from "lucide-react";
 
-import { PrintfactoryThumbnailImage } from "@/components/production/printfactory-thumbnail";
+import { ProductionBoardPrintfactoryPreview } from "@/components/production/production-board-printfactory-preview";
 import { JOB_PRODUCTION_BOARD_STAGE_LABELS } from "@/lib/production/job-board-constants";
 import { resolveJobProductionBoardCardStage } from "@/lib/production/job-board-mobile";
 import type { JobProductionBoardCard } from "@/lib/production/job-board-service";
@@ -66,12 +66,13 @@ export function JobProductionBoardMobileCard({ card }: JobProductionBoardMobileC
                 Shared
               </p>
             ) : null}
-            <PrintfactoryThumbnailImage
-              src={card.preview_thumbnail_url}
+            <ProductionBoardPrintfactoryPreview
+              jobGuid={card.preview_printfactory_job_guid}
+              thumbnailUrl={card.preview_thumbnail_url}
               alt={card.preview_thumbnail_alt ?? card.job_reference}
+              outputPageCount={card.preview_output_page_count}
               maxHeightClassName="max-h-20"
-              previewWidthClassName="w-20"
-              frameClassName="min-h-20"
+              className="w-20"
             />
           </div>
         ) : null}

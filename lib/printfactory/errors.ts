@@ -8,6 +8,7 @@ export class PrintfactoryError extends Error {
     | "job_not_found"
     | "match_failed"
     | "sync_failed"
+    | "invalid_request"
     | "unknown";
 
   status: number;

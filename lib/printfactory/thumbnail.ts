@@ -1,11 +1,18 @@
 import { PrintfactoryError } from "@/lib/printfactory/errors";
 import {
+  PRINTFACTORY_THUMBNAIL_MAX_PAGE,
+} from "@/lib/printfactory/output-page-count";
+import {
   buildPrintfactoryJobThumbnailUrl,
   resolvePrintfactoryBaseUrl,
 } from "@/lib/printfactory/endpoints";
 
 /** PrintFactory Cloud uses 1-based thumbnail pages (verified: page 0 → 404, page 1 → image). */
 export const PRINTFACTORY_THUMBNAIL_DEFAULT_PAGE = 1;
+
+export type PrintfactoryThumbnailPageValidationResult =
+  | { ok: true; page: number }
+  | { ok: false; reason: "below_min" | "above_max" | "invalid" };
 
 export type PrintfactoryThumbnailFetchResult = {
   body: ArrayBuffer;
@@ -19,6 +26,33 @@ function resolveApiToken() {
     process.env.PRINTFACTORY_API_KEY?.trim() ||
     null
   );
+}
+
+export function validatePrintfactoryThumbnailPage(
+  value: string | number | null | undefined
+): PrintfactoryThumbnailPageValidationResult {
+  if (value == null || value === "") {
+    return { ok: true, page: PRINTFACTORY_THUMBNAIL_DEFAULT_PAGE };
+  }
+
+  const parsed =
+    typeof value === "number"
+      ? value
+      : Number.parseInt(String(value).trim(), 10);
+
+  if (!Number.isFinite(parsed)) {
+    return { ok: false, reason: "invalid" };
+  }
+
+  if (parsed < 1) {
+    return { ok: false, reason: "below_min" };
+  }
+
+  if (parsed > PRINTFACTORY_THUMBNAIL_MAX_PAGE) {
+    return { ok: false, reason: "above_max" };
+  }
+
+  return { ok: true, page: Math.floor(parsed) };
 }
 
 export function buildPrintfactoryThumbnailProxyPath(
@@ -43,6 +77,16 @@ export async function fetchPrintfactoryJobThumbnail(
   jobGuid: string,
   page = PRINTFACTORY_THUMBNAIL_DEFAULT_PAGE
 ): Promise<PrintfactoryThumbnailFetchResult | null> {
+  const validated = validatePrintfactoryThumbnailPage(page);
+
+  if (!validated.ok) {
+    throw new PrintfactoryError(
+      "PrintFactory thumbnail page is out of range.",
+      "invalid_request",
+      400
+    );
+  }
+
   const token = resolveApiToken();
 
   if (!token) {
@@ -56,7 +100,7 @@ export async function fetchPrintfactoryJobThumbnail(
   const url = buildPrintfactoryJobThumbnailUrl(
     resolvePrintfactoryBaseUrl(),
     jobGuid,
-    page
+    validated.page
   );
 
   let response: Response;
@@ -102,6 +146,6 @@ export async function fetchPrintfactoryJobThumbnail(
   return {
     body: await response.arrayBuffer(),
     contentType,
-    page,
+    page: validated.page,
   };
 }
