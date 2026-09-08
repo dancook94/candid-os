@@ -14,6 +14,7 @@ import {
   History,
   LogOut,
   Mail,
+  Megaphone,
   Package,
   Receipt,
   Settings,
@@ -39,6 +40,7 @@ type AppShellProps = {
   showStaffNav?: boolean;
   showCrmNav?: boolean;
   showGlobalSearch?: boolean;
+  updatesUnreadCount?: number;
   userName?: string;
   companyName?: string;
   companyLogoUrl?: string | null;
@@ -50,6 +52,13 @@ type NavLink = {
   href: string;
   label: string;
   icon: typeof Gauge;
+  badgeCount?: number;
+};
+
+const updatesLink: NavLink = {
+  href: "/updates",
+  label: "Updates",
+  icon: Megaphone,
 };
 
 const customerLinks: NavLink[] = [
@@ -68,6 +77,7 @@ const customerLinks: NavLink[] = [
     label: "Jobs",
     icon: Package,
   },
+  updatesLink,
   {
     href: "/settings",
     label: "Settings",
@@ -105,6 +115,17 @@ const adminLinks: NavLink[] = [
     href: "/admin/jobs",
     label: "Jobs",
     icon: Package,
+  },
+  updatesLink,
+  {
+    href: "/admin/updates",
+    label: "Manage updates",
+    icon: FileText,
+  },
+  {
+    href: "/admin/problem-reports",
+    label: "Problem reports",
+    icon: ClipboardList,
   },
   {
     href: "/admin/settings",
@@ -158,6 +179,7 @@ const staffLinks: NavLink[] = [
     label: "Workspace",
     icon: Gauge,
   },
+  updatesLink,
 ];
 
 function assertUniqueNavHrefs(links: NavLink[], context: string) {
@@ -186,6 +208,7 @@ export function AppShell({
   showStaffNav = false,
   showCrmNav = false,
   showGlobalSearch,
+  updatesUnreadCount = 0,
   userName,
   companyName,
   accountStatusSubtitle,
@@ -213,8 +236,14 @@ export function AppShell({
         ? [...staffLinks, ...(showCrmNav ? crmLinks : [])]
         : customerLinks;
 
+  const linksWithBadges = links.map((link) =>
+    link.href === "/updates" && updatesUnreadCount > 0
+      ? { ...link, badgeCount: updatesUnreadCount }
+      : link
+  );
+
   assertUniqueNavHrefs(
-    links,
+    linksWithBadges,
     userRole === "admin"
       ? "admin navigation"
       : userRole === "staff"
@@ -280,7 +309,7 @@ export function AppShell({
         ) : null}
 
         <nav className="flex-1 space-y-1 px-3 py-4">
-          {links.map((link) => {
+          {linksWithBadges.map((link) => {
             const Icon = link.icon;
 
             const isActive =
@@ -302,7 +331,14 @@ export function AppShell({
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                {link.label}
+                <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                  <span>{link.label}</span>
+                  {link.badgeCount ? (
+                    <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--candid-yellow)] px-1.5 py-0.5 text-[10px] font-semibold text-neutral-950">
+                      {link.badgeCount > 9 ? "9+" : link.badgeCount}
+                    </span>
+                  ) : null}
+                </span>
               </Link>
             );
           })}

@@ -6,6 +6,7 @@ import { loadCustomerCompanyBranding } from "@/lib/customer-company-branding";
 import { loadCustomerSettingsProfile } from "@/lib/customer-settings/queries";
 import { getCustomerPortalStatusSubtitle } from "@/lib/customer-portal-status";
 import { loadProfileAvatarSignedUrl } from "@/lib/staff-avatar-server";
+import { fetchUnreadProductUpdateCount } from "@/lib/updates/queries";
 
 export type CustomerPortalProfile = {
   full_name: string | null;
@@ -85,6 +86,9 @@ export async function buildCustomerAppShellProps(
     accountStatusSubtitle,
     companyName: companyBranding.companyName,
     companyLogoUrl: companyBranding.companyLogoUrl,
+    updatesUnreadCount: (
+      await fetchUnreadProductUpdateCount(supabase, user.id, "customer")
+    ).count,
     userAvatarUrl: await loadProfileAvatarSignedUrl(
       supabase,
       profile ?? { avatar_storage_path: null }

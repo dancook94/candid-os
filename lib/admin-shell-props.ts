@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { loadStaffAvatarSignedUrl } from "@/lib/staff-avatar-server";
 import { isAdminRole, isCrmRole, isSuperAdminRole } from "@/lib/staff-roles";
+import { fetchUnreadProductUpdateCount } from "@/lib/updates/queries";
 
 export type AdminShellProfile = {
   full_name: string | null;
@@ -11,6 +12,7 @@ export type AdminShellProfile = {
 
 type AppShellPropsOptions = {
   avatarSignedUrl?: string | null;
+  userId?: string;
 };
 
 async function resolveAvatarSignedUrl(
@@ -28,17 +30,44 @@ async function resolveAvatarSignedUrl(
   });
 }
 
+async function resolveUserId(
+  supabase: SupabaseClient,
+  userId?: string
+) {
+  if (userId) {
+    return userId;
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  return user?.id;
+}
+
 export async function buildAdminAppShellProps(
   supabase: SupabaseClient,
   profile: AdminShellProfile,
   options?: AppShellPropsOptions
 ) {
+  const resolvedUserId = await resolveUserId(supabase, options?.userId);
+  const updatesUnreadCount = resolvedUserId
+    ? (
+        await fetchUnreadProductUpdateCount(
+          supabase,
+          resolvedUserId,
+          profile.user_role
+        )
+      ).count
+    : 0;
+
   return {
     userRole: "admin" as const,
     showStaffNav: isSuperAdminRole(profile.user_role),
     showCrmNav: isAdminRole(profile.user_role),
     userName: profile.full_name || "Candid administrator",
     companyName: "Candid Creative",
+    updatesUnreadCount,
     userAvatarUrl: await resolveAvatarSignedUrl(
       supabase,
       profile,
@@ -52,10 +81,22 @@ export async function buildStaffAppShellProps(
   profile: AdminShellProfile,
   options?: AppShellPropsOptions
 ) {
+  const resolvedUserId = await resolveUserId(supabase, options?.userId);
+  const updatesUnreadCount = resolvedUserId
+    ? (
+        await fetchUnreadProductUpdateCount(
+          supabase,
+          resolvedUserId,
+          profile.user_role
+        )
+      ).count
+    : 0;
+
   return {
     userRole: "staff" as const,
     userName: profile.full_name || "Candid team member",
     companyName: "Candid Creative",
+    updatesUnreadCount,
     userAvatarUrl: await resolveAvatarSignedUrl(
       supabase,
       profile,
@@ -86,12 +127,24 @@ export async function buildCrmAppShellProps(
   }
 
   if (isCrmRole(profile.user_role)) {
+    const resolvedUserId = await resolveUserId(supabase, options?.userId);
+    const updatesUnreadCount = resolvedUserId
+      ? (
+          await fetchUnreadProductUpdateCount(
+            supabase,
+            resolvedUserId,
+            profile.user_role
+          )
+        ).count
+      : 0;
+
     return {
       userRole: "staff" as const,
       showStaffNav: false,
       showCrmNav: true,
       userName: profile.full_name || "Candid team member",
       companyName: "Candid Creative",
+      updatesUnreadCount,
       userAvatarUrl: await resolveAvatarSignedUrl(
         supabase,
         profile,
