@@ -279,8 +279,8 @@ export function AppShell({
       {userRole === "admin" || userRole === "staff" ? (
         <CommunicationModeBanner />
       ) : null}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[17.5rem] border-r border-border bg-card lg:flex lg:flex-col">
-        <div className="border-b border-border px-5 py-5">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden h-dvh max-h-dvh w-[17.5rem] flex-col overflow-hidden border-r border-border bg-card lg:flex">
+        <div className="shrink-0 border-b border-border px-5 py-5">
           <Link href={homeHref} className="group flex items-center gap-3">
             <Image
               src="/LOGO_YELLOW.svg"
@@ -303,12 +303,12 @@ export function AppShell({
         </div>
 
         {canShowGlobalSearch ? (
-          <div className="px-3 pb-3">
+          <div className="shrink-0 px-3 pb-3">
             <GlobalSearchTrigger onOpen={openSearch} />
           </div>
         ) : null}
 
-        <nav className="flex-1 space-y-1 px-3 py-4">
+        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-3 py-4">
           {linksWithBadges.map((link) => {
             const Icon = link.icon;
 
@@ -344,7 +344,7 @@ export function AppShell({
           })}
         </nav>
 
-        <div className="border-t border-border p-4">
+        <div className="shrink-0 border-t border-border p-4">
           <div className="mb-3 flex items-center gap-3 rounded-xl bg-muted/50 px-3 py-3">
             {profileHref ? (
               <Link href={profileHref} className="shrink-0">
