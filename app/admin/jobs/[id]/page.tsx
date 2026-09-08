@@ -271,6 +271,7 @@ export default async function AdminJobDetailPage({
                 id: file.id,
                 file_name: file.file_name,
                 upload_status: file.upload_status,
+                dropbox_path_lower: file.dropbox_path_lower,
               }))}
               initialRequirement={proofing.requirement}
               initialProofs={proofing.proofs}

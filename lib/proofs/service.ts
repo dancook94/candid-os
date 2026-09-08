@@ -21,6 +21,7 @@ import {
   type ProofFileRole,
   type ProofInternalChecklistKey,
 } from "@/lib/proofs/constants";
+import { findJobFileIdForDropboxPath } from "@/lib/proofs/customer-artwork-discovery";
 import { logProofActivity } from "@/lib/proofs/activity";
 import {
   fetchDropboxGeneratedProofMetadata,
@@ -69,6 +70,10 @@ import {
   logDropboxProofDebug,
   runDropboxProofOperation,
 } from "@/lib/proofs/dropbox-errors";
+import {
+  isProofSourceAttachExtension,
+  proofSourceAttachExtensionError,
+} from "@/lib/proofs/source-artwork-formats";
 import { syncJobProofWorkflowStatus } from "@/lib/proofs/gates";
 import { normalizeProofFileRole } from "@/lib/proofs/proof-files";
 import {
@@ -1531,41 +1536,91 @@ async function resolveAttachProofFileMetadata(
   }
 
   if (input.source === "customer_artwork") {
-    if (!input.sourceJobFileId) {
+    if (input.sourceJobFileId) {
+      const { data: jobFile, error } = await adminClient
+        .from("job_files")
+        .select("*")
+        .eq("id", input.sourceJobFileId)
+        .eq("job_id", job.id)
+        .is("deleted_at", null)
+        .maybeSingle();
+
+      if (error || !jobFile) {
+        throw new ProofError("Source artwork file not found.", 404);
+      }
+
+      if (jobFile.upload_status !== "complete" || !jobFile.dropbox_path_lower) {
+        throw new ProofError("Source artwork file is not ready.", 409);
+      }
+
+      assertDropboxPathInJobSubfolder(
+        jobFile.dropbox_path_lower as string,
+        job.dropbox_folder_path,
+        CUSTOMER_UPLOAD_SUBFOLDER
+      );
+
+      const fileName = jobFile.file_name as string;
+      if (!isProofSourceAttachExtension(fileName)) {
+        throw new ProofError(proofSourceAttachExtensionError(fileName) ?? "Unsupported file type.", 400);
+      }
+
+      return {
+        jobFileId: jobFile.id as string,
+        dropboxFileId: jobFile.dropbox_file_id as string | null,
+        dropboxPath: normalizeDropboxApiPath(jobFile.dropbox_path_lower as string),
+        dropboxRevision: jobFile.dropbox_revision as string | null,
+        fileName,
+        mimeType: jobFile.mime_type as string | null,
+        fileSizeBytes: Number(jobFile.file_size_bytes ?? 0),
+        contentHash: jobFile.content_hash as string | null,
+      };
+    }
+
+    const dropboxSourcePath = input.dropboxSourcePath?.trim();
+    if (!dropboxSourcePath) {
       throw new ProofError("Select a customer artwork file.", 400);
     }
 
-    const { data: jobFile, error } = await adminClient
-      .from("job_files")
-      .select("*")
-      .eq("id", input.sourceJobFileId)
-      .eq("job_id", job.id)
-      .is("deleted_at", null)
-      .maybeSingle();
-
-    if (error || !jobFile) {
-      throw new ProofError("Source artwork file not found.", 404);
-    }
-
-    if (jobFile.upload_status !== "complete" || !jobFile.dropbox_path_lower) {
-      throw new ProofError("Source artwork file is not ready.", 409);
-    }
-
     assertDropboxPathInJobSubfolder(
-      jobFile.dropbox_path_lower as string,
+      dropboxSourcePath,
       job.dropbox_folder_path,
       CUSTOMER_UPLOAD_SUBFOLDER
     );
 
+    const metadata = await resolveDropboxFileMetadata(dropboxSourcePath);
+
+    if (!isProofSourceAttachExtension(metadata.name)) {
+      throw new ProofError(
+        proofSourceAttachExtensionError(metadata.name) ?? "Unsupported file type.",
+        400
+      );
+    }
+
+    const { data: jobFiles } = await adminClient
+      .from("job_files")
+      .select("id, file_name, upload_status, dropbox_path_lower")
+      .eq("job_id", job.id)
+      .is("deleted_at", null);
+
+    const matchedJobFileId = findJobFileIdForDropboxPath(
+      metadata.path_lower ?? metadata.path_display,
+      (jobFiles ?? []) as Array<{
+        id: string;
+        file_name: string;
+        upload_status: string;
+        dropbox_path_lower?: string | null;
+      }>
+    );
+
     return {
-      jobFileId: jobFile.id as string,
-      dropboxFileId: jobFile.dropbox_file_id as string | null,
-      dropboxPath: normalizeDropboxApiPath(jobFile.dropbox_path_lower as string),
-      dropboxRevision: jobFile.dropbox_revision as string | null,
-      fileName: jobFile.file_name as string,
-      mimeType: jobFile.mime_type as string | null,
-      fileSizeBytes: Number(jobFile.file_size_bytes ?? 0),
-      contentHash: jobFile.content_hash as string | null,
+      jobFileId: matchedJobFileId,
+      dropboxFileId: metadata.id,
+      dropboxPath: normalizeDropboxApiPath(metadata.path_lower ?? metadata.path_display),
+      dropboxRevision: metadata.rev,
+      fileName: metadata.name,
+      mimeType: null,
+      fileSizeBytes: metadata.size,
+      contentHash: metadata.content_hash ?? null,
     };
   }
 
@@ -1586,6 +1641,13 @@ async function resolveAttachProofFileMetadata(
   );
 
   const metadata = await resolveDropboxFileMetadata(dropboxSourcePath);
+
+  if (input.source === "working_file" && !isProofSourceAttachExtension(metadata.name)) {
+    throw new ProofError(
+      proofSourceAttachExtensionError(metadata.name) ?? "Unsupported file type.",
+      400
+    );
+  }
 
   return {
     jobFileId: null,

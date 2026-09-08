@@ -182,24 +182,33 @@ export function AdminJobProofsPanel({
     setError(null);
     setPending(true);
 
-    const response = await fetch(`/api/admin/jobs/${jobId}/proof-requirement`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        proofRequired: nextRequired,
-        bypassReason: nextRequired ? undefined : bypassReason,
-      }),
-    });
+    try {
+      const response = await fetch(`/api/admin/jobs/${jobId}/proof-requirement`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          proofRequired: nextRequired,
+          bypassReason: nextRequired ? undefined : bypassReason,
+        }),
+      });
 
-    const payload = (await response.json()) as { error?: string };
-    setPending(false);
+      const payload = (await response.json()) as { error?: string };
 
-    if (!response.ok) {
-      setError(payload.error ?? "Unable to update proof requirement.");
-      return;
+      if (!response.ok) {
+        setError(payload.error ?? "Unable to update proof requirement.");
+        return;
+      }
+
+      await refreshProofs();
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Unable to update proof requirement."
+      );
+    } finally {
+      setPending(false);
     }
-
-    await refreshProofs();
   }
 
   async function loadDropboxFiles(origin: ProofArtworkOrigin) {
@@ -233,33 +242,44 @@ export function AdminJobProofsPanel({
     setError(null);
     setPending(true);
 
-    const response = await fetch(`/api/admin/jobs/${jobId}/proofs/${sourceProofId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "create_revised_proof" }),
-    });
-
-    const payload = (await response.json()) as { error?: string; proofId?: string; message?: string | null };
-    setPending(false);
-
-    if (!response.ok) {
-      setError(payload.error ?? "Unable to create revised proof.");
-      return;
-    }
-
-    if (payload.message) {
-      setError(null);
-    }
-
-    await refreshProofs();
-
-    if (payload.proofId) {
-      setFocusedProofId(payload.proofId);
-      window.requestAnimationFrame(() => {
-        document
-          .getElementById(`proof-${payload.proofId}`)
-          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    try {
+      const response = await fetch(`/api/admin/jobs/${jobId}/proofs/${sourceProofId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "create_revised_proof" }),
       });
+
+      const payload = (await response.json()) as {
+        error?: string;
+        proofId?: string;
+        message?: string | null;
+      };
+
+      if (!response.ok) {
+        setError(payload.error ?? "Unable to create revised proof.");
+        return;
+      }
+
+      if (payload.message) {
+        setError(null);
+      }
+
+      await refreshProofs();
+
+      if (payload.proofId) {
+        setFocusedProofId(payload.proofId);
+        window.requestAnimationFrame(() => {
+          document
+            .getElementById(`proof-${payload.proofId}`)
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+      }
+    } catch (error) {
+      setError(
+        error instanceof Error ? error.message : "Unable to create revised proof."
+      );
+    } finally {
+      setPending(false);
     }
   }
 
@@ -297,21 +317,28 @@ export function AdminJobProofsPanel({
     setError(null);
     setPending(true);
 
-    const response = await fetch(`/api/admin/jobs/${jobId}/proofs/${proofId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "discard_draft_revision" }),
-    });
+    try {
+      const response = await fetch(`/api/admin/jobs/${jobId}/proofs/${proofId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "discard_draft_revision" }),
+      });
 
-    const payload = (await response.json()) as { error?: string };
-    setPending(false);
+      const payload = (await response.json()) as { error?: string };
 
-    if (!response.ok) {
-      setError(payload.error ?? "Unable to discard draft revision.");
-      return;
+      if (!response.ok) {
+        setError(payload.error ?? "Unable to discard draft revision.");
+        return;
+      }
+
+      await refreshProofs();
+    } catch (error) {
+      setError(
+        error instanceof Error ? error.message : "Unable to discard draft revision."
+      );
+    } finally {
+      setPending(false);
     }
-
-    await refreshProofs();
   }
 
   async function confirmDiscardDraftRevision() {
@@ -471,37 +498,42 @@ export function AdminJobProofsPanel({
     setError(null);
     setPending(true);
 
-    const response = await fetch(`/api/admin/jobs/${jobId}/proofs`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title,
-        artworkOrigin,
-        customerMessage,
-        internalNote,
-        productionItemIds: selectedItemIds,
-        sourceJobFileId: sourceJobFileId || undefined,
-        dropboxSourcePath: dropboxSourcePath || undefined,
-        dropboxFileName: dropboxFiles.find((file) => file.path === dropboxSourcePath)?.name,
-      }),
-    });
+    try {
+      const response = await fetch(`/api/admin/jobs/${jobId}/proofs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          artworkOrigin,
+          customerMessage,
+          internalNote,
+          productionItemIds: selectedItemIds,
+          sourceJobFileId: sourceJobFileId || undefined,
+          dropboxSourcePath: dropboxSourcePath || undefined,
+          dropboxFileName: dropboxFiles.find((file) => file.path === dropboxSourcePath)?.name,
+        }),
+      });
 
-    const payload = (await response.json()) as { error?: string };
-    setPending(false);
+      const payload = (await response.json()) as { error?: string };
 
-    if (!response.ok) {
-      setError(payload.error ?? "Unable to create proof.");
-      return;
+      if (!response.ok) {
+        setError(payload.error ?? "Unable to create proof.");
+        return;
+      }
+
+      setShowCreate(false);
+      setTitle("");
+      setCustomerMessage("");
+      setInternalNote("");
+      setSelectedItemIds([]);
+      setSourceJobFileId("");
+      setDropboxSourcePath("");
+      await refreshProofs();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to create proof.");
+    } finally {
+      setPending(false);
     }
-
-    setShowCreate(false);
-    setTitle("");
-    setCustomerMessage("");
-    setInternalNote("");
-    setSelectedItemIds([]);
-    setSourceJobFileId("");
-    setDropboxSourcePath("");
-    await refreshProofs();
   }
 
   async function refreshAfterProofAction() {
@@ -513,21 +545,26 @@ export function AdminJobProofsPanel({
     setError(null);
     setPending(true);
 
-    const response = await fetch(`/api/admin/jobs/${jobId}/proofs/${proofId}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, ...extra }),
-    });
+    try {
+      const response = await fetch(`/api/admin/jobs/${jobId}/proofs/${proofId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...extra }),
+      });
 
-    const payload = (await response.json()) as { error?: string };
-    setPending(false);
+      const payload = (await response.json()) as { error?: string };
 
-    if (!response.ok) {
-      setError(payload.error ?? "Proof action failed.");
-      return;
+      if (!response.ok) {
+        setError(payload.error ?? "Proof action failed.");
+        return;
+      }
+
+      await refreshAfterProofAction();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Proof action failed.");
+    } finally {
+      setPending(false);
     }
-
-    await refreshAfterProofAction();
   }
 
   if (schemaMissing) {
