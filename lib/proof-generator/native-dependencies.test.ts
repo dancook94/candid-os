@@ -126,8 +126,10 @@ describe("proof generator native dependency packaging", () => {
     );
     assert.match(nextConfig, /\.\/public\/LOGO_YELLOW\.svg/);
 
-    assert.match(nextConfig, /serverExternalPackages:\s*\[[^\]]*"sharp"/);
+    assert.doesNotMatch(nextConfig, /serverExternalPackages:\s*\[[^\]]*"sharp"/);
+    assert.match(nextConfig, /serverExternalPackages:\s*\[[^\]]*"pdfkit"/);
     assert.match(nextConfig, /serverExternalPackages:\s*\[[^\]]*"@napi-rs\/canvas"/);
+    assert.match(nextConfig, /serverExternalPackages:\s*\[[^\]]*"pdfjs-dist"/);
 
     assert.match(nextConfig, /\/api\/admin\/quotes\/\[id\]\/pdf/);
     assert.match(nextConfig, /\/api\/quotes\/\[id\]\/pdf/);

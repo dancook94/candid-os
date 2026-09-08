@@ -19,7 +19,7 @@ const proofGeneratorTracingIncludes = [
 ];
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["pdfkit", "sharp", "@napi-rs/canvas", "pdfjs-dist"],
+  serverExternalPackages: ["pdfkit", "@napi-rs/canvas", "pdfjs-dist"],
   outputFileTracingIncludes: {
     "/api/admin/quotes/[id]/pdf": quotePdfTracingIncludes,
     "/api/quotes/[id]/pdf": quotePdfTracingIncludes,
