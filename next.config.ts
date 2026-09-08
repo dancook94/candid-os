@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const quotePdfTracingIncludes = [
   "./node_modules/pdfkit/js/data/**",
-  "./public/LOGO_YELLOW.svg",
+  "./public/LOGO_YELLOW.png",
 ];
 
 const nextConfig: NextConfig = {

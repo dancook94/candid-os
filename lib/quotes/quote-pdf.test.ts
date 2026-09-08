@@ -20,6 +20,7 @@ async function readRepoFile(relativePath: string) {
 describe("quote PDF download", () => {
   it("1. professional PDF generator remains wired to shared response helper", async () => {
     const shared = await readRepoFile("lib/quotes/quote-pdf-response.ts");
+    const generator = await readRepoFile("lib/generate-customer-quote-pdf.ts");
     const customerRoute = await readRepoFile("app/api/quotes/[id]/pdf/route.ts");
     const adminRoute = await readRepoFile("app/api/admin/quotes/[id]/pdf/route.ts");
     const nextConfig = await readRepoFile("next.config.ts");
@@ -27,11 +28,14 @@ describe("quote PDF download", () => {
     assert.match(shared, /import\(\s*"@\/lib\/generate-customer-quote-pdf"\s*\)/);
     assert.match(shared, /generateCustomerQuotePdf/);
     assert.match(shared, /Content-Type": "application\/pdf"/);
+    assert.match(generator, /LOGO_YELLOW\.png/);
+    assert.doesNotMatch(generator, /import sharp from "sharp"/);
     assert.match(customerRoute, /createQuotePdfResponse/);
     assert.match(adminRoute, /createQuotePdfResponse/);
     assert.match(adminRoute, /verifyApprovedCrmStaff/);
     assert.match(nextConfig, /outputFileTracingIncludes/);
     assert.match(nextConfig, /node_modules\/pdfkit\/js\/data\/\*\*/);
+    assert.match(nextConfig, /LOGO_YELLOW\.png/);
   });
 
   it("admin and customer PDF routes force Node runtime", async () => {

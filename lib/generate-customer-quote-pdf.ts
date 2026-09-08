@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 
 import PDFDocument from "pdfkit";
-import sharp from "sharp";
 
 import type {
   CustomerFormalQuoteData,
@@ -42,9 +41,8 @@ function formatDate(dateString: string) {
 }
 
 async function loadLogoBuffer() {
-  const logoPath = path.join(process.cwd(), "public", "LOGO_YELLOW.svg");
-  const svg = await fs.readFile(logoPath);
-  return sharp(svg).png().resize({ width: 300 }).toBuffer();
+  const logoPath = path.join(process.cwd(), "public", "LOGO_YELLOW.png");
+  return fs.readFile(logoPath);
 }
 
 async function loadImageBuffer(url: string) {
@@ -55,12 +53,7 @@ async function loadImageBuffer(url: string) {
       return null;
     }
 
-    const input = Buffer.from(await response.arrayBuffer());
-    return sharp(input)
-      .rotate()
-      .resize({ width: 220, height: 220, fit: "inside" })
-      .png()
-      .toBuffer();
+    return Buffer.from(await response.arrayBuffer());
   } catch {
     return null;
   }
