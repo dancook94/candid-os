@@ -19,6 +19,66 @@ import { isPrintFactoryJobRipped } from "@/lib/printfactory/ripped";
 import type { PrintfactoryDataQueryError } from "@/lib/printfactory/schema-readiness";
 import { buildPrintfactoryThumbnailProxyPath } from "@/lib/printfactory/thumbnail";
 
+type SyncResponsePayload = {
+  ok?: boolean;
+  partial?: boolean;
+  error?: string;
+  safeMessage?: string;
+  failingStage?: string | null;
+  errorCode?: string | null;
+  summaryMessage?: string;
+  recordsReceived?: number;
+  imported?: number;
+};
+
+function formatSyncFailureMessage(payload: SyncResponsePayload): string {
+  const parts: string[] = [];
+  const detail = payload.safeMessage ?? payload.error;
+
+  if (detail?.trim()) {
+    parts.push(detail.trim());
+  }
+
+  if (payload.failingStage) {
+    parts.push(`Stage: ${payload.failingStage.replace(/_/g, " ")}`);
+  }
+
+  if (payload.errorCode && payload.errorCode !== "sync_failed") {
+    parts.push(`Code: ${payload.errorCode}`);
+  }
+
+  if (
+    typeof payload.recordsReceived === "number" &&
+    payload.recordsReceived > 0
+  ) {
+    parts.push(`Records received: ${payload.recordsReceived}`);
+  }
+
+  if (typeof payload.imported === "number" && payload.imported > 0) {
+    parts.push(`Imported before failure: ${payload.imported}`);
+  }
+
+  return parts.length > 0 ? parts.join(" · ") : "Sync failed.";
+}
+
+async function parseSyncResponse(response: Response): Promise<SyncResponsePayload> {
+  const rawText = await response.text();
+
+  if (!rawText.trim()) {
+    throw new Error(
+      `Sync failed (${response.status}): server returned an empty response body.`
+    );
+  }
+
+  try {
+    return JSON.parse(rawText) as SyncResponsePayload;
+  } catch {
+    throw new Error(
+      `Sync failed (${response.status}): server returned a non-JSON response.`
+    );
+  }
+}
+
 type CompanyOption = {
   id: string;
   companyName: string;
@@ -339,19 +399,18 @@ export function PrintfactoryMatchingClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ includeHistorical: syncHistorical }),
       });
-      const payload = (await response.json()) as {
-        ok?: boolean;
-        partial?: boolean;
-        error?: string;
-        summaryMessage?: string;
-      };
+      const payload = await parseSyncResponse(response);
 
       if (!response.ok && !payload.partial) {
-        throw new Error(payload.error ?? "Sync failed.");
+        throw new Error(formatSyncFailureMessage(payload));
+      }
+
+      if (!payload.ok && payload.error && !payload.partial) {
+        throw new Error(formatSyncFailureMessage(payload));
       }
 
       if (payload.partial && payload.error) {
-        setSyncError(payload.error);
+        setSyncError(formatSyncFailureMessage(payload));
       }
 
       setSyncMessage(payload.summaryMessage ?? "Sync completed.");

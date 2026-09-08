@@ -43,6 +43,10 @@ import {
   savePrintfactorySyncState,
 } from "@/lib/printfactory/sync-state";
 import {
+  logSyncFailure,
+  normalizeSyncError,
+} from "@/lib/printfactory/sync-errors";
+import {
   createSyncStageTimer,
   logSyncErrorDev,
   type SyncStageName,
@@ -84,6 +88,7 @@ export type PrintfactorySyncResult = {
   itemSuggestionsCreated: number;
   error: string | null;
   errorCode: string | null;
+  safeMessage: string | null;
   connectionStatus: ReturnType<typeof getPrintfactoryConnectionStatus>;
   summaryMessage: string | null;
 };
@@ -212,6 +217,7 @@ export async function syncPrintfactoryJobs(
     itemSuggestionsCreated: 0,
     error: null,
     errorCode: null,
+    safeMessage: null,
     connectionStatus,
     summaryMessage: null,
     ...partial,
@@ -231,6 +237,7 @@ export async function syncPrintfactoryJobs(
   let nextCursor: number | null = null;
   let failingStage: SyncStageName | null = null;
   let currentStage: SyncStageName = "api_request";
+  let dateWindow: { dateTimeFrom: string; dateTimeTo: string } | null = null;
 
   const finish = (
     partial: Partial<PrintfactorySyncResult>
@@ -272,8 +279,11 @@ export async function syncPrintfactoryJobs(
   };
 
   if (!connectionStatus.configured) {
+    const message = `PrintFactory is not configured. Missing: ${connectionStatus.missing.join(", ")}`;
+
     return finish({
-      error: `PrintFactory is not configured. Missing: ${connectionStatus.missing.join(", ")}`,
+      error: message,
+      safeMessage: message,
       errorCode: "not_configured",
     });
   }
@@ -283,6 +293,7 @@ export async function syncPrintfactoryJobs(
   if (!schemaReadiness.ready) {
     return finish({
       error: schemaReadiness.message,
+      safeMessage: schemaReadiness.message,
       errorCode: "migration_required",
     });
   }
@@ -295,7 +306,7 @@ export async function syncPrintfactoryJobs(
     !syncState.lastSuccessfulSyncAt;
   const syncWindowOptions = { includeHistorical };
 
-  const dateWindow = syncState.lastSuccessfulSyncAt
+  const resolvedDateWindow = syncState.lastSuccessfulSyncAt
     ? buildIncrementalSyncWindow(
         syncState.lastSuccessfulSyncAt,
         limits,
@@ -303,11 +314,95 @@ export async function syncPrintfactoryJobs(
         syncWindowOptions
       )
     : buildInitialSyncWindow(limits, new Date(), syncWindowOptions);
+  dateWindow = resolvedDateWindow;
 
   await savePrintfactorySyncState(adminClient, {
     lastAttemptedSyncAt: attemptedAt,
     lastError: null,
   });
+
+  const recordSyncFailure = async (
+    error: unknown,
+    stage: SyncStageName | null
+  ): Promise<PrintfactorySyncResult> => {
+    failingStage = stage;
+    logSyncErrorDev(failingStage, error);
+
+    const normalized = normalizeSyncError(error);
+    logSyncFailure({
+      failingStage,
+      error,
+      recordsReceived,
+      imported,
+      updated,
+      syncWindowDateTimeFrom: dateWindow?.dateTimeFrom ?? null,
+      syncWindowDateTimeTo: dateWindow?.dateTimeTo ?? null,
+      printfactoryResponseStatus: normalized.printfactoryResponseStatus,
+    });
+
+    const partialSuccess = imported + updated > 0;
+    const committedMessage = partialSuccess
+      ? `Imported ${imported + updated} PrintFactory jobs, but ${failingStage?.replace(/_/g, " ")} failed. Imported records were retained.`
+      : normalized.safeMessage;
+
+    try {
+      await savePrintfactorySyncState(adminClient, {
+        lastAttemptedSyncAt: attemptedAt,
+        lastSkipCursor: hasMore
+          ? (nextCursor ?? syncState.lastSkipCursor)
+          : syncState.lastSkipCursor,
+        lastRecordCount: recordsReceived > 0 ? recordsReceived : null,
+        lastError: normalized.safeMessage,
+      });
+    } catch (stateError) {
+      logSyncFailure({
+        failingStage: "sync_state_update",
+        error: stateError,
+        recordsReceived,
+        imported,
+        updated,
+        syncWindowDateTimeFrom: dateWindow?.dateTimeFrom ?? null,
+        syncWindowDateTimeTo: dateWindow?.dateTimeTo ?? null,
+      });
+    }
+
+    if (error instanceof PrintfactoryError) {
+      return finish({
+        ok: partialSuccess,
+        partial: partialSuccess,
+        failingStage,
+        error: committedMessage,
+        safeMessage: normalized.safeMessage,
+        errorCode: error.code,
+        summaryMessage: partialSuccess ? committedMessage : null,
+      });
+    }
+
+    const schemaReadinessAfter = await checkPrintfactorySchemaReadiness(adminClient);
+
+    if (!schemaReadinessAfter.ready) {
+      const schemaMessage =
+        schemaReadinessAfter.message ?? "PrintFactory matching schema is not ready.";
+
+      return finish({
+        partial: partialSuccess,
+        failingStage,
+        error: schemaMessage,
+        safeMessage: schemaMessage,
+        errorCode: "migration_required",
+      });
+    }
+
+    return finish({
+      ok: partialSuccess,
+      partial: partialSuccess,
+      failingStage,
+      error: committedMessage,
+      safeMessage: normalized.safeMessage,
+      errorCode: normalized.errorCode,
+      summaryMessage: partialSuccess ? committedMessage : null,
+    });
+  };
 
   try {
     timer.start("api_request");
@@ -316,8 +411,8 @@ export async function syncPrintfactoryJobs(
 
     const fetchResult = await fetchPrintfactoryJobsBounded({
       skip: continuingBackfill ? syncState.lastSkipCursor : 0,
-      dateTimeFrom: dateWindow.dateTimeFrom,
-      dateTimeTo: dateWindow.dateTimeTo,
+      dateTimeFrom: resolvedDateWindow.dateTimeFrom,
+      dateTimeTo: resolvedDateWindow.dateTimeTo,
       maxRecords: limits.maxRecordsPerSync,
       maxPages: limits.maxPagesPerSync,
       pageSize: limits.pageSize,
@@ -525,63 +620,10 @@ export async function syncPrintfactoryJobs(
       summaryMessage,
       error: null,
       errorCode: null,
+      safeMessage: null,
     });
   } catch (error) {
-    failingStage = currentStage;
-    logSyncErrorDev(failingStage, error);
-
-    const safeMessage =
-      error instanceof PrintfactoryError
-        ? error.message
-        : error instanceof Error
-          ? error.message
-          : "PrintFactory sync failed.";
-
-    const partialSuccess = imported + updated > 0;
-    const committedMessage = partialSuccess
-      ? `Imported ${imported + updated} PrintFactory jobs, but ${failingStage?.replace(/_/g, " ")} failed. Imported records were retained.`
-      : safeMessage;
-
-    await savePrintfactorySyncState(adminClient, {
-      lastAttemptedSyncAt: attemptedAt,
-      lastSkipCursor: hasMore ? (nextCursor ?? syncState.lastSkipCursor) : syncState.lastSkipCursor,
-      lastRecordCount: recordsReceived || null,
-      lastError: safeMessage,
-      ...(partialSuccess && !hasMore
-        ? { lastSuccessfulSyncAt: syncState.lastSuccessfulSyncAt }
-        : {}),
-    });
-
-    if (error instanceof PrintfactoryError) {
-      return finish({
-        ok: partialSuccess,
-        partial: partialSuccess,
-        failingStage,
-        error: committedMessage,
-        errorCode: error.code,
-        summaryMessage: partialSuccess ? committedMessage : null,
-      });
-    }
-
-    const schemaReadinessAfter = await checkPrintfactorySchemaReadiness(adminClient);
-
-    if (!schemaReadinessAfter.ready) {
-      return finish({
-        partial: partialSuccess,
-        failingStage,
-        error: schemaReadinessAfter.message ?? "PrintFactory matching schema is not ready.",
-        errorCode: "migration_required",
-      });
-    }
-
-    return finish({
-      ok: partialSuccess,
-      partial: partialSuccess,
-      failingStage,
-      error: committedMessage,
-      errorCode: "sync_failed",
-      summaryMessage: partialSuccess ? committedMessage : null,
-    });
+    return recordSyncFailure(error, currentStage);
   }
 }
 

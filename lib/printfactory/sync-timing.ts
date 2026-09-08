@@ -8,6 +8,7 @@ export type SyncStageName =
   | "parent_job_matching"
   | "item_suggestions"
   | "activity_logging"
+  | "sync_state_update"
   | "total";
 
 export type SyncStageTiming = {
@@ -93,7 +94,7 @@ function serializeSyncErrorField(value: unknown): unknown {
   }
 }
 
-/** Dev-only: log the full sync failure payload (PostgREST errors are plain objects). */
+/** @deprecated Prefer logSyncFailure from sync-errors.ts (logs in all environments). */
 export function logSyncErrorDev(
   failingStage: SyncStageName | null,
   error: unknown

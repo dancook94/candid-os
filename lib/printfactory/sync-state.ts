@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  buildPrintfactorySyncStateRow,
+  type PrintfactorySyncStatePatch,
+} from "@/lib/printfactory/sync-state-patch";
+
 export type PrintfactorySyncState = {
   lastSuccessfulSyncAt: string | null;
   lastAttemptedSyncAt: string | null;
@@ -54,18 +59,9 @@ function emptySyncState(): PrintfactorySyncState {
 
 export async function savePrintfactorySyncState(
   adminClient: SupabaseClient,
-  update: Partial<PrintfactorySyncState> & { lastError?: string | null }
+  update: PrintfactorySyncStatePatch
 ) {
-  const now = new Date().toISOString();
-  const row = {
-    singleton_key: SINGLETON_KEY,
-    last_successful_sync_at: update.lastSuccessfulSyncAt,
-    last_attempted_sync_at: update.lastAttemptedSyncAt ?? now,
-    last_skip_cursor: update.lastSkipCursor ?? 0,
-    last_record_count: update.lastRecordCount ?? null,
-    last_error: update.lastError ?? null,
-    updated_at: now,
-  };
+  const row = buildPrintfactorySyncStateRow(update);
 
   const { error } = await adminClient
     .from("printfactory_sync_state")
