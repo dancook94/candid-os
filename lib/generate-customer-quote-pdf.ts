@@ -18,10 +18,21 @@ const CANDID_YELLOW = "#fbd12c";
 const PAGE_WIDTH = 595.28;
 const PAGE_HEIGHT = 841.89;
 const PAGE_MARGIN = 45;
-const FOOTER_TEXT_Y = PAGE_HEIGHT - PAGE_MARGIN - 40;
+const FOOTER_TEXT_Y = PAGE_HEIGHT - PAGE_MARGIN - 34;
 const FOOTER_LINE_Y = FOOTER_TEXT_Y - 8;
 const CONTENT_WIDTH = PAGE_WIDTH - PAGE_MARGIN * 2;
-const CONTENT_BOTTOM = FOOTER_LINE_Y - 10;
+const CONTENT_BOTTOM = FOOTER_LINE_Y - 6;
+
+const TERMS_MAIN_HEADING_SIZE = 12;
+const TERMS_SECTION_TITLE_SIZE = 10;
+const TERMS_SUBSECTION_TITLE_SIZE = 9;
+const TERMS_BODY_FONT_SIZE = 9;
+const TERMS_BODY_LINE_GAP = 1;
+const TERMS_MAIN_HEADING_AFTER = 6;
+const TERMS_SECTION_TITLE_AFTER = 3;
+const TERMS_SUBSECTION_TITLE_AFTER = 2;
+const TERMS_PARAGRAPH_AFTER = 3;
+const TERMS_SECTION_AFTER = 2;
 
 type Cursor = { y: number };
 
@@ -141,19 +152,86 @@ function drawBodyText(
   doc: PDFKit.PDFDocument,
   text: string,
   cursor: Cursor,
-  options?: { fontSize?: number; width?: number }
+  options?: {
+    fontSize?: number;
+    width?: number;
+    lineGap?: number;
+    paragraphAfter?: number;
+  }
 ) {
   const fontSize = options?.fontSize ?? 9.5;
   const width = options?.width ?? CONTENT_WIDTH;
-  const blockHeight = textHeight(doc, text, width, fontSize) + 6;
+  const lineGap = options?.lineGap ?? 2;
+  const paragraphAfter = options?.paragraphAfter ?? 6;
+  const blockHeight = textHeight(doc, text, width, fontSize, "Helvetica", lineGap) + paragraphAfter;
 
   ensureSpace(doc, blockHeight, cursor);
   doc
     .font("Helvetica")
     .fontSize(fontSize)
     .fillColor("#525252")
-    .text(text, PAGE_MARGIN, cursor.y, { width, lineGap: 2 });
-  cursor.y = doc.y + 6;
+    .text(text, PAGE_MARGIN, cursor.y, { width, lineGap });
+  cursor.y = doc.y + paragraphAfter;
+}
+
+function measureTermsBlockHeight(
+  doc: PDFKit.PDFDocument,
+  title: string,
+  titleFontSize: number,
+  titleAfter: number,
+  firstParagraph?: string
+) {
+  let height = textHeight(doc, title, CONTENT_WIDTH, titleFontSize, "Helvetica-Bold") + titleAfter;
+
+  if (firstParagraph) {
+    height +=
+      textHeight(
+        doc,
+        firstParagraph,
+        CONTENT_WIDTH,
+        TERMS_BODY_FONT_SIZE,
+        "Helvetica",
+        TERMS_BODY_LINE_GAP
+      ) + TERMS_PARAGRAPH_AFTER;
+  }
+
+  return height;
+}
+
+function drawTermsMainHeading(doc: PDFKit.PDFDocument, cursor: Cursor) {
+  ensureSpace(doc, 22, cursor);
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(TERMS_MAIN_HEADING_SIZE)
+    .fillColor("#1e1e1c")
+    .text("Terms & Conditions", PAGE_MARGIN, cursor.y, { width: CONTENT_WIDTH });
+  cursor.y = doc.y + TERMS_MAIN_HEADING_AFTER;
+}
+
+function drawTermsSectionTitle(doc: PDFKit.PDFDocument, title: string, cursor: Cursor) {
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(TERMS_SECTION_TITLE_SIZE)
+    .fillColor("#1e1e1c")
+    .text(title, PAGE_MARGIN, cursor.y, { width: CONTENT_WIDTH });
+  cursor.y = doc.y + TERMS_SECTION_TITLE_AFTER;
+}
+
+function drawTermsSubsectionTitle(doc: PDFKit.PDFDocument, title: string, cursor: Cursor) {
+  doc
+    .font("Helvetica-Bold")
+    .fontSize(TERMS_SUBSECTION_TITLE_SIZE)
+    .fillColor("#262626")
+    .text(title, PAGE_MARGIN, cursor.y, { width: CONTENT_WIDTH });
+  cursor.y = doc.y + TERMS_SUBSECTION_TITLE_AFTER;
+}
+
+function drawTermsBodyText(doc: PDFKit.PDFDocument, text: string, cursor: Cursor) {
+  drawBodyText(doc, text, cursor, {
+    fontSize: TERMS_BODY_FONT_SIZE,
+    lineGap: TERMS_BODY_LINE_GAP,
+    paragraphAfter: TERMS_PARAGRAPH_AFTER,
+  });
 }
 
 function measureSummaryCard(
@@ -610,52 +688,44 @@ export async function generateCustomerQuotePdf(quote: CustomerFormalQuotePdfInpu
   }
 
   addPage(doc, cursor);
-  drawSectionHeading(doc, "Terms & Conditions", cursor);
+  drawTermsMainHeading(doc, cursor);
 
   for (const section of CUSTOMER_QUOTE_TERMS_SECTIONS) {
     const firstParagraph = section.paragraphs?.[0] ?? section.subsections?.[0]?.paragraphs[0];
-    const headingBlockHeight =
-      18 +
-      (firstParagraph
-        ? textHeight(doc, firstParagraph, CONTENT_WIDTH, 9.5) + 8
-        : 0);
+    const headingBlockHeight = measureTermsBlockHeight(
+      doc,
+      section.title,
+      TERMS_SECTION_TITLE_SIZE,
+      TERMS_SECTION_TITLE_AFTER,
+      firstParagraph
+    );
 
     ensureSpace(doc, headingBlockHeight, cursor);
-
-    doc
-      .font("Helvetica-Bold")
-      .fontSize(10.5)
-      .fillColor("#1e1e1c")
-      .text(section.title, PAGE_MARGIN, cursor.y, { width: CONTENT_WIDTH });
-    cursor.y = doc.y + 6;
+    drawTermsSectionTitle(doc, section.title, cursor);
 
     for (const paragraph of section.paragraphs ?? []) {
-      drawBodyText(doc, paragraph, cursor, { fontSize: 9.5 });
+      drawTermsBodyText(doc, paragraph, cursor);
     }
 
     for (const subsection of section.subsections ?? []) {
       const firstSubParagraph = subsection.paragraphs[0];
-      const subsectionBlockHeight =
-        16 +
-        (firstSubParagraph
-          ? textHeight(doc, firstSubParagraph, CONTENT_WIDTH, 9.5) + 6
-          : 0);
+      const subsectionBlockHeight = measureTermsBlockHeight(
+        doc,
+        subsection.title,
+        TERMS_SUBSECTION_TITLE_SIZE,
+        TERMS_SUBSECTION_TITLE_AFTER,
+        firstSubParagraph
+      );
 
       ensureSpace(doc, subsectionBlockHeight, cursor);
-
-      doc
-        .font("Helvetica-Bold")
-        .fontSize(9.5)
-        .fillColor("#262626")
-        .text(subsection.title, PAGE_MARGIN, cursor.y, { width: CONTENT_WIDTH });
-      cursor.y = doc.y + 4;
+      drawTermsSubsectionTitle(doc, subsection.title, cursor);
 
       for (const paragraph of subsection.paragraphs) {
-        drawBodyText(doc, paragraph, cursor, { fontSize: 9.5 });
+        drawTermsBodyText(doc, paragraph, cursor);
       }
     }
 
-    cursor.y += 4;
+    cursor.y += TERMS_SECTION_AFTER;
   }
 
   drawFooters(doc);
