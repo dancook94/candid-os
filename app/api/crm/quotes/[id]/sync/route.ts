@@ -6,9 +6,7 @@ import {
   syncOpportunityFromQuoteEvent,
   type QuoteOpportunitySyncEvent,
 } from "@/lib/crm/opportunity-stage-sync";
-import { notifyQuoteReadySafe } from "@/lib/notifications/triggers";
 import { revalidateQuoteWorkflowRoutes } from "@/lib/quote-route-revalidation";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 type SyncBody = {
@@ -73,35 +71,6 @@ export async function POST(
     quoteId,
     quoteRequestId: quoteLink?.quote_request_id ?? null,
   });
-
-  if (body.event === "quote_sent" && result.ok) {
-    const adminClient = createAdminClient();
-    const [{ data: version }, { data: quote }] = await Promise.all([
-      adminClient
-        .from("quote_versions")
-        .select("id")
-        .eq("quote_id", quoteId)
-        .eq("version_status", "sent")
-        .order("version_number", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
-      adminClient
-        .from("quotes")
-        .select("contact_id")
-        .eq("id", quoteId)
-        .maybeSingle(),
-    ]);
-
-    const quoteReadyNotification = await notifyQuoteReadySafe(adminClient, {
-      quoteId,
-      versionId: version?.id ?? null,
-      contactId: quote?.contact_id ?? null,
-    });
-
-    if (process.env.NODE_ENV === "development") {
-      console.info("[quote_sent] quote_ready notification", quoteReadyNotification);
-    }
-  }
 
   return NextResponse.json(result);
 }

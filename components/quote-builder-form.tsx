@@ -442,6 +442,11 @@ export function QuoteBuilderForm({
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const [warning, setWarning] = useState("");
+  const [failedNotificationId, setFailedNotificationId] = useState<string | null>(
+    null
+  );
+  const [isRetryingEmail, setIsRetryingEmail] = useState(false);
   const [focusTitleClientKey, setFocusTitleClientKey] = useState<string | null>(
     null
   );
@@ -648,22 +653,29 @@ export function QuoteBuilderForm({
     await supabase.from("quotes").delete().eq("id", quoteIdToRemove);
   }
 
-  async function persistQuote(targetStatus: "draft" | "sent") {
+  async function persistQuote(
+    targetStatus: "draft",
+    options?: { silent?: boolean }
+  ): Promise<boolean> {
     if (isReadOnly) {
-      return;
+      return false;
     }
 
-    setError("");
-    setSuccess("");
+    if (!options?.silent) {
+      setError("");
+      setSuccess("");
+      setWarning("");
+      setFailedNotificationId(null);
+    }
 
     if (!companyId) {
       setError("Company is required.");
-      return;
+      return false;
     }
 
     if (!contactId) {
       setError("Contact is required.");
-      return;
+      return false;
     }
 
     const validateResponse = await fetch("/api/crm/quotes/validate", {
@@ -681,14 +693,14 @@ export function QuoteBuilderForm({
 
     if (!validateResponse.ok) {
       setError(validatePayload.error ?? "Contact validation failed.");
-      return;
+      return false;
     }
 
     const trimmedProjectName = projectName.trim();
 
     if (!trimmedProjectName) {
       setError("Project name is required.");
-      return;
+      return false;
     }
 
     const parsedPaymentTerms = parsePaymentTermsDays(paymentTermsDays);
@@ -697,7 +709,7 @@ export function QuoteBuilderForm({
       setError(
         `Payment terms must be a whole number between ${PAYMENT_TERMS_MIN_DAYS} and ${PAYMENT_TERMS_MAX_DAYS} days.`
       );
-      return;
+      return false;
     }
 
     for (const item of lineItems) {
@@ -710,15 +722,13 @@ export function QuoteBuilderForm({
 
       if (hasContent && !item.title.trim()) {
         setError("Each line item must have a title.");
-        return;
+        return false;
       }
     }
 
     const activeItems = totals.parsedItems.filter((item) => item.title.trim());
 
-    if (targetStatus === "sent") {
-      setIsSending(true);
-    } else {
+    if (!options?.silent) {
       setIsSaving(true);
     }
 
@@ -735,7 +745,7 @@ export function QuoteBuilderForm({
       }
 
       const versionFields = {
-        version_status: targetStatus,
+        version_status: "draft" as const,
         expiry_date: expiryDate || null,
         payment_terms_days: parsedPaymentTerms,
         introduction: introduction.trim() || null,
@@ -745,18 +755,11 @@ export function QuoteBuilderForm({
         vat_rate: vatRate,
         vat_amount: totals.vatAmount,
         total: totals.total,
-        ...(targetStatus === "sent"
-          ? { sent_at: new Date().toISOString() }
-          : {}),
       };
 
       const itemsPayload = buildItemsPayload(activeItems);
 
       if (mode === "create") {
-        if (targetStatus !== "draft") {
-          throw new Error("Save the quote as a draft before sending.");
-        }
-
         const nextQuoteNumber = await getNextQuoteNumber();
 
         let linkedOpportunityId = opportunityId || null;
@@ -890,7 +893,7 @@ export function QuoteBuilderForm({
 
         router.push(`/admin/quotes/${createdQuote.id}`);
         router.refresh();
-        return;
+        return true;
       }
 
       if (!quoteId || !selectedQuoteVersionId) {
@@ -899,19 +902,6 @@ export function QuoteBuilderForm({
 
       if (versionStatus !== "draft") {
         throw new Error("Only draft versions can be saved.");
-      }
-
-      if (targetStatus === "sent") {
-        const { error: supersedeError } = await supabase
-          .from("quote_versions")
-          .update({ version_status: "superseded" })
-          .eq("quote_id", quoteId)
-          .eq("version_status", "sent")
-          .neq("id", selectedQuoteVersionId);
-
-        if (supersedeError) {
-          throw supersedeError;
-        }
       }
 
       const { data: existingItems, error: existingItemsError } = await supabase
@@ -927,28 +917,6 @@ export function QuoteBuilderForm({
         .map((item) => item.image_storage_path)
         .filter((path): path is string => Boolean(path));
 
-      if (targetStatus === "sent") {
-        if (!selectedQuoteVersionId || selectedVersionNumber === undefined) {
-          throw new Error("Quote version is missing. Save a draft version before sending.");
-        }
-
-        const { data: currentVersionRow, error: currentVersionError } =
-          await supabase
-            .from("quote_versions")
-            .select("id, version_number")
-            .eq("quote_id", quoteId)
-            .eq("version_number", selectedVersionNumber)
-            .maybeSingle();
-
-        if (currentVersionError) {
-          throw currentVersionError;
-        }
-
-        if (!currentVersionRow) {
-          throw new Error("This quote has no current version and cannot be sent.");
-        }
-      }
-
       const { error: quoteUpdateError } = await supabase
         .from("quotes")
         .update({
@@ -957,10 +925,6 @@ export function QuoteBuilderForm({
           quote_request_id: resolvedQuoteRequestId,
           opportunity_id: opportunityId || null,
           project_name: trimmedProjectName,
-          status: targetStatus,
-          ...(targetStatus === "sent" && selectedVersionNumber !== undefined
-            ? { current_version: selectedVersionNumber }
-            : {}),
           updated_at: new Date().toISOString(),
         })
         .eq("id", quoteId);
@@ -1023,25 +987,8 @@ export function QuoteBuilderForm({
         );
       }
 
-      if (targetStatus === "sent") {
-        setSuccess("Quote sent successfully.");
-      } else {
+      if (!options?.silent) {
         setSuccess("Draft saved successfully.");
-      }
-
-      if (targetStatus === "sent" && resolvedQuoteRequestId) {
-        const { error: requestUpdateError } = await supabase
-          .from("quote_requests")
-          .update({ request_status: "quoted" })
-          .eq("id", resolvedQuoteRequestId);
-
-        if (requestUpdateError) {
-          throw requestUpdateError;
-        }
-      }
-
-      if (targetStatus === "sent" && opportunityId) {
-        await syncQuoteOpportunityStage(quoteId, "quote_sent");
       }
 
       await revalidateQuoteWorkflowRoutes({
@@ -1049,22 +996,138 @@ export function QuoteBuilderForm({
         quoteRequestId: resolvedQuoteRequestId,
       });
 
-      router.refresh();
+      if (!options?.silent) {
+        router.refresh();
+      }
+
+      return true;
     } catch (saveError) {
       setError(formatSaveError(saveError));
+      return false;
     } finally {
-      setIsSaving(false);
+      if (!options?.silent) {
+        setIsSaving(false);
+      }
+    }
+  }
+
+  type SendQuoteApiResponse = {
+    ok?: boolean;
+    quoteSent?: boolean;
+    emailSent?: boolean;
+    emailError?: string | null;
+    communicationMode?: string;
+    email?: {
+      notificationId?: string | null;
+      redirected?: boolean;
+      intendedRecipient?: string | null;
+      actualRecipient?: string | null;
+    };
+    error?: string;
+  };
+
+  async function handleSendQuote() {
+    if (isReadOnly || mode !== "edit" || !quoteId || !selectedQuoteVersionId) {
+      return;
+    }
+
+    setError("");
+    setSuccess("");
+    setWarning("");
+    setFailedNotificationId(null);
+    setIsSending(true);
+
+    try {
+      const saved = await persistQuote("draft", { silent: true });
+
+      if (!saved) {
+        return;
+      }
+
+      const response = await fetch(`/api/admin/quotes/${quoteId}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ versionId: selectedQuoteVersionId }),
+      });
+
+      const payload = (await response.json()) as SendQuoteApiResponse;
+
+      if (!response.ok || !payload.ok || !payload.quoteSent) {
+        setError(payload.error ?? payload.emailError ?? "Unable to send quote.");
+        return;
+      }
+
+      if (payload.emailSent) {
+        let message = "Quote sent successfully.";
+
+        if (
+          payload.communicationMode === "test" &&
+          payload.email?.redirected
+        ) {
+          message +=
+            " Test mode redirected the customer email to the configured test recipient.";
+        }
+
+        setSuccess(message);
+      } else {
+        setWarning(
+          payload.emailError ??
+            "Quote was marked as sent, but the email could not be delivered."
+        );
+        setFailedNotificationId(payload.email?.notificationId ?? null);
+      }
+
+      router.refresh();
+    } catch (sendError) {
+      setError(formatSaveError(sendError));
+    } finally {
       setIsSending(false);
+    }
+  }
+
+  async function handleRetryQuoteEmail() {
+    if (!failedNotificationId) {
+      return;
+    }
+
+    setIsRetryingEmail(true);
+
+    try {
+      const response = await fetch(
+        `/api/admin/notifications/${failedNotificationId}/retry`,
+        { method: "POST" }
+      );
+      const payload = (await response.json()) as {
+        ok?: boolean;
+        error?: string;
+        status?: string;
+      };
+
+      if (!response.ok || !payload.ok || payload.status !== "sent") {
+        setWarning(
+          payload.error ??
+            "Quote was marked as sent, but the email could not be delivered."
+        );
+        return;
+      }
+
+      setWarning("");
+      setSuccess("Quote email sent successfully.");
+      setFailedNotificationId(null);
+    } catch (retryError) {
+      setWarning(
+        retryError instanceof Error
+          ? retryError.message
+          : "Quote was marked as sent, but the email could not be delivered."
+      );
+    } finally {
+      setIsRetryingEmail(false);
     }
   }
 
   async function handleSaveDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await persistQuote("draft");
-  }
-
-  async function handleSendQuote() {
-    await persistQuote("sent");
   }
 
   return (
@@ -1358,6 +1421,25 @@ export function QuoteBuilderForm({
         <div className="rounded-lg border border-red-200 bg-red-50 p-4">
           <p className="text-sm font-medium text-red-800">Unable to save quote</p>
           <p className="mt-1 text-sm text-red-700">{error}</p>
+        </div>
+      )}
+
+      {warning && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-medium text-amber-900">{warning}</p>
+          {failedNotificationId && (
+            <div className="mt-3">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={isRetryingEmail || isBusy}
+                onClick={handleRetryQuoteEmail}
+              >
+                {isRetryingEmail ? "Retrying email..." : "Retry email"}
+              </Button>
+            </div>
+          )}
         </div>
       )}
 
