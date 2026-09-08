@@ -780,6 +780,7 @@ export async function resolveCustomerArtworkPreviewBuffer(
   const previewValidation = await validateFlattenedArtworkPreview({
     sourceBuffer,
     pngBuffer: suppressedRaster.pngBuffer,
+    rgbaData: suppressedRaster.rgbaData,
     requireVisibleText: options?.requireVisibleText,
   });
 

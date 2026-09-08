@@ -49,6 +49,7 @@ export async function embedArtworkPreview(
     const previewValidation = await validateFlattenedArtworkPreview({
       sourceBuffer,
       pngBuffer: raster.pngBuffer,
+      rgbaData: raster.rgbaData,
       requireVisibleText: options?.requireVisibleText,
     });
 

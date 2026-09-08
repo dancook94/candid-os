@@ -78,6 +78,7 @@ describe("J-4 artwork fixture", () => {
     const flattenedValidation = await validateFlattenedArtworkPreview({
       sourceBuffer,
       pngBuffer: flattened.pngBuffer,
+      rgbaData: flattened.rgbaData,
     });
 
     assert.equal(flattenedValidation.ok, true);

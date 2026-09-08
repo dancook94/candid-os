@@ -16,6 +16,7 @@ const require = createRequire(import.meta.url);
 
 export type RasterizedPdfPage = {
   pngBuffer: Buffer;
+  rgbaData: Uint8ClampedArray;
   widthPx: number;
   heightPx: number;
   pageWidthPt: number;
@@ -166,8 +167,11 @@ export async function rasterizePdfPageToPng(
     disableFontFace: true,
   });
 
+  const rgbaData = context.getImageData(0, 0, widthPx, heightPx).data;
+
   return {
     pngBuffer: canvas.toBuffer("image/png"),
+    rgbaData,
     widthPx,
     heightPx,
     pageWidthPt: viewportAtScale1.width,
