@@ -7,7 +7,6 @@ import {
 } from "@/lib/proof-generator/cut-path-overlay";
 import {
   PROOF_PDF_LOGO_DISPLAY_WIDTH,
-  PROOF_PDF_LOGO_RASTER_SCALE,
   PROOF_PDF_MARGIN,
   PROOF_PDF_PAGE_HEIGHT,
   PROOF_PDF_PAGE_WIDTH,
@@ -103,13 +102,12 @@ export async function embedCandidLogo(
   doc: PDFDocument,
   displayWidth = PROOF_PDF_LOGO_DISPLAY_WIDTH
 ) {
-  const rasterWidth = Math.round(displayWidth * PROOF_PDF_LOGO_RASTER_SCALE);
-  const pngBuffer = await loadCandidLogoPng(rasterWidth);
+  const pngBuffer = await loadCandidLogoPng();
   const image = await doc.embedPng(pngBuffer);
   const aspect = image.width / image.height;
   const width = displayWidth;
   const height = width / aspect;
-  return { image, width, height, rasterWidth };
+  return { image, width, height, rasterWidth: image.width };
 }
 
 export function drawProofPageHeader(

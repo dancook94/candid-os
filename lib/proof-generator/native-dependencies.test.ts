@@ -177,6 +177,12 @@ describe("proof generator native dependency packaging", () => {
       assert.doesNotMatch(source, /import sharp from "sharp"/);
       assert.doesNotMatch(source, /require\(["']sharp["']\)/);
       assert.doesNotMatch(source, /import\(["']sharp["']\)/);
+
+      if (relativePath === "lib/proof-generator/pdf-brand.ts") {
+        assert.doesNotMatch(source, /canvas-image/);
+        assert.doesNotMatch(source, /loadImage/);
+        assert.doesNotMatch(source, /loadAndResizeLogoPng/);
+      }
     }
   });
 
@@ -186,6 +192,8 @@ describe("proof generator native dependency packaging", () => {
     assert.match(pdfBrand, /LOGO_YELLOW\.png/);
     assert.doesNotMatch(pdfBrand, /LOGO_YELLOW\.svg/);
     assert.doesNotMatch(pdfBrand, /import sharp from "sharp"/);
-    assert.match(pdfBrand, /loadAndResizeLogoPng/);
+    assert.match(pdfBrand, /readFile/);
+    assert.doesNotMatch(pdfBrand, /loadAndResizeLogoPng/);
+    assert.doesNotMatch(pdfBrand, /canvas-image/);
   });
 });
