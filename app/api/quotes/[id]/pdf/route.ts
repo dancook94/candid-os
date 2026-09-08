@@ -3,6 +3,8 @@ import { loadCustomerPortalProfile } from "@/lib/customer-shell-props";
 import { createQuotePdfResponse } from "@/lib/quotes/quote-pdf-response";
 import { createClient } from "@/lib/supabase/server";
 
+export const runtime = "nodejs";
+
 type RouteContext = {
   params: Promise<{ id: string }>;
 };

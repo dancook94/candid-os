@@ -3,6 +3,8 @@ import { createQuotePdfResponse } from "@/lib/quotes/quote-pdf-response";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
+export const runtime = "nodejs";
+
 type RouteContext = {
   params: Promise<{ id: string }>;
 };

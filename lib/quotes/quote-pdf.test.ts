@@ -22,11 +22,42 @@ describe("quote PDF download", () => {
     const shared = await readRepoFile("lib/quotes/quote-pdf-response.ts");
     const customerRoute = await readRepoFile("app/api/quotes/[id]/pdf/route.ts");
     const adminRoute = await readRepoFile("app/api/admin/quotes/[id]/pdf/route.ts");
+    const nextConfig = await readRepoFile("next.config.ts");
 
+    assert.match(shared, /import\(\s*"@\/lib\/generate-customer-quote-pdf"\s*\)/);
     assert.match(shared, /generateCustomerQuotePdf/);
+    assert.match(shared, /Content-Type": "application\/pdf"/);
     assert.match(customerRoute, /createQuotePdfResponse/);
     assert.match(adminRoute, /createQuotePdfResponse/);
     assert.match(adminRoute, /verifyApprovedCrmStaff/);
+    assert.match(nextConfig, /outputFileTracingIncludes/);
+    assert.match(nextConfig, /node_modules\/pdfkit\/js\/data\/\*\*/);
+  });
+
+  it("admin and customer PDF routes force Node runtime", async () => {
+    const customerRoute = await readRepoFile("app/api/quotes/[id]/pdf/route.ts");
+    const adminRoute = await readRepoFile("app/api/admin/quotes/[id]/pdf/route.ts");
+
+    assert.match(customerRoute, /export const runtime = "nodejs"/);
+    assert.match(adminRoute, /export const runtime = "nodejs"/);
+  });
+
+  it("customer PDF route preserves portal authentication", async () => {
+    const customerRoute = await readRepoFile("app/api/quotes/[id]/pdf/route.ts");
+
+    assert.match(customerRoute, /loadCustomerPortalProfile/);
+    assert.match(customerRoute, /Unauthorized\./);
+  });
+
+  it("shared PDF response lazy-loads generator and returns safe errors", async () => {
+    const shared = await readRepoFile("lib/quotes/quote-pdf-response.ts");
+
+    assert.doesNotMatch(
+      shared,
+      /^import \{ generateCustomerQuotePdf \} from "@\/lib\/generate-customer-quote-pdf";/m
+    );
+    assert.match(shared, /Unable to generate PDF\./);
+    assert.match(shared, /\[quote-pdf\] failed/);
   });
 
   it("2. admin quote UI exposes Download PDF", async () => {
