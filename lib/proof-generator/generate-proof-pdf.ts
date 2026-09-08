@@ -40,6 +40,11 @@ import { resolveCustomerArtworkPreviewBuffer } from "@/lib/proof-generator/suppr
 import { validateGeneratedProofPdf } from "@/lib/proof-generator/validate-proof-pdf";
 import { resolvePreflightChecksAfterProductionConfirmation } from "@/lib/proof-generator/warnings";
 import { buildCustomerProofPdfFileName } from "@/lib/proofs/dropbox";
+import {
+  logProofGeneratorStageMarker,
+  wrapProofGenerationError,
+} from "@/lib/proof-generator/generation-diagnostics";
+import { detectArtworkBufferKind } from "@/lib/proof-generator/artwork-buffer";
 
 const FOOTER_BAR_HEIGHT = 34;
 const FOOTER_GAP = 8;
@@ -63,11 +68,22 @@ export async function generateCustomerProofPdf(input: {
   cutPathGeometryCache?: CutPathGeometryCache;
 }) {
   try {
+    logProofGeneratorStageMarker("generation-started", {
+      sourceFileName: input.sourceFileName,
+      sourceByteLength: input.sourceBuffer.length,
+      sourceKind: detectArtworkBufferKind(input.sourceBuffer),
+    });
+
     const doc = await PDFDocument.create();
     const regular = await doc.embedFont(StandardFonts.Helvetica);
     const bold = await doc.embedFont(StandardFonts.HelveticaBold);
     const fonts = { regular, bold };
     const logo = await embedCandidLogo(doc);
+
+    logProofGeneratorStageMarker("logo-embedded", {
+      logoDisplayWidthPt: logo.width,
+      logoRasterWidthPx: logo.rasterWidth,
+    });
 
     logProofGeneratorDebug("proof_pdf_logo_embedded", {
       displayWidthPt: logo.width,
@@ -147,6 +163,13 @@ export async function generateCustomerProofPdf(input: {
       suppressionReason: previewSource.suppressionReason ?? null,
     });
 
+    logProofGeneratorStageMarker("customer-preview-resolved", {
+      sourceByteLength: input.sourceBuffer.length,
+      previewByteLength: previewSource.previewBuffer.length,
+      originalCutPathSuppressed: previewSource.originalCutPathSuppressed,
+      suppressionMethod: previewSource.method,
+    });
+
     const preview = await withProofGeneratorTimeout(
       "Preview render",
       PROOF_GENERATOR_TIMEOUTS.previewRenderMs,
@@ -165,6 +188,15 @@ export async function generateCustomerProofPdf(input: {
     logDiagnosticStage("19", "artwork preview rendering completed", {
       sourceFileName: input.sourceFileName,
       previewMethod: preview.previewMethod,
+    });
+
+    logProofGeneratorStageMarker("artwork-preview-embedded", {
+      previewMethod: preview.previewMethod,
+      previewKind: preview.kind,
+      previewPixelWidth:
+        preview.kind === "image" ? preview.image.width : Math.round(preview.width),
+      previewPixelHeight:
+        preview.kind === "image" ? preview.image.height : Math.round(preview.height),
     });
 
     logProofGeneratorDebug("artwork_preview_embedded", {
@@ -253,6 +285,13 @@ export async function generateCustomerProofPdf(input: {
 
     features.cutPathOverlayRendered =
       overlayRequested && cutPathOverlayGeometryAvailable && cutPathOverlayRendered;
+
+    logProofGeneratorStageMarker("cut-path-overlay-complete", {
+      overlayRequested,
+      cutPathOverlayRendered: features.cutPathOverlayRendered,
+      cutPathOverlayGeometryAvailable,
+    });
+
     preflight.productionFeatures = features;
     preflight.checks = resolvePreflightChecksAfterProductionConfirmation(
       preflight.checks,
@@ -288,6 +327,10 @@ export async function generateCustomerProofPdf(input: {
 
     renderSpecificationPages(doc, fonts, logo, preflight);
 
+    logProofGeneratorStageMarker("spec-pages-rendered", {
+      pageCount: doc.getPageCount(),
+    });
+
     updateProofPageIndicators(doc.getPages(), fonts, 1);
 
     input.preflight.productionFeatures = features;
@@ -296,10 +339,19 @@ export async function generateCustomerProofPdf(input: {
     const bytes = await doc.save();
     const pdfBuffer = Buffer.from(bytes);
 
+    logProofGeneratorStageMarker("document-saved", {
+      pdfByteLength: pdfBuffer.length,
+      pageCount: doc.getPageCount(),
+    });
+
     const validation = await validateGeneratedProofPdf(pdfBuffer);
     if (!validation.ok) {
       throw new Error(`Generated proof PDF failed validation: ${validation.reason}`);
     }
+
+    logProofGeneratorStageMarker("validation-complete", {
+      pageCount: validation.pageCount,
+    });
 
     logProofGeneratorDebug("proof_pdf_validated", {
       sourceFileName: input.sourceFileName,
@@ -309,7 +361,10 @@ export async function generateCustomerProofPdf(input: {
     return pdfBuffer;
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown PDF generation error.";
-    throw new Error(`Branded proof PDF generation failed: ${detail}`);
+    throw wrapProofGenerationError(
+      `Branded proof PDF generation failed: ${detail}`,
+      error
+    );
   }
 }
 

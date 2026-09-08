@@ -6,6 +6,7 @@ import {
 } from "@/lib/proof-generator/artwork-buffer";
 import { resizeImageBufferToPng } from "@/lib/proof-generator/canvas-image";
 import { PROOF_PDF_PREVIEW_MAX_PX } from "@/lib/proof-generator/constants";
+import { logProofGeneratorStageMarker } from "@/lib/proof-generator/generation-diagnostics";
 
 export type ArtworkPreview =
   | {
@@ -66,6 +67,15 @@ export async function embedArtworkPreview(
       });
     }
 
+    logProofGeneratorStageMarker("pdf-raster-complete", {
+      sourceByteLength: sourceBuffer.length,
+      pngByteLength: raster.pngBuffer.length,
+      rgbaDataPresent: Boolean(raster.rgbaData?.length),
+      rgbaDataLength: raster.rgbaData?.length ?? 0,
+      renderedWidthPx: raster.widthPx,
+      renderedHeightPx: raster.heightPx,
+    });
+
     const image = await targetDoc.embedPng(raster.pngBuffer);
 
     logProofGeneratorDebug("artwork_preview_rasterized", {
@@ -125,7 +135,10 @@ export async function embedArtworkPreview(
       }
     }
 
-    throw new Error(`Unable to render PDF artwork preview: ${lastError?.message ?? "Unknown PDF preview error."}`);
+    throw new Error(
+      `Unable to render PDF artwork preview: ${lastError?.message ?? "Unknown PDF preview error."}`,
+      { cause: lastError ?? undefined }
+    );
   }
 
   try {
@@ -141,6 +154,6 @@ export async function embedArtworkPreview(
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : "Unknown image preview error.";
-    throw new Error(`Unable to render image artwork preview: ${detail}`);
+    throw new Error(`Unable to render image artwork preview: ${detail}`, { cause: error });
   }
 }

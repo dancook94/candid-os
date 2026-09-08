@@ -28,6 +28,8 @@ import {
   ProofGeneratorTimeoutError,
   withProofGeneratorTimeout,
 } from "@/lib/proof-generator/runtime";
+import { logProofGeneratorStageMarker } from "@/lib/proof-generator/generation-diagnostics";
+import { detectArtworkBufferKind } from "@/lib/proof-generator/artwork-buffer";
 import { loadQuotedSpecificationItems } from "@/lib/proof-generator/quoted-specification";
 import type {
   PreflightManualOverrides,
@@ -658,6 +660,14 @@ export async function generateBrandedPdfForExistingProof(
     detectedKind: artwork.detectedKind,
   });
 
+  logProofGeneratorStageMarker("source-loaded", {
+    proofId,
+    jobId,
+    sourceFileName: artwork.fileName,
+    sourceByteLength: artwork.buffer.length,
+    sourceKind: detectArtworkBufferKind(artwork.buffer) ?? artwork.detectedKind,
+  });
+
   let preflightResult = await withProofGeneratorTimeout(
     "Preflight analysis",
     PROOF_GENERATOR_TIMEOUTS.artworkAnalysisMs,
@@ -776,7 +786,9 @@ export async function generateBrandedPdfForExistingProof(
 
     const message =
       error instanceof Error ? error.message : "Branded proof PDF generation failed.";
-    throw new ProofError(message, 500);
+    throw new ProofError(message, 500, {
+      cause: error instanceof Error ? error : undefined,
+    });
   }
 
   const pdfBuffer = Uint8Array.from(generatedPdf);
