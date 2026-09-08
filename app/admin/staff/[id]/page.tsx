@@ -16,6 +16,7 @@ import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { buildLoginUrl } from "@/lib/auth-redirect";
 import { resolveAdminAccessDeniedPath } from "@/lib/portal-access";
 import { loadStaffAvatarSignedUrl } from "@/lib/staff-avatar-server";
+import { mapStaffAuthState } from "@/lib/staff-auth-actions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import {
@@ -149,6 +150,7 @@ export default async function AdminStaffDetailPage({
           email={authData.user.email ?? null}
           role={staffProfile.user_role}
           accountStatus={staffProfile.account_status}
+          authState={mapStaffAuthState(authData.user)}
         />
       </div>
     </AppShell>

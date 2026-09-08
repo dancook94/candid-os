@@ -9,6 +9,9 @@ export type StaffMemberRecord = {
   account_status: string;
   created_at: string;
   email: string | null;
+  invited_at: string | null;
+  email_confirmed_at: string | null;
+  confirmed_at: string | null;
   last_sign_in_at: string | null;
   avatar_storage_path: string | null;
   avatarUrl: string | null;
@@ -45,6 +48,9 @@ export async function loadStaffMembersWithAuth(): Promise<StaffMemberRecord[]> {
         return {
           ...profile,
           email: null,
+          invited_at: null,
+          email_confirmed_at: null,
+          confirmed_at: null,
           last_sign_in_at: null,
           avatarUrl,
         };
@@ -53,6 +59,9 @@ export async function loadStaffMembersWithAuth(): Promise<StaffMemberRecord[]> {
       return {
         ...profile,
         email: authData.user.email ?? null,
+        invited_at: authData.user.invited_at ?? null,
+        email_confirmed_at: authData.user.email_confirmed_at ?? null,
+        confirmed_at: authData.user.confirmed_at ?? null,
         last_sign_in_at: authData.user.last_sign_in_at ?? null,
         avatarUrl,
       };

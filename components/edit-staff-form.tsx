@@ -5,6 +5,7 @@ import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { StatusBadge } from "@/components/status-badge";
+import { StaffAuthActionButton } from "@/components/staff-auth-action-button";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Card,
@@ -20,6 +21,10 @@ import {
   formatRoleLabel,
   isSuperAdminRole,
 } from "@/lib/staff-roles";
+import {
+  resolveStaffAuthActionType,
+  type StaffAuthState,
+} from "@/lib/staff-auth-actions";
 
 type EditStaffFormProps = {
   staffId: string;
@@ -27,6 +32,7 @@ type EditStaffFormProps = {
   email: string | null;
   role: string;
   accountStatus: string;
+  authState: StaffAuthState;
 };
 
 export function EditStaffForm({
@@ -35,6 +41,7 @@ export function EditStaffForm({
   email,
   role: initialRole,
   accountStatus: initialAccountStatus,
+  authState,
 }: EditStaffFormProps) {
   const router = useRouter();
 
@@ -46,6 +53,7 @@ export function EditStaffForm({
   const [success, setSuccess] = useState("");
 
   const isSuperAdmin = isSuperAdminRole(initialRole);
+  const authActionType = resolveStaffAuthActionType(authState);
 
   async function saveUpdates(updates: {
     fullName?: string;
@@ -238,6 +246,26 @@ export function EditStaffForm({
           </form>
         </CardContent>
       </Card>
+
+      {authActionType ? (
+        <Card className="portal-surface overflow-hidden rounded-2xl shadow-sm ring-0">
+          <CardHeader className="border-b border-border">
+            <CardTitle className="text-lg font-semibold">Account access</CardTitle>
+            <CardDescription>
+              Help this team member complete sign-in or receive a fresh password
+              setup link.
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent className="pt-6">
+            <StaffAuthActionButton
+              staffId={staffId}
+              email={email}
+              actionType={authActionType}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
     </div>
   );
 }

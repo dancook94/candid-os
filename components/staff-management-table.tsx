@@ -4,10 +4,12 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 
 import { StatusBadge } from "@/components/status-badge";
+import { StaffAuthActionButton } from "@/components/staff-auth-action-button";
 import { StaffAvatarDisplay } from "@/components/staff-avatar-display";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { formatRoleLabel } from "@/lib/staff-roles";
+import { resolveStaffAuthActionType } from "@/lib/staff-auth-actions";
 import type { StaffMemberRecord } from "@/lib/staff-members";
 
 type StaffManagementTableProps = {
@@ -139,7 +141,15 @@ export function StaffManagementTable({
                     </td>
                   </tr>
                 ) : (
-                  filteredStaff.map((member) => (
+                  filteredStaff.map((member) => {
+                    const authActionType = resolveStaffAuthActionType({
+                      invited_at: member.invited_at,
+                      email_confirmed_at: member.email_confirmed_at,
+                      confirmed_at: member.confirmed_at,
+                      last_sign_in_at: member.last_sign_in_at,
+                    });
+
+                    return (
                     <tr key={member.id}>
                       <td className="px-4 py-3.5">
                         <div className="flex items-center gap-3">
@@ -181,15 +191,27 @@ export function StaffManagementTable({
                       </td>
 
                       <td className="px-4 py-3.5">
-                        <Link
-                          href={`/admin/staff/${member.id}`}
-                          className="inline-flex h-7 items-center justify-center rounded-[min(var(--radius-md),12px)] border border-border bg-background px-2.5 text-[0.8rem] font-medium text-foreground transition-colors hover:bg-muted"
-                        >
-                          Edit
-                        </Link>
+                        <div className="flex flex-wrap items-start gap-2">
+                          <Link
+                            href={`/admin/staff/${member.id}`}
+                            className="inline-flex h-7 items-center justify-center rounded-[min(var(--radius-md),12px)] border border-border bg-background px-2.5 text-[0.8rem] font-medium text-foreground transition-colors hover:bg-muted"
+                          >
+                            Edit
+                          </Link>
+
+                          {authActionType ? (
+                            <StaffAuthActionButton
+                              staffId={member.id}
+                              email={member.email}
+                              actionType={authActionType}
+                              compact
+                            />
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
-                  ))
+                    );
+                  })
                 )}
               </tbody>
             </table>
