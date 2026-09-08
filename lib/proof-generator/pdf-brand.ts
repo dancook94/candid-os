@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
+import { logProofGeneratorStageMarker } from "@/lib/proof-generator/generation-diagnostics";
+
 /** Candid yellow (#fbd12c). */
 export const CANDID_YELLOW_HEX = "#fbd12c";
 
@@ -27,9 +29,15 @@ let cachedLogoPng: Buffer | null = null;
  */
 export async function loadCandidLogoPng() {
   if (cachedLogoPng) {
+    logProofGeneratorStageMarker("logo-buffer-cached", {
+      logoBufferByteLength: cachedLogoPng.byteLength,
+    });
     return cachedLogoPng;
   }
 
   cachedLogoPng = await readFile(PROOF_PDF_LOGO_PATH);
+  logProofGeneratorStageMarker("logo-buffer-loaded", {
+    logoBufferByteLength: cachedLogoPng.byteLength,
+  });
   return cachedLogoPng;
 }

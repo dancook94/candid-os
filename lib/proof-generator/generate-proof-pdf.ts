@@ -41,7 +41,9 @@ import { validateGeneratedProofPdf } from "@/lib/proof-generator/validate-proof-
 import { resolvePreflightChecksAfterProductionConfirmation } from "@/lib/proof-generator/warnings";
 import { buildCustomerProofPdfFileName } from "@/lib/proofs/dropbox";
 import {
+  logOriginalGenerationError,
   logProofGeneratorStageMarker,
+  PROOF_GENERATOR_DIAGNOSTICS_V2,
   wrapProofGenerationError,
 } from "@/lib/proof-generator/generation-diagnostics";
 import { detectArtworkBufferKind } from "@/lib/proof-generator/artwork-buffer";
@@ -68,19 +70,21 @@ export async function generateCustomerProofPdf(input: {
   cutPathGeometryCache?: CutPathGeometryCache;
 }) {
   try {
-    logProofGeneratorStageMarker("generation-started", {
+    logProofGeneratorStageMarker("entered-generator", {
       sourceFileName: input.sourceFileName,
-      sourceByteLength: input.sourceBuffer.length,
-      sourceKind: detectArtworkBufferKind(input.sourceBuffer),
+      sourceType: detectArtworkBufferKind(input.sourceBuffer),
+      sourceBufferByteLength: input.sourceBuffer.byteLength,
+      diagnosticsVersion: PROOF_GENERATOR_DIAGNOSTICS_V2,
     });
 
     const doc = await PDFDocument.create();
     const regular = await doc.embedFont(StandardFonts.Helvetica);
     const bold = await doc.embedFont(StandardFonts.HelveticaBold);
     const fonts = { regular, bold };
-    const logo = await embedCandidLogo(doc);
 
-    logProofGeneratorStageMarker("logo-embedded", {
+    logProofGeneratorStageMarker("logo-start");
+    const logo = await embedCandidLogo(doc);
+    logProofGeneratorStageMarker("logo-complete", {
       logoDisplayWidthPt: logo.width,
       logoRasterWidthPx: logo.rasterWidth,
     });
@@ -147,6 +151,9 @@ export async function generateCustomerProofPdf(input: {
     const requireVisibleText = (input.preflight.fonts.names?.length ?? 0) > 0;
     const confirmedCutPathForPreview = input.preflight.productionFeatures.confirmedCutPath ?? null;
 
+    logProofGeneratorStageMarker("preview-resolve-start", {
+      sourceBufferByteLength: input.sourceBuffer.byteLength,
+    });
     const previewSource = await withProofGeneratorTimeout(
       "Cut-path preview suppression",
       PROOF_GENERATOR_TIMEOUTS.ocgSuppressionMs,
@@ -163,13 +170,17 @@ export async function generateCustomerProofPdf(input: {
       suppressionReason: previewSource.suppressionReason ?? null,
     });
 
-    logProofGeneratorStageMarker("customer-preview-resolved", {
-      sourceByteLength: input.sourceBuffer.length,
-      previewByteLength: previewSource.previewBuffer.length,
+    logProofGeneratorStageMarker("preview-resolve-complete", {
+      sourceBufferByteLength: input.sourceBuffer.byteLength,
+      previewBufferByteLength: previewSource.previewBuffer.byteLength,
       originalCutPathSuppressed: previewSource.originalCutPathSuppressed,
       suppressionMethod: previewSource.method,
     });
 
+    logProofGeneratorStageMarker("artwork-embed-start", {
+      sourceBufferByteLength: input.sourceBuffer.byteLength,
+      previewBufferByteLength: previewSource.previewBuffer.byteLength,
+    });
     const preview = await withProofGeneratorTimeout(
       "Preview render",
       PROOF_GENERATOR_TIMEOUTS.previewRenderMs,
@@ -190,7 +201,7 @@ export async function generateCustomerProofPdf(input: {
       previewMethod: preview.previewMethod,
     });
 
-    logProofGeneratorStageMarker("artwork-preview-embedded", {
+    logProofGeneratorStageMarker("artwork-embed-complete", {
       previewMethod: preview.previewMethod,
       previewKind: preview.kind,
       previewPixelWidth:
@@ -286,7 +297,7 @@ export async function generateCustomerProofPdf(input: {
     features.cutPathOverlayRendered =
       overlayRequested && cutPathOverlayGeometryAvailable && cutPathOverlayRendered;
 
-    logProofGeneratorStageMarker("cut-path-overlay-complete", {
+    logProofGeneratorStageMarker("overlay-complete", {
       overlayRequested,
       cutPathOverlayRendered: features.cutPathOverlayRendered,
       cutPathOverlayGeometryAvailable,
@@ -327,7 +338,7 @@ export async function generateCustomerProofPdf(input: {
 
     renderSpecificationPages(doc, fonts, logo, preflight);
 
-    logProofGeneratorStageMarker("spec-pages-rendered", {
+    logProofGeneratorStageMarker("spec-pages-complete", {
       pageCount: doc.getPageCount(),
     });
 
@@ -336,11 +347,14 @@ export async function generateCustomerProofPdf(input: {
     input.preflight.productionFeatures = features;
     input.preflight.checks = preflight.checks;
 
+    logProofGeneratorStageMarker("save-start", {
+      pageCount: doc.getPageCount(),
+    });
     const bytes = await doc.save();
     const pdfBuffer = Buffer.from(bytes);
 
-    logProofGeneratorStageMarker("document-saved", {
-      pdfByteLength: pdfBuffer.length,
+    logProofGeneratorStageMarker("save-complete", {
+      pdfBufferByteLength: pdfBuffer.byteLength,
       pageCount: doc.getPageCount(),
     });
 
@@ -360,6 +374,7 @@ export async function generateCustomerProofPdf(input: {
 
     return pdfBuffer;
   } catch (error) {
+    logOriginalGenerationError(error, { stage: "generateCustomerProofPdf-catch" });
     const detail = error instanceof Error ? error.message : "Unknown PDF generation error.";
     throw wrapProofGenerationError(
       `Branded proof PDF generation failed: ${detail}`,

@@ -28,7 +28,7 @@ import {
   ProofGeneratorTimeoutError,
   withProofGeneratorTimeout,
 } from "@/lib/proof-generator/runtime";
-import { logProofGeneratorStageMarker } from "@/lib/proof-generator/generation-diagnostics";
+import { logProofGeneratorStageMarker, logOriginalGenerationError } from "@/lib/proof-generator/generation-diagnostics";
 import { detectArtworkBufferKind } from "@/lib/proof-generator/artwork-buffer";
 import { loadQuotedSpecificationItems } from "@/lib/proof-generator/quoted-specification";
 import type {
@@ -783,6 +783,12 @@ export async function generateBrandedPdfForExistingProof(
     if (error instanceof ProofGeneratorTimeoutError) {
       throw new ProofError(proofGeneratorTimeoutMessage(error), 504);
     }
+
+    logOriginalGenerationError(error, {
+      proofId,
+      jobId,
+      stage: "generateBrandedPdfForExistingProof-pdf-generation-catch",
+    });
 
     const message =
       error instanceof Error ? error.message : "Branded proof PDF generation failed.";

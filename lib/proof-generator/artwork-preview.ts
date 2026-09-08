@@ -68,10 +68,10 @@ export async function embedArtworkPreview(
     }
 
     logProofGeneratorStageMarker("pdf-raster-complete", {
-      sourceByteLength: sourceBuffer.length,
-      pngByteLength: raster.pngBuffer.length,
+      sourceBufferByteLength: sourceBuffer.byteLength,
+      pngBufferByteLength: raster.pngBuffer.byteLength,
+      rgbaDataByteLength: raster.rgbaData?.byteLength ?? 0,
       rgbaDataPresent: Boolean(raster.rgbaData?.length),
-      rgbaDataLength: raster.rgbaData?.length ?? 0,
       renderedWidthPx: raster.widthPx,
       renderedHeightPx: raster.heightPx,
     });

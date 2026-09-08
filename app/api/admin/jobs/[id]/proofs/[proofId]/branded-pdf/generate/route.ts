@@ -18,7 +18,7 @@ import {
   proofGeneratorTimeoutMessage,
 } from "@/lib/proof-generator/runtime";
 import { logDiagnosticStage } from "@/lib/proof-generator/diagnostic-stage-log";
-import { logProofGenerationError } from "@/lib/proof-generator/generation-diagnostics";
+import { logProofGenerationErrorChain } from "@/lib/proof-generator/generation-diagnostics";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -88,7 +88,7 @@ export async function POST(request: Request, context: RouteContext) {
     return NextResponse.json(result);
   } catch (error) {
     const { id: jobId, proofId } = await context.params;
-    logProofGenerationError("[proofs:branded-pdf:generate]", error, { jobId, proofId });
+    logProofGenerationErrorChain("[proofs:branded-pdf:generate]", error, { jobId, proofId });
     return proofErrorResponse(error);
   }
 }
