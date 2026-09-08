@@ -62,10 +62,14 @@ export async function fetchCustomerFormalQuote(
     customerContactName,
     customerEmail,
     fallbackCompanyName,
+    versionNumber,
+    allowDraftVersion = false,
   }: {
     customerContactName: string;
     customerEmail: string | null;
     fallbackCompanyName: string;
+    versionNumber?: number;
+    allowDraftVersion?: boolean;
   }
 ): Promise<CustomerFormalQuoteData | null> {
   const { data: formalQuote } = await supabase
@@ -119,14 +123,19 @@ export async function fetchCustomerFormalQuote(
       : Promise.resolve({ data: null }),
   ]);
 
-  const displayVersion =
-    quoteVersions?.find(
-      (version) =>
-        version.version_number === formalQuote.current_version &&
-        version.version_status !== "draft"
-    ) ?? quoteVersions?.find((version) => version.version_status !== "draft");
+  const displayVersion = versionNumber
+    ? quoteVersions?.find((version) => version.version_number === versionNumber)
+    : quoteVersions?.find(
+        (version) =>
+          version.version_number === formalQuote.current_version &&
+          version.version_status !== "draft"
+      ) ?? quoteVersions?.find((version) => version.version_status !== "draft");
 
   if (!displayVersion) {
+    return null;
+  }
+
+  if (displayVersion.version_status === "draft" && !allowDraftVersion) {
     return null;
   }
 

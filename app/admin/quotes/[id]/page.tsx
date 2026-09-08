@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AdminQuoteDocumentActions } from "@/components/admin-quote-document-actions";
 import { AdminQuoteFollowUpTaskPanel } from "@/components/admin-quote-follow-up-task-panel";
 import { AdminQuoteLinkedJobPanel } from "@/components/admin-quote-linked-job-panel";
 import { AdminQuoteManagementActions } from "@/components/admin-quote-management-actions";
@@ -453,6 +454,17 @@ export default async function QuoteDetailPage({
         />
 
         <QuoteContactSummary contact={quoteContact} />
+
+        {quoteVersion && (
+          <AdminQuoteDocumentActions
+            quoteId={quote.id}
+            versionId={quoteVersion.id}
+            versionNumber={selectedVersionNumber}
+            versionStatus={quoteVersion.version_status}
+            currentVersionNumber={quote.current_version}
+            quoteStatus={quote.status}
+          />
+        )}
 
         {quoteVersion && initialValues && user ? (
           <QuoteBuilderForm

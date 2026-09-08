@@ -296,3 +296,114 @@ export async function sendQuoteAsStaff(
 
   return response;
 }
+
+export type ResendQuoteInput = {
+  quoteId: string;
+  versionId: string;
+};
+
+export type ResendQuoteSuccessResult = {
+  ok: true;
+  quoteSent: true;
+  resent: true;
+  emailSent: boolean;
+  emailError: string | null;
+  communicationMode: string;
+  email: SendQuoteEmailDetails;
+};
+
+export type ResendQuoteResult = ResendQuoteSuccessResult | SendQuoteFailureResult;
+
+export function buildResendQuoteResponse(input: {
+  notification: QuoteReadyNotificationResult;
+}): ResendQuoteSuccessResult {
+  const { emailSent, emailError, email } = interpretQuoteReadyNotificationResult(
+    input.notification
+  );
+
+  const response: ResendQuoteSuccessResult = {
+    ok: true,
+    quoteSent: true,
+    resent: true,
+    emailSent,
+    emailError,
+    communicationMode: getCommunicationConfig().mode,
+    email,
+  };
+
+  if (
+    response.email.intendedRecipient &&
+    response.email.actualRecipient &&
+    response.email.intendedRecipient !== response.email.actualRecipient
+  ) {
+    response.email.redirected = true;
+  }
+
+  return response;
+}
+
+export async function resendQuoteAsStaff(
+  adminClient: SupabaseClient,
+  input: ResendQuoteInput
+): Promise<ResendQuoteResult> {
+  const { quoteId, versionId } = input;
+
+  const { data: quote, error: quoteError } = await adminClient
+    .from("quotes")
+    .select("id, company_id, contact_id, quote_request_id, status, current_version")
+    .eq("id", quoteId)
+    .maybeSingle();
+
+  if (quoteError) {
+    return failure(quoteError.message);
+  }
+
+  if (!quote) {
+    return failure("Quote not found.");
+  }
+
+  if (quote.status === "draft") {
+    return failure("Only sent quotes can be resent.");
+  }
+
+  if (!quote.contact_id) {
+    return failure("Quote must have a contact before it can be resent.");
+  }
+
+  const { data: version, error: versionError } = await adminClient
+    .from("quote_versions")
+    .select("id, version_number, version_status, sent_at")
+    .eq("id", versionId)
+    .eq("quote_id", quoteId)
+    .maybeSingle();
+
+  if (versionError) {
+    return failure(versionError.message);
+  }
+
+  if (!version) {
+    return failure("Quote version not found.");
+  }
+
+  if (version.version_status !== "sent") {
+    return failure("Only the current sent quote version can be resent.");
+  }
+
+  if (version.version_number !== quote.current_version) {
+    return failure("Only the current sent quote version can be resent.");
+  }
+
+  const notification = await notifyQuoteReadySafe(adminClient, {
+    quoteId,
+    versionId: version.id,
+    contactId: quote.contact_id,
+    resend: true,
+  });
+
+  revalidateQuoteWorkflowRoutes({
+    quoteId,
+    quoteRequestId: quote.quote_request_id ?? null,
+  });
+
+  return buildResendQuoteResponse({ notification });
+}

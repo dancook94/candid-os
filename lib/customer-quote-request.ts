@@ -65,6 +65,17 @@ export function isCustomerQuotePdfDownloadable(versionStatus: string) {
   );
 }
 
+export function isAdminQuotePdfDownloadable(versionStatus: string) {
+  return [
+    "draft",
+    "sent",
+    "accepted",
+    "declined",
+    "expired",
+    "superseded",
+  ].includes(versionStatus.toLowerCase());
+}
+
 export function buildCustomerQuotePdfFilename(
   quoteNumber: number,
   versionNumber: number,

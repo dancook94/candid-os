@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 
 import { verifyApprovedCrmStaff } from "@/lib/crm-auth";
-import { sendQuoteAsStaff } from "@/lib/quotes/send-quote";
+import { resendQuoteAsStaff, sendQuoteAsStaff } from "@/lib/quotes/send-quote";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 type SendQuoteBody = {
   versionId?: string;
+  resend?: boolean;
 };
 
 type RouteContext = {
@@ -39,17 +40,22 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const adminClient = createAdminClient();
-  const result = await sendQuoteAsStaff(adminClient, supabase, {
-    quoteId,
-    versionId: body.versionId.trim(),
-    changedBy: auth.userId,
-  });
+  const result = body.resend
+    ? await resendQuoteAsStaff(adminClient, {
+        quoteId,
+        versionId: body.versionId.trim(),
+      })
+    : await sendQuoteAsStaff(adminClient, supabase, {
+        quoteId,
+        versionId: body.versionId.trim(),
+        changedBy: auth.userId,
+      });
 
   if (!result.ok) {
     return NextResponse.json({ error: result.message }, { status: 400 });
   }
 
-  if (result.opportunitySynced) {
+  if ("opportunitySynced" in result && result.opportunitySynced) {
     revalidatePath("/admin/opportunities");
   }
 

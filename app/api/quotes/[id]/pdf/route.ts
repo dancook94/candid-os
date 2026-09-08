@@ -1,16 +1,6 @@
-import { NextResponse } from "next/server";
-
-import {
-  fetchCustomerFormalQuote,
-  loadLinkedQuoteRequestDeadline,
-} from "@/lib/customer-formal-quote-data";
-import {
-  buildCustomerQuotePdfFilename,
-  isCustomerQuotePdfDownloadable,
-} from "@/lib/customer-quote-request";
-import { generateCustomerQuotePdf } from "@/lib/generate-customer-quote-pdf";
 import { loadCustomerCompanyBranding } from "@/lib/customer-company-branding";
 import { loadCustomerPortalProfile } from "@/lib/customer-shell-props";
+import { createQuotePdfResponse } from "@/lib/quotes/quote-pdf-response";
 import { createClient } from "@/lib/supabase/server";
 
 type RouteContext = {
@@ -26,7 +16,7 @@ export async function GET(_request: Request, context: RouteContext) {
   } = await supabase.auth.getUser();
 
   if (!user) {
-    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+    return Response.json({ error: "Unauthorized." }, { status: 401 });
   }
 
   const profile = await loadCustomerPortalProfile(supabase, user.id);
@@ -43,72 +33,11 @@ export async function GET(_request: Request, context: RouteContext) {
     (user.user_metadata?.company_name as string | undefined) || "Your company"
   );
 
-  const quote = await fetchCustomerFormalQuote(supabase, id, {
-    customerContactName: fullName,
-    customerEmail: user.email ?? null,
+  return createQuotePdfResponse({
+    supabase,
+    quoteId: id,
+    contactName: fullName,
+    contactEmail: user.email ?? null,
     fallbackCompanyName: companyBranding.companyName,
   });
-
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found." }, { status: 404 });
-  }
-
-  const { data: quoteLinkRow } = await supabase
-    .from("quotes")
-    .select("id, quote_request_id")
-    .eq("id", id)
-    .maybeSingle();
-
-  if (process.env.NODE_ENV === "development") {
-    console.log("[approved-deadline] pdf quote link", {
-      quoteId: quoteLinkRow?.id ?? id,
-      quoteRequestId: quoteLinkRow?.quote_request_id ?? null,
-    });
-  }
-
-  const deadlineLoad = await loadLinkedQuoteRequestDeadline(supabase, {
-    quoteId: id,
-    quoteRequestId: quoteLinkRow?.quote_request_id ?? null,
-  });
-
-  if (deadlineLoad.loadError) {
-    console.error(
-      "[approved-deadline] pdf quote request query error:",
-      deadlineLoad.loadError
-    );
-  }
-
-  if (!isCustomerQuotePdfDownloadable(quote.versionStatus)) {
-    return NextResponse.json(
-      { error: "This quote version is not available for download." },
-      { status: 403 }
-    );
-  }
-
-  try {
-    const pdfBuffer = await generateCustomerQuotePdf({
-      ...quote,
-      approvedDeadline: deadlineLoad.approvedDeadline,
-    });
-    const filename = buildCustomerQuotePdfFilename(
-      quote.quoteNumber,
-      quote.versionNumber,
-      quote.projectName
-    );
-
-    return new NextResponse(new Uint8Array(pdfBuffer), {
-      status: 200,
-      headers: {
-        "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${filename}"`,
-        "Cache-Control": "no-store",
-      },
-    });
-  } catch (error) {
-    console.error("Failed to generate quote PDF:", error);
-    return NextResponse.json(
-      { error: "Unable to generate PDF." },
-      { status: 500 }
-    );
-  }
 }

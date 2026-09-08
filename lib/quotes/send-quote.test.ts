@@ -224,11 +224,19 @@ describe("send quote architecture", () => {
     assert.doesNotMatch(serviceSource, /client\.emails\.send/);
   });
 
-  it("3. send service uses one notification call path", async () => {
+  it("3. send service uses one notification call path per operation", async () => {
     const source = await readRepoFile("lib/quotes/send-quote.ts");
-    const notifyMatches = source.match(/await notifyQuoteReadySafe\(/g) ?? [];
+    const sendMatches = source.match(
+      /export async function sendQuoteAsStaff[\s\S]*?^}/m
+    )?.[0];
+    const resendMatches = source.match(
+      /export async function resendQuoteAsStaff[\s\S]*?^}/m
+    )?.[0];
 
-    assert.equal(notifyMatches.length, 1);
+    assert.ok(sendMatches);
+    assert.ok(resendMatches);
+    assert.equal((sendMatches.match(/await notifyQuoteReadySafe\(/g) ?? []).length, 1);
+    assert.equal((resendMatches.match(/await notifyQuoteReadySafe\(/g) ?? []).length, 1);
   });
 
   it("7. quote builder uses server send endpoint and accurate messaging", async () => {

@@ -5,20 +5,25 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 
-type CustomerQuoteDownloadPdfButtonProps = {
+type QuoteDownloadPdfButtonProps = {
   quoteId: string;
+  downloadPath?: string;
+  disabled?: boolean;
 };
 
-export function CustomerQuoteDownloadPdfButton({
+export function QuoteDownloadPdfButton({
   quoteId,
-}: CustomerQuoteDownloadPdfButtonProps) {
+  downloadPath,
+  disabled = false,
+}: QuoteDownloadPdfButtonProps) {
   const [isDownloading, setIsDownloading] = useState(false);
+  const pdfPath = downloadPath ?? `/api/quotes/${quoteId}/pdf`;
 
   async function handleDownload() {
     setIsDownloading(true);
 
     try {
-      const response = await fetch(`/api/quotes/${quoteId}/pdf`);
+      const response = await fetch(pdfPath);
 
       if (!response.ok) {
         throw new Error("Download failed");
@@ -48,10 +53,13 @@ export function CustomerQuoteDownloadPdfButton({
       variant="outline"
       className="gap-2"
       onClick={handleDownload}
-      disabled={isDownloading}
+      disabled={disabled || isDownloading}
     >
       <Download className="h-4 w-4" aria-hidden />
       {isDownloading ? "Preparing PDF…" : "Download PDF"}
     </Button>
   );
 }
+
+/** @deprecated Use QuoteDownloadPdfButton */
+export const CustomerQuoteDownloadPdfButton = QuoteDownloadPdfButton;

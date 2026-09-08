@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { randomUUID } from "node:crypto";
 
 import { getAdminArtworkSourceLabel } from "@/lib/jobs/artwork-source";
 import { describeArtworkSource } from "@/lib/jobs/artwork-model";
@@ -275,7 +276,12 @@ export async function notifyCustomerAccountApprovedSafe(
 
 export async function notifyQuoteReady(
   adminClient: SupabaseClient,
-  input: { quoteId: string; contactId?: string | null; versionId?: string | null }
+  input: {
+    quoteId: string;
+    contactId?: string | null;
+    versionId?: string | null;
+    resend?: boolean;
+  }
 ) {
   const { data: quote, error } = await adminClient
     .from("quotes")
@@ -330,7 +336,9 @@ export async function notifyQuoteReady(
     contactId: (input.contactId ?? quote.contact_id) as string | null,
     profileId: (contact?.profile_id as string | null) ?? null,
     quoteId: quote.id as string,
-    idempotencyKey: `quote_ready:${quote.id}:${version.id}`,
+    idempotencyKey: input.resend
+      ? `quote_ready:${quote.id}:${version.id}:resend:${randomUUID()}`
+      : `quote_ready:${quote.id}:${version.id}`,
     metadata: {
       projectName: quote.project_name,
       companyName: company?.company_name ?? "Your company",
@@ -340,13 +348,19 @@ export async function notifyQuoteReady(
       quoteVersion: `Version ${version.version_number}`,
       quoteId: quote.id,
       quoteUrl: `/quotes/${quote.id}`,
+      ...(input.resend ? { resend: true } : {}),
     },
   });
 }
 
 export async function notifyQuoteReadySafe(
   adminClient: SupabaseClient,
-  input: { quoteId: string; contactId?: string | null; versionId?: string | null }
+  input: {
+    quoteId: string;
+    contactId?: string | null;
+    versionId?: string | null;
+    resend?: boolean;
+  }
 ) {
   try {
     return await notifyQuoteReady(adminClient, input);
