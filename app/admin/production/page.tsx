@@ -2,15 +2,19 @@ import Link from "next/link";
 import { Factory } from "lucide-react";
 
 import { JobProductionBoard } from "@/components/production/job-production-board";
+import { JobProductionBoardMobile } from "@/components/production/job-production-board-mobile";
 import { JobProductionBoardArchivedList } from "@/components/production/job-production-board-archived";
+import { JobProductionBoardArchivedMobileList } from "@/components/production/job-production-board-archived-mobile";
 import { AppShell } from "@/components/app-shell";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
+import { ProductionBoardMobileControls } from "@/components/production/production-board-mobile-controls";
+import {
+  ProductionBoardFilterActions,
+  ProductionBoardFilterFields,
+} from "@/components/production/production-board-filter-fields";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select } from "@/components/ui/select";
 import { buildCrmAppShellProps } from "@/lib/admin-shell-props";
 import { requireCrmPageAccess } from "@/lib/crm-page-access";
 import {
@@ -19,10 +23,6 @@ import {
   parseProductionBoardFilters,
   type ProductionBoardSearchParams,
 } from "@/lib/production/board";
-import {
-  PRODUCTION_PRIORITIES,
-  PRODUCTION_PRIORITY_LABELS,
-} from "@/lib/production/constants";
 import {
   fetchArchivedProductionBoardJobs,
   fetchJobProductionBoard,
@@ -113,139 +113,43 @@ export default async function AdminProductionPage({
           }
         />
 
-        <Card className="portal-surface sticky top-[4.5rem] z-10 mb-6 shadow-sm">
-          <CardContent className="pt-6">
-            <form
-              method="get"
-              className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8"
-            >
-              {isArchivedView ? (
-                <input type="hidden" name="view" value="archived" />
-              ) : null}
-              <div className="space-y-2 md:col-span-2 2xl:col-span-2">
-                <Label htmlFor="search">Search</Label>
-                <Input
-                  id="search"
-                  name="search"
-                  type="search"
-                  placeholder="Job ref, item, company, machine…"
-                  defaultValue={filters.search}
+        <div className="hidden lg:block">
+          <Card className="portal-surface sticky top-[4.5rem] z-10 mb-6 shadow-sm">
+            <CardContent className="pt-6">
+              <form
+                method="get"
+                className="grid gap-4 md:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-8"
+              >
+                <ProductionBoardFilterFields
+                  filters={filters}
+                  isArchivedView={isArchivedView}
+                  companies={activeCompanies ?? []}
+                  staff={staff}
+                  machines={filterOptions.machines}
+                  materials={filterOptions.materials}
                 />
-              </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="company">Company</Label>
-                <Select
-                  id="company"
-                  name="company"
-                  defaultValue={filters.companyId ?? ""}
-                >
-                  <option value="">All companies</option>
-                  {(activeCompanies ?? []).map((company) => (
-                    <option key={company.id} value={company.id}>
-                      {company.company_name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="staff">Staff</Label>
-                <Select
-                  id="staff"
-                  name="staff"
-                  defaultValue={filters.assignedToProfileId ?? ""}
-                >
-                  <option value="">All staff</option>
-                  {staff.map((member) => (
-                    <option key={member.id} value={member.id}>
-                      {member.full_name?.trim() || "Unnamed staff member"}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="machine">Machine</Label>
-                <Select
-                  id="machine"
-                  name="machine"
-                  defaultValue={filters.machine ?? ""}
-                >
-                  <option value="">All machines</option>
-                  {filterOptions.machines.map((machine) => (
-                    <option key={machine} value={machine}>
-                      {machine}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="material">Material</Label>
-                <Select
-                  id="material"
-                  name="material"
-                  defaultValue={filters.material ?? ""}
-                >
-                  <option value="">All materials</option>
-                  {filterOptions.materials.map((material) => (
-                    <option key={material} value={material}>
-                      {material}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="priority">Priority</Label>
-                <Select
-                  id="priority"
-                  name="priority"
-                  defaultValue={filters.priority ?? ""}
-                >
-                  <option value="">All priorities</option>
-                  {PRODUCTION_PRIORITIES.map((priority) => (
-                    <option key={priority} value={priority}>
-                      {PRODUCTION_PRIORITY_LABELS[priority]}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="due">Due date</Label>
-                <Select id="due" name="due" defaultValue={filters.dueDate ?? ""}>
-                  <option value="">Any due date</option>
-                  <option value="overdue">Overdue</option>
-                  <option value="today">Due today</option>
-                  <option value="tomorrow">Due tomorrow</option>
-                </Select>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="job_ref">Job reference</Label>
-                <Input
-                  id="job_ref"
-                  name="job_ref"
-                  placeholder="J-1048"
-                  defaultValue={filters.jobReference ?? ""}
+                <ProductionBoardFilterActions
+                  hasFilters={hasFilters}
+                  clearHref={clearHref}
+                  className="flex flex-wrap items-end gap-2 md:col-span-2 2xl:col-span-8"
                 />
-              </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
 
-              <div className="flex flex-wrap items-end gap-2 md:col-span-2 2xl:col-span-8">
-                <Button type="submit">Apply filters</Button>
-                {hasFilters ? (
-                  <Link href={clearHref}>
-                    <Button type="button" variant="outline">
-                      Clear
-                    </Button>
-                  </Link>
-                ) : null}
-              </div>
-            </form>
-          </CardContent>
-        </Card>
+        <div className="mb-4 lg:hidden">
+          <ProductionBoardMobileControls
+            filters={filters}
+            clearHref={clearHref}
+            isArchivedView={isArchivedView}
+            companies={activeCompanies ?? []}
+            staff={staff}
+            machines={filterOptions.machines}
+            materials={filterOptions.materials}
+          />
+        </div>
 
         {isArchivedView ? (
           archivedResult.queryError === "migration_required" ? (
@@ -302,7 +206,12 @@ export default async function AdminProductionPage({
                 {archivedResult.data.totalCount}{" "}
                 {archivedResult.data.totalCount === 1 ? "job" : "jobs"} archived
               </div>
+            <div className="hidden lg:block">
               <JobProductionBoardArchivedList data={archivedResult.data} />
+            </div>
+            <div className="lg:hidden">
+              <JobProductionBoardArchivedMobileList data={archivedResult.data} />
+            </div>
             </>
           ) : null
         ) : boardResult.queryError === "migration_required" ? (
@@ -381,7 +290,12 @@ export default async function AdminProductionPage({
                 </>
               ) : null}
             </div>
-            <JobProductionBoard initialData={boardResult.data} />
+            <div className="hidden lg:block">
+              <JobProductionBoard initialData={boardResult.data} />
+            </div>
+            <div className="lg:hidden">
+              <JobProductionBoardMobile initialData={boardResult.data} />
+            </div>
           </>
         ) : null}
       </div>
