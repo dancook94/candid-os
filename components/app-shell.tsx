@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Building2,
   CheckSquare,
@@ -15,12 +15,14 @@ import {
   LogOut,
   Mail,
   Megaphone,
+  Menu,
   Package,
   Receipt,
   Settings,
   Target,
   UserCog,
   Users,
+  X,
 } from "lucide-react";
 
 import {
@@ -202,6 +204,123 @@ function assertUniqueNavHrefs(links: NavLink[], context: string) {
   }
 }
 
+function isNavLinkActive(pathname: string, href: string) {
+  return (
+    pathname === href ||
+    (href !== "/admin" &&
+      href !== "/dashboard" &&
+      href !== "/staff" &&
+      pathname.startsWith(`${href}/`))
+  );
+}
+
+function NavLinksList({
+  links,
+  pathname,
+  onNavigate,
+  className,
+}: {
+  links: NavLink[];
+  pathname: string;
+  onNavigate?: () => void;
+  className?: string;
+}) {
+  return (
+    <nav className={cn("space-y-1", className)}>
+      {links.map((link) => {
+        const Icon = link.icon;
+        const isActive = isNavLinkActive(pathname, link.href);
+
+        return (
+          <Link
+            key={link.href}
+            href={link.href}
+            onClick={onNavigate}
+            className={cn(
+              "relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
+              isActive
+                ? "bg-muted text-foreground shadow-sm ring-1 ring-border before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-[var(--candid-yellow)]"
+                : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+            )}
+          >
+            <Icon className="h-4 w-4 shrink-0" aria-hidden />
+            <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+              <span>{link.label}</span>
+              {link.badgeCount ? (
+                <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--candid-yellow)] px-1.5 py-0.5 text-[10px] font-semibold text-neutral-950">
+                  {link.badgeCount > 9 ? "9+" : link.badgeCount}
+                </span>
+              ) : null}
+            </span>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+function SidebarAccountFooter({
+  displayName,
+  displaySubtitle,
+  profileHref,
+  userAvatarUrl,
+  onNavigate,
+  onLogout,
+}: {
+  displayName: string;
+  displaySubtitle: string;
+  profileHref: string | null;
+  userAvatarUrl: string | null;
+  onNavigate?: () => void;
+  onLogout: () => void;
+}) {
+  return (
+    <div className="shrink-0 border-t border-border p-4">
+      <div className="mb-3 flex items-center gap-3 rounded-xl bg-muted/50 px-3 py-3">
+        {profileHref ? (
+          <Link href={profileHref} className="shrink-0" onClick={onNavigate}>
+            <StaffAvatarDisplay
+              fullName={displayName}
+              avatarUrl={userAvatarUrl}
+              size="md"
+            />
+          </Link>
+        ) : (
+          <StaffAvatarDisplay
+            fullName={displayName}
+            avatarUrl={userAvatarUrl}
+            size="md"
+          />
+        )}
+
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-foreground">
+            {profileHref ? (
+              <Link href={profileHref} className="hover:underline" onClick={onNavigate}>
+                {displayName}
+              </Link>
+            ) : (
+              displayName
+            )}
+          </p>
+          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+            {displaySubtitle}
+          </p>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={onLogout}
+        className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+      >
+        <LogOut className="h-4 w-4" aria-hidden />
+        Sign out
+      </button>
+    </div>
+  );
+}
+
 export function AppShell({
   children,
   userRole = "customer",
@@ -218,7 +337,9 @@ export function AppShell({
   const router = useRouter();
   const supabase = createClient();
   const [searchOpen, setSearchOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const openSearch = useCallback(() => setSearchOpen(true), []);
+  const closeMobileNav = useCallback(() => setMobileNavOpen(false), []);
   const canShowGlobalSearch =
     showGlobalSearch ?? (showCrmNav && userRole !== "customer");
 
@@ -269,10 +390,37 @@ export function AppShell({
     userRole === "admin" || userRole === "staff" ? "/staff/profile" : null;
 
   async function handleLogout() {
+    closeMobileNav();
     await supabase.auth.signOut();
     router.push("/login");
     router.refresh();
   }
+
+  useEffect(() => {
+    if (!mobileNavOpen) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        closeMobileNav();
+      }
+    }
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [mobileNavOpen, closeMobileNav]);
+
+  useEffect(() => {
+    closeMobileNav();
+  }, [pathname, closeMobileNav]);
 
   return (
     <div className="min-h-screen bg-[var(--portal-page-bg)]">
@@ -308,90 +456,104 @@ export function AppShell({
           </div>
         ) : null}
 
-        <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-3 py-4">
-          {linksWithBadges.map((link) => {
-            const Icon = link.icon;
-
-            const isActive =
-              pathname === link.href ||
-              (link.href !== "/admin" &&
-                link.href !== "/dashboard" &&
-                link.href !== "/staff" &&
-                pathname.startsWith(`${link.href}/`));
-
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={cn(
-                  "relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
-                  isActive
-                    ? "bg-muted text-foreground shadow-sm ring-1 ring-border before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-[var(--candid-yellow)]"
-                    : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
-                )}
-              >
-                <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
-                  <span>{link.label}</span>
-                  {link.badgeCount ? (
-                    <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--candid-yellow)] px-1.5 py-0.5 text-[10px] font-semibold text-neutral-950">
-                      {link.badgeCount > 9 ? "9+" : link.badgeCount}
-                    </span>
-                  ) : null}
-                </span>
-              </Link>
-            );
-          })}
+        <nav className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4">
+          <NavLinksList links={linksWithBadges} pathname={pathname} />
         </nav>
 
-        <div className="shrink-0 border-t border-border p-4">
-          <div className="mb-3 flex items-center gap-3 rounded-xl bg-muted/50 px-3 py-3">
-            {profileHref ? (
-              <Link href={profileHref} className="shrink-0">
-                <StaffAvatarDisplay
-                  fullName={displayName}
-                  avatarUrl={userAvatarUrl}
-                  size="md"
-                />
-              </Link>
-            ) : (
-              <StaffAvatarDisplay
-                fullName={displayName}
-                avatarUrl={userAvatarUrl}
-                size="md"
-              />
-            )}
-
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-foreground">
-                {profileHref ? (
-                  <Link href={profileHref} className="hover:underline">
-                    {displayName}
-                  </Link>
-                ) : (
-                  displayName
-                )}
-              </p>
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                {displaySubtitle}
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
-          >
-            <LogOut className="h-4 w-4" aria-hidden />
-            Sign out
-          </button>
-        </div>
+        <SidebarAccountFooter
+          displayName={displayName}
+          displaySubtitle={displaySubtitle}
+          profileHref={profileHref}
+          userAvatarUrl={userAvatarUrl}
+          onLogout={handleLogout}
+        />
       </aside>
 
+      {mobileNavOpen ? (
+        <div className="fixed inset-0 z-40 lg:hidden" role="presentation">
+          <button
+            type="button"
+            aria-label="Close navigation menu"
+            className="absolute inset-0 bg-neutral-950/40"
+            onClick={closeMobileNav}
+          />
+
+          <aside
+            id="mobile-navigation-menu"
+            className="relative flex h-dvh max-h-dvh w-[min(100vw,17.5rem)] flex-col overflow-hidden border-r border-border bg-card shadow-xl"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Navigation menu"
+          >
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-5 py-4">
+              <Link
+                href={homeHref}
+                className="group flex min-w-0 flex-1 items-center gap-3"
+                onClick={closeMobileNav}
+              >
+                <Image
+                  src="/LOGO_YELLOW.svg"
+                  alt="Candid Creative"
+                  width={96}
+                  height={47}
+                  priority
+                  className="h-auto w-20 shrink-0 transition-opacity group-hover:opacity-90"
+                />
+
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold tracking-tight text-foreground">
+                    Candid OS
+                  </p>
+                  <p className="truncate text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                    {portalLabel}
+                  </p>
+                </div>
+              </Link>
+
+              <button
+                type="button"
+                aria-label="Close navigation menu"
+                onClick={closeMobileNav}
+                className="ml-2 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+              >
+                <X className="h-5 w-5" aria-hidden />
+              </button>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-4">
+              <NavLinksList
+                links={linksWithBadges}
+                pathname={pathname}
+                onNavigate={closeMobileNav}
+              />
+            </div>
+
+            <SidebarAccountFooter
+              displayName={displayName}
+              displaySubtitle={displaySubtitle}
+              profileHref={profileHref}
+              userAvatarUrl={userAvatarUrl}
+              onNavigate={closeMobileNav}
+              onLogout={handleLogout}
+            />
+          </aside>
+        </div>
+      ) : null}
+
       <div className="lg:pl-[17.5rem]">
-        <header className="sticky top-0 z-20 border-b border-border bg-card/95 px-6 py-4 backdrop-blur lg:hidden">
+        <header className="sticky top-0 z-20 border-b border-border bg-card/95 px-4 py-4 backdrop-blur sm:px-6 lg:hidden">
           <div className="flex items-center gap-3">
+            <button
+              type="button"
+              aria-label="Open navigation menu"
+              aria-expanded={mobileNavOpen}
+              aria-controls="mobile-navigation-menu"
+              onClick={() => setMobileNavOpen(true)}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-foreground transition-colors hover:bg-muted/70"
+            >
+              <Menu className="h-5 w-5" aria-hidden />
+            </button>
+
             <Image
               src="/LOGO_YELLOW.svg"
               alt="Candid Creative"
@@ -400,8 +562,8 @@ export function AppShell({
               className="h-auto w-20 shrink-0"
             />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-foreground">Candid OS</p>
-              <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+              <p className="truncate text-sm font-semibold text-foreground">Candid OS</p>
+              <p className="truncate text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                 {portalLabel}
               </p>
             </div>
