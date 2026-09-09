@@ -61,7 +61,7 @@ export async function createQuotePdfResponse(input: CreateQuotePdfResponseInput)
 
   const isDownloadable = input.allowDraftVersion
     ? isAdminQuotePdfDownloadable(quote.versionStatus)
-    : isCustomerQuotePdfDownloadable(quote.versionStatus);
+    : isCustomerQuotePdfDownloadable(quote.versionStatus, quote.sentAt);
 
   if (!isDownloadable) {
     return Response.json(

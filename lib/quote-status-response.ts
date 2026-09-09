@@ -71,6 +71,65 @@ export function isQuoteAwaitingDecision({
   return quoteStatus === "sent" && versionStatus === "sent";
 }
 
+function isTerminalQuoteDecisionState(
+  quoteStatus: string,
+  versionStatus: string
+) {
+  return (
+    quoteStatus === "accepted" ||
+    versionStatus === "accepted" ||
+    quoteStatus === "declined" ||
+    versionStatus === "declined" ||
+    quoteStatus === "expired" ||
+    versionStatus === "expired" ||
+    versionStatus === "superseded"
+  );
+}
+
+export function canStaffAcceptQuoteOnBehalf({
+  quoteStatus,
+  versionStatus,
+  versionNumber,
+  currentVersion,
+}: {
+  quoteStatus: string;
+  versionStatus: string;
+  versionNumber: number;
+  currentVersion: number;
+}) {
+  if (versionNumber !== currentVersion) {
+    return false;
+  }
+
+  if (isTerminalQuoteDecisionState(quoteStatus, versionStatus)) {
+    return false;
+  }
+
+  return (
+    (quoteStatus === "draft" && versionStatus === "draft") ||
+    (quoteStatus === "sent" && versionStatus === "sent")
+  );
+}
+
+export function canStaffDeclineQuoteOnBehalf({
+  quoteStatus,
+  versionStatus,
+  versionNumber,
+  currentVersion,
+}: {
+  quoteStatus: string;
+  versionStatus: string;
+  versionNumber: number;
+  currentVersion: number;
+}) {
+  return isQuoteAwaitingDecision({
+    quoteStatus,
+    versionStatus,
+    versionNumber,
+    currentVersion,
+  });
+}
+
 export type QuoteDecisionState =
   | {
       kind: "awaiting_decision";
@@ -289,6 +348,105 @@ export async function applyQuoteStatusResponse(
       })
       .eq("id", context.quote.id)
       .eq("status", nextQuoteStatus);
+
+    return responseError(
+      500,
+      versionUpdateError?.message ??
+        "Unable to update the quote version. No changes were saved."
+    );
+  }
+
+  return { ok: true };
+}
+
+export async function applyAdminQuoteAcceptance(
+  supabase: SupabaseClient,
+  context: QuoteResponseContext
+): Promise<QuoteStatusResponseResult> {
+  const sourceQuoteStatus = context.quote.status;
+  const sourceVersionStatus = context.version.version_status;
+
+  if (
+    !canStaffAcceptQuoteOnBehalf({
+      quoteStatus: sourceQuoteStatus,
+      versionStatus: sourceVersionStatus,
+      versionNumber: context.version.version_number,
+      currentVersion: context.quote.current_version,
+    })
+  ) {
+    return responseError(
+      409,
+      quoteResponseConflictMessage(sourceQuoteStatus, sourceVersionStatus)
+    );
+  }
+
+  const now = new Date().toISOString();
+
+  const { data: updatedQuote, error: quoteUpdateError } = await supabase
+    .from("quotes")
+    .update({
+      status: "accepted",
+      updated_at: now,
+    })
+    .eq("id", context.quote.id)
+    .eq("status", sourceQuoteStatus)
+    .select("id")
+    .maybeSingle();
+
+  if (quoteUpdateError) {
+    return responseError(500, quoteUpdateError.message);
+  }
+
+  if (!updatedQuote) {
+    const { data: currentQuote } = await supabase
+      .from("quotes")
+      .select("status")
+      .eq("id", context.quote.id)
+      .maybeSingle();
+
+    const { data: currentVersion } = await supabase
+      .from("quote_versions")
+      .select("version_status")
+      .eq("id", context.version.id)
+      .maybeSingle();
+
+    if (currentQuote && currentVersion) {
+      return responseError(
+        409,
+        quoteResponseConflictMessage(
+          currentQuote.status,
+          currentVersion.version_status
+        )
+      );
+    }
+
+    return responseError(
+      409,
+      "This quote could not be updated. It may already have been actioned."
+    );
+  }
+
+  const { data: updatedVersion, error: versionUpdateError } = await supabase
+    .from("quote_versions")
+    .update({
+      version_status: "accepted",
+      accepted_at: now,
+      declined_at: null,
+    })
+    .eq("id", context.version.id)
+    .eq("version_status", sourceVersionStatus)
+    .select("id")
+    .maybeSingle();
+
+  if (versionUpdateError || !updatedVersion) {
+    await supabase
+      .from("quotes")
+      .update({
+        status: sourceQuoteStatus,
+        updated_at: now,
+      })
+      .eq("id", context.quote.id)
+      .eq("status", "accepted");
 
     return responseError(
       500,

@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { formatOpportunityStageLabel } from "@/lib/crm/opportunity-stages";
 import { normalizeSupabaseQueryError } from "@/lib/customer-settings/query-errors";
+import { isQuoteVersionCustomerPublished } from "@/lib/quote-customer-publication";
 
 export type LinkedOpportunitySummary = {
   id: string;
@@ -284,11 +285,7 @@ async function loadCurrentVersionForQuote(
     total: data.total,
     sent_at:
       data.sent_at ??
-      (["sent", "accepted", "declined", "expired"].includes(
-        data.version_status.toLowerCase()
-      )
-        ? data.created_at
-        : null),
+      (data.version_status.toLowerCase() === "sent" ? data.created_at : null),
   };
 }
 
@@ -744,7 +741,7 @@ export async function loadCustomerCompanyQuotes(
 }> {
   const { data, error } = await supabase
     .from("quotes")
-    .select("id, quote_number, project_name, status, updated_at")
+    .select("id, quote_number, project_name, status, updated_at, current_version")
     .in("status", [...CUSTOMER_VISIBLE_QUOTE_STATUSES])
     .order("updated_at", { ascending: false })
     .limit(limit);
@@ -765,8 +762,39 @@ export async function loadCustomerCompanyQuotes(
     };
   }
 
+  const candidateQuotes = data ?? [];
+
+  if (candidateQuotes.length === 0) {
+    return { quotes: [], loadError: null };
+  }
+
+  const quoteIds = candidateQuotes.map((quote) => quote.id);
+  const { data: versions, error: versionsError } = await supabase
+    .from("quote_versions")
+    .select("quote_id, version_number, sent_at")
+    .in("quote_id", quoteIds);
+
+  if (versionsError) {
+    const normalized = normalizeSupabaseQueryError(versionsError);
+
+    return {
+      quotes: [],
+      loadError: normalized.message ?? "Company quotes could not be loaded.",
+    };
+  }
+
+  const publishedQuotes = candidateQuotes.filter((quote) => {
+    const currentVersion = (versions ?? []).find(
+      (version) =>
+        version.quote_id === quote.id &&
+        version.version_number === quote.current_version
+    );
+
+    return isQuoteVersionCustomerPublished(currentVersion?.sent_at ?? null);
+  });
+
   return {
-    quotes: (data ?? []).map((quote) => ({
+    quotes: publishedQuotes.map((quote) => ({
       id: quote.id,
       quoteNumber: quote.quote_number,
       projectName: quote.project_name,

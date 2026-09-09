@@ -31,8 +31,8 @@ import { CUSTOMER_AWAITING_APPROVAL_PATH, isPendingCustomer } from "@/lib/custom
 import {
   getCustomerQuoteActionLabel,
   getFormalQuoteStatusLabel,
+  isCustomerQuoteAccessible,
   isCustomerQuotePdfDownloadable,
-  isCustomerQuoteViewable,
   isQuoteRequestLockedByFormalQuote,
   mapCustomerQuoteStatusToBadge,
   QUOTE_REQUEST_LOCKED_NOTICE,
@@ -255,7 +255,8 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
         <CustomerFormalQuoteView
           quoteId={formalQuote.quoteId}
           showPdfDownload={isCustomerQuotePdfDownloadable(
-            formalQuote.versionStatus
+            formalQuote.versionStatus,
+            formalQuote.sentAt
           )}
           quoteNumber={formalQuote.quoteNumber}
           projectName={formalQuote.projectName}
@@ -322,16 +323,23 @@ export default async function QuoteDetailPage({ params }: QuoteDetailPageProps) 
   const customerQuoteStatus = linkedQuote
     ? await resolveCustomerQuoteStatus(supabase, linkedQuote)
     : undefined;
+  const linkedQuoteSentAt = linkedQuoteLoad.quote?.sentAt ?? null;
   const quoteActionLabel =
     quoteDisplay.kind === "load_error" || quoteDisplay.kind === "integrity_error"
       ? quoteDisplay.customerLabel
-      : getCustomerQuoteActionLabel(customerQuoteStatus);
-  const quoteStatusLabel = customerQuoteStatus
-    ? getFormalQuoteStatusLabel(customerQuoteStatus)
-    : quoteDisplay.customerLabel;
-  const quoteStatusIsClickable = isCustomerQuoteViewable(customerQuoteStatus);
+      : getCustomerQuoteActionLabel(customerQuoteStatus, linkedQuoteSentAt);
+  const quoteStatusLabel =
+    customerQuoteStatus &&
+    isCustomerQuoteAccessible(customerQuoteStatus, linkedQuoteSentAt)
+      ? getFormalQuoteStatusLabel(customerQuoteStatus)
+      : quoteActionLabel;
+  const quoteStatusIsClickable = isCustomerQuoteAccessible(
+    customerQuoteStatus,
+    linkedQuoteSentAt
+  );
   const isLockedByFormalQuote = isQuoteRequestLockedByFormalQuote(
-    customerQuoteStatus
+    customerQuoteStatus,
+    linkedQuoteSentAt
   );
 
   const canEdit =

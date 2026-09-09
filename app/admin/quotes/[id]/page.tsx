@@ -44,7 +44,10 @@ import {
 import { loadQuoteContactDisplay } from "@/lib/crm/quote-contact-display";
 import { createClient } from "@/lib/supabase/server";
 import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
-import { isQuoteAwaitingDecision } from "@/lib/quote-status-response";
+import {
+  canStaffAcceptQuoteOnBehalf,
+  canStaffDeclineQuoteOnBehalf,
+} from "@/lib/quote-status-response";
 
 export const dynamic = "force-dynamic";
 
@@ -261,15 +264,30 @@ export default async function QuoteDetailPage({
   const companyName =
     companies.find((company) => company.id === quote.company_id)?.company_name ??
     "Unknown company";
-  const canRespondOnBehalf = quoteVersion
-    ? selectedVersionNumber === quote.current_version &&
-      isQuoteAwaitingDecision({
-        quoteStatus: quote.status,
-        versionStatus: quoteVersion.version_status,
-        versionNumber: selectedVersionNumber,
-        currentVersion: quote.current_version,
-      })
-    : false;
+  const isCurrentVersionSelected =
+    quoteVersion != null && selectedVersionNumber === quote.current_version;
+  const canAcceptOnBehalf =
+    isCurrentVersionSelected && quoteVersion
+      ? canStaffAcceptQuoteOnBehalf({
+          quoteStatus: quote.status,
+          versionStatus: quoteVersion.version_status,
+          versionNumber: selectedVersionNumber,
+          currentVersion: quote.current_version,
+        })
+      : false;
+  const canDeclineOnBehalf =
+    isCurrentVersionSelected && quoteVersion
+      ? canStaffDeclineQuoteOnBehalf({
+          quoteStatus: quote.status,
+          versionStatus: quoteVersion.version_status,
+          versionNumber: selectedVersionNumber,
+          currentVersion: quote.current_version,
+        })
+      : false;
+  const isDraftInternalAcceptance =
+    canAcceptOnBehalf &&
+    quote.status === "draft" &&
+    quoteVersion?.version_status === "draft";
   const versionOptions: QuoteVersionOption[] = versions.map((version) => ({
     version_number: version.version_number,
     version_status: version.version_status,
@@ -430,7 +448,9 @@ export default async function QuoteDetailPage({
           versionNumber={selectedVersionNumber}
           companyName={companyName}
           total={Number(quoteVersion?.total ?? 0)}
-          canRespondOnBehalf={canRespondOnBehalf}
+          canAcceptOnBehalf={canAcceptOnBehalf}
+          canDeclineOnBehalf={canDeclineOnBehalf}
+          isDraftInternalAcceptance={isDraftInternalAcceptance}
           hidePermanentDelete={missingVersions}
         />
 

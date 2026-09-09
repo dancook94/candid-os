@@ -26,7 +26,9 @@ type AdminQuoteManagementActionsProps = {
   versionNumber: number;
   companyName: string;
   total: number;
-  canRespondOnBehalf: boolean;
+  canAcceptOnBehalf: boolean;
+  canDeclineOnBehalf: boolean;
+  isDraftInternalAcceptance?: boolean;
   hidePermanentDelete?: boolean;
 };
 
@@ -39,7 +41,9 @@ export function AdminQuoteManagementActions({
   versionNumber,
   companyName,
   total,
-  canRespondOnBehalf,
+  canAcceptOnBehalf,
+  canDeclineOnBehalf,
+  isDraftInternalAcceptance = false,
   hidePermanentDelete = false,
 }: AdminQuoteManagementActionsProps) {
   const router = useRouter();
@@ -49,6 +53,7 @@ export function AdminQuoteManagementActions({
   const [error, setError] = useState("");
 
   const deleteMatches = isPermanentDeleteConfirmationValid(deleteConfirmation);
+  const showCustomerDecisionCard = canAcceptOnBehalf || canDeclineOnBehalf;
 
   async function handleDecisionConfirm() {
     if (!confirmAction || confirmAction === "delete") {
@@ -117,11 +122,17 @@ export function AdminQuoteManagementActions({
 
   const decisionDialogCopy =
     confirmAction === "accept"
-      ? {
-          title: "Accept on behalf of customer",
-          description: `Accept quotation Q-${quoteNumber}, Version ${versionNumber}, for ${companyName}, totalling ${formatGbp(total)}?`,
-          confirmLabel: "Confirm acceptance",
-        }
+      ? isDraftInternalAcceptance
+        ? {
+            title: "Accept this draft internally?",
+            description: `Accept quotation Q-${quoteNumber}, Version ${versionNumber}, for ${companyName}, totalling ${formatGbp(total)}? This will accept the quote and create the job without sending the quote to the customer.`,
+            confirmLabel: "Confirm internal acceptance",
+          }
+        : {
+            title: "Accept on behalf of customer",
+            description: `Accept quotation Q-${quoteNumber}, Version ${versionNumber}, for ${companyName}, totalling ${formatGbp(total)}?`,
+            confirmLabel: "Confirm acceptance",
+          }
       : confirmAction === "decline"
         ? {
             title: "Decline on behalf of customer",
@@ -132,33 +143,39 @@ export function AdminQuoteManagementActions({
 
   return (
     <>
-      {canRespondOnBehalf ? (
+      {showCustomerDecisionCard ? (
         <Card className="portal-surface mb-6">
           <CardHeader className="border-b border-border">
             <CardTitle className="text-lg font-semibold">
               Customer decision
             </CardTitle>
             <CardDescription>
-              Record the customer&apos;s decision on the current sent version.
+              {isDraftInternalAcceptance
+                ? "Accept the current draft internally to create production without sending the quote to the customer."
+                : "Record the customer\u2019s decision on the current sent version."}
             </CardDescription>
           </CardHeader>
 
           <CardContent className="flex flex-wrap gap-3 pt-6">
-            <Button
-              type="button"
-              disabled={isSubmitting}
-              onClick={() => setConfirmAction("accept")}
-            >
-              Accept on behalf of customer
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={isSubmitting}
-              onClick={() => setConfirmAction("decline")}
-            >
-              Decline on behalf of customer
-            </Button>
+            {canAcceptOnBehalf ? (
+              <Button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => setConfirmAction("accept")}
+              >
+                Accept on behalf of customer
+              </Button>
+            ) : null}
+            {canDeclineOnBehalf ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isSubmitting}
+                onClick={() => setConfirmAction("decline")}
+              >
+                Decline on behalf of customer
+              </Button>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}

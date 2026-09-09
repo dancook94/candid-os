@@ -4,6 +4,7 @@ import { ensureLinkedJobForAcceptedQuote } from "@/lib/customer-quote-response";
 import { reconcileQuoteFollowUpTasks } from "@/lib/crm/reconcile-quote-follow-up-tasks";
 import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
 import { resolveCustomerQuoteStatus } from "@/lib/quote-customer-status";
+import { isQuoteVersionCustomerPublished } from "@/lib/quote-customer-publication";
 import {
   getQuoteDecisionState,
   type QuoteDecisionState,
@@ -35,6 +36,7 @@ export type CustomerFormalQuoteData = {
   canRespondToQuote: boolean;
   decisionState: QuoteDecisionState;
   dateSent: string | null;
+  sentAt: string | null;
   expiryDate: string | null;
   paymentTermsDays: number | null;
   introduction: string | null;
@@ -110,7 +112,7 @@ export async function fetchCustomerFormalQuote(
     supabase
       .from("quote_versions")
       .select(
-        "id, version_number, version_status, created_at, expiry_date, payment_terms_days, introduction, customer_notes, subtotal, vat_amount, total, accepted_at, declined_at"
+        "id, version_number, version_status, created_at, sent_at, expiry_date, payment_terms_days, introduction, customer_notes, subtotal, vat_amount, total, accepted_at, declined_at"
       )
       .eq("quote_id", formalQuote.id)
       .order("version_number", { ascending: false }),
@@ -136,6 +138,13 @@ export async function fetchCustomerFormalQuote(
   }
 
   if (displayVersion.version_status === "draft" && !allowDraftVersion) {
+    return null;
+  }
+
+  if (
+    !allowDraftVersion &&
+    !isQuoteVersionCustomerPublished(displayVersion.sent_at)
+  ) {
     return null;
   }
 
@@ -200,6 +209,7 @@ export async function fetchCustomerFormalQuote(
     canRespondToQuote: decisionState.canRespond,
     decisionState,
     dateSent: displayVersion.created_at,
+    sentAt: displayVersion.sent_at ?? null,
     expiryDate: displayVersion.expiry_date,
     paymentTermsDays: displayVersion.payment_terms_days,
     introduction: displayVersion.introduction,

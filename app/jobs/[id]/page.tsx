@@ -140,12 +140,16 @@ export default async function CustomerJobDetailPage({
               <p className="text-muted-foreground">Related quote</p>
               <p className="mt-2 font-medium text-neutral-950">
                 {job.quoteNumber ? (
-                  <Link
-                    href={`/quotes/${job.quoteId}`}
-                    className="underline-offset-4 hover:underline"
-                  >
-                    {job.quoteNumber}
-                  </Link>
+                  job.quoteLinkPublished ? (
+                    <Link
+                      href={`/quotes/${job.quoteId}`}
+                      className="underline-offset-4 hover:underline"
+                    >
+                      {job.quoteNumber}
+                    </Link>
+                  ) : (
+                    "Internal quote"
+                  )
                 ) : (
                   "—"
                 )}

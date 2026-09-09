@@ -131,6 +131,7 @@ export type CustomerJobDetail = {
   deliveryDetails: string | null;
   quoteId: string | null;
   quoteNumber: string | null;
+  quoteLinkPublished: boolean;
   artworkRequired: boolean;
   customerArtworkMessage: string | null;
   uploadEnabled: boolean;

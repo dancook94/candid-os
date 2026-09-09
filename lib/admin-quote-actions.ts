@@ -3,8 +3,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ensureJobForAcceptedQuote } from "@/lib/jobs/create-from-quote";
 import { completeQuoteFollowUpTasksAfterAcceptance } from "@/lib/crm/quote-acceptance-follow-up";
 import {
+  applyAdminQuoteAcceptance,
   applyQuoteStatusResponse,
-  isQuoteAwaitingDecision,
+  canStaffAcceptQuoteOnBehalf,
+  canStaffDeclineQuoteOnBehalf,
   quoteResponseConflictMessage,
   type QuoteResponseAction,
   type QuoteStatusResponseResult,
@@ -41,7 +43,7 @@ function responseError(status: number, message: string): AdminQuoteActionResult 
   return { ok: false, status, message };
 }
 
-async function loadAdminQuoteContext(
+async function loadAdminQuoteRecord(
   supabase: SupabaseClient,
   quoteId: string
 ): Promise<AdminQuoteActionResult | LoadedAdminQuoteContext> {
@@ -74,21 +76,36 @@ async function loadAdminQuoteContext(
     return responseError(409, "This quote version is no longer available.");
   }
 
-  if (
-    !isQuoteAwaitingDecision({
-      quoteStatus: quote.status,
-      versionStatus: version.version_status,
-      versionNumber: version.version_number,
-      currentVersion: quote.current_version,
-    })
-  ) {
+  return { quote, version };
+}
+
+function validateAdminQuoteAction(
+  loaded: LoadedAdminQuoteContext,
+  action: QuoteResponseAction
+): AdminQuoteActionResult | null {
+  const gate =
+    action === "accept"
+      ? canStaffAcceptQuoteOnBehalf({
+          quoteStatus: loaded.quote.status,
+          versionStatus: loaded.version.version_status,
+          versionNumber: loaded.version.version_number,
+          currentVersion: loaded.quote.current_version,
+        })
+      : canStaffDeclineQuoteOnBehalf({
+          quoteStatus: loaded.quote.status,
+          versionStatus: loaded.version.version_status,
+          versionNumber: loaded.version.version_number,
+          currentVersion: loaded.quote.current_version,
+        });
+
+  if (!gate) {
     return responseError(
       409,
-      quoteResponseConflictMessage(quote.status, version.version_status)
+      quoteResponseConflictMessage(loaded.quote.status, loaded.version.version_status)
     );
   }
 
-  return { quote, version };
+  return null;
 }
 
 export async function respondToQuoteAsAdmin(
@@ -103,13 +120,22 @@ export async function respondToQuoteAsAdmin(
     changedBy: string;
   }
 ): Promise<AdminQuoteActionResult> {
-  const loaded = await loadAdminQuoteContext(supabase, quoteId);
+  const loaded = await loadAdminQuoteRecord(supabase, quoteId);
 
   if ("ok" in loaded) {
     return loaded;
   }
 
-  const result = await applyQuoteStatusResponse(supabase, loaded, action);
+  const validationError = validateAdminQuoteAction(loaded, action);
+
+  if (validationError) {
+    return validationError;
+  }
+
+  const result =
+    action === "accept"
+      ? await applyAdminQuoteAcceptance(supabase, loaded)
+      : await applyQuoteStatusResponse(supabase, loaded, action);
 
   if (!result.ok) {
     return result;

@@ -406,6 +406,27 @@ export async function notifyQuoteAccepted(
     return { ok: false as const, skippedReason: "quote_or_job_missing" };
   }
 
+  const { data: currentQuote } = await adminClient
+    .from("quotes")
+    .select("current_version")
+    .eq("id", input.quoteId)
+    .maybeSingle();
+
+  let versionSentAt: string | null = null;
+
+  if (currentQuote?.current_version != null) {
+    const { data: currentVersion } = await adminClient
+      .from("quote_versions")
+      .select("sent_at")
+      .eq("quote_id", input.quoteId)
+      .eq("version_number", currentQuote.current_version)
+      .maybeSingle();
+
+    versionSentAt = currentVersion?.sent_at ?? null;
+  }
+
+  const sendCustomerNotification = versionSentAt != null && versionSentAt !== "";
+
   let purchaseOrderNumber: string | null = null;
 
   if (quote.quote_request_id) {
@@ -444,47 +465,56 @@ export async function notifyQuoteAccepted(
 
   const profileId = (contact?.profile_id as string | null) ?? null;
 
-  const [customerResult, internalResult] = await Promise.all([
-    sendNotification(adminClient, {
-      type: "quote_accepted_customer",
-      companyId: input.companyId,
-      contactId: input.contactId ?? null,
-      profileId,
-      quoteId: input.quoteId,
-      jobId: input.jobId,
-      idempotencyKey: `quote_accepted_customer:${input.quoteId}`,
-      metadata: {
-        ...sharedMetadata,
-        jobUrl: `/jobs/${job.id}`,
-      },
-    }),
-    sendNotification(adminClient, {
-      type: "quote_accepted_internal",
-      companyId: input.companyId,
-      contactId: input.contactId ?? null,
-      quoteId: input.quoteId,
-      jobId: input.jobId,
-      opportunityId: input.opportunityId ?? null,
-      idempotencyKey: `quote_accepted_internal:${input.quoteId}`,
-      metadata: {
-        ...sharedMetadata,
-        jobUrl: `/admin/jobs/${job.id}`,
-        opportunityUrl: input.opportunityId
-          ? `/admin/opportunities/${input.opportunityId}`
-          : null,
-      },
-    }),
-  ]);
+  const internalResult = await sendNotification(adminClient, {
+    type: "quote_accepted_internal",
+    companyId: input.companyId,
+    contactId: input.contactId ?? null,
+    quoteId: input.quoteId,
+    jobId: input.jobId,
+    opportunityId: input.opportunityId ?? null,
+    idempotencyKey: `quote_accepted_internal:${input.quoteId}`,
+    metadata: {
+      ...sharedMetadata,
+      jobUrl: `/admin/jobs/${job.id}`,
+      opportunityUrl: input.opportunityId
+        ? `/admin/opportunities/${input.opportunityId}`
+        : null,
+    },
+  });
+
+  const customerResult = sendCustomerNotification
+    ? await sendNotification(adminClient, {
+        type: "quote_accepted_customer",
+        companyId: input.companyId,
+        contactId: input.contactId ?? null,
+        profileId,
+        quoteId: input.quoteId,
+        jobId: input.jobId,
+        idempotencyKey: `quote_accepted_customer:${input.quoteId}`,
+        metadata: {
+          ...sharedMetadata,
+          jobUrl: `/jobs/${job.id}`,
+        },
+      })
+    : {
+        ok: true as const,
+        notificationIds: [] as string[],
+        results: [],
+        skippedReason: "quote_not_published_to_customer",
+      };
 
   logNotificationEvent("quote_accepted_sent", {
     quoteId: input.quoteId,
     jobId: input.jobId,
     customerOk: customerResult.ok,
     internalOk: internalResult.ok,
+    customerSkipped: !sendCustomerNotification,
   });
 
   return {
-    ok: customerResult.ok && internalResult.ok,
+    ok:
+      internalResult.ok &&
+      (sendCustomerNotification ? customerResult.ok : true),
     customerResult,
     internalResult,
   };

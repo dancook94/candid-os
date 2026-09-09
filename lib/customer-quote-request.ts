@@ -8,6 +8,11 @@ export const FORMAL_QUOTE_LOCK_STATUSES = [
 
 export type FormalQuoteLockStatus = (typeof FORMAL_QUOTE_LOCK_STATUSES)[number];
 
+import {
+  isCustomerQuoteAccessible,
+  isQuoteVersionCustomerPublished,
+} from "@/lib/quote-customer-publication";
+
 export const QUOTE_REQUEST_LOCKED_NOTICE =
   "This request is now linked to a formal quote and can no longer be edited.";
 
@@ -22,17 +27,21 @@ export function isCustomerQuoteViewable(status: string | undefined) {
 }
 
 export function isQuoteRequestLockedByFormalQuote(
-  customerQuoteStatus: string | undefined
+  customerQuoteStatus: string | undefined,
+  sentAt?: string | null
 ) {
-  return isCustomerQuoteViewable(customerQuoteStatus);
+  return isCustomerQuoteAccessible(customerQuoteStatus, sentAt);
 }
 
-export function getCustomerQuoteActionLabel(status: string | undefined) {
+export function getCustomerQuoteActionLabel(
+  status: string | undefined,
+  sentAt?: string | null
+) {
   if (!status) {
     return "No quote yet";
   }
 
-  if (isCustomerQuoteViewable(status)) {
+  if (isCustomerQuoteAccessible(status, sentAt)) {
     return "View Quote";
   }
 
@@ -59,11 +68,20 @@ export function formatQuoteProjectName(projectName: string) {
   return projectName.replace(/^Hi\s+/i, "");
 }
 
-export function isCustomerQuotePdfDownloadable(versionStatus: string) {
+export function isCustomerQuotePdfDownloadable(
+  versionStatus: string,
+  sentAt?: string | null
+) {
+  if (!isQuoteVersionCustomerPublished(sentAt)) {
+    return false;
+  }
+
   return ["sent", "accepted", "declined", "expired"].includes(
     versionStatus.toLowerCase()
   );
 }
+
+export { isCustomerQuoteAccessible, isQuoteVersionCustomerPublished };
 
 export function isAdminQuotePdfDownloadable(versionStatus: string) {
   return [

@@ -128,12 +128,16 @@ export function CustomerJobsList({ jobs }: CustomerJobsListProps) {
               </td>
               <td className="p-4 text-muted-foreground">
                 {job.quoteId && job.quoteNumber ? (
-                  <Link
-                    href={`/quotes/${job.quoteId}`}
-                    className="font-medium text-foreground underline decoration-border underline-offset-4 transition hover:decoration-foreground"
-                  >
-                    {job.quoteNumber}
-                  </Link>
+                  job.quoteLinkPublished ? (
+                    <Link
+                      href={`/quotes/${job.quoteId}`}
+                      className="font-medium text-foreground underline decoration-border underline-offset-4 transition hover:decoration-foreground"
+                    >
+                      {job.quoteNumber}
+                    </Link>
+                  ) : (
+                    <span className="text-muted-foreground">Internal quote</span>
+                  )
                 ) : (
                   "—"
                 )}

@@ -164,9 +164,9 @@ describe("applyRequiredDateToJobBoardCard", () => {
 });
 
 describe("computeDeadlineFlags", () => {
-  it("marks today deadlines correctly using the noon UTC convention", () => {
-    const today = new Date().toISOString().slice(0, 10);
-    const flags = computeDeadlineFlags(`${today}T12:00:00.000Z`, "printing");
+  it("marks today deadlines correctly when the due time is still ahead", () => {
+    const dueLaterToday = new Date(Date.now() + 60 * 60 * 1000);
+    const flags = computeDeadlineFlags(dueLaterToday.toISOString(), "printing");
 
     assert.equal(flags.is_due_today, true);
     assert.equal(flags.is_overdue, false);

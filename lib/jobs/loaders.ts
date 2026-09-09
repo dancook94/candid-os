@@ -27,6 +27,7 @@ import type {
   JobRecord,
 } from "@/lib/jobs/types";
 import type { CustomerJobRecord } from "@/lib/customer-jobs";
+import { isQuoteVersionCustomerPublished } from "@/lib/quote-customer-publication";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   CUSTOMER_PROOF_STATUS_LABELS,
@@ -38,6 +39,7 @@ import { loadCustomerProofStatesByJobId } from "@/lib/proofs/loaders";
 function mapJobToCustomerListRecord(
   job: JobRecord,
   quoteNumber: number | null,
+  quoteLinkPublished: boolean,
   files: JobFileRecord[],
   proofState?: CustomerProofState
 ): CustomerJobRecord {
@@ -69,6 +71,7 @@ function mapJobToCustomerListRecord(
     fulfilmentMethod: job.fulfilment_method,
     quoteId: job.quote_id,
     quoteNumber: quoteNumber ? `Q-${quoteNumber}` : null,
+    quoteLinkPublished,
     artworkRequired: job.artwork_required,
     needsArtworkUpload: jobNeedsArtworkUpload(job, files),
     updatedAt: job.updated_at,
@@ -157,22 +160,58 @@ export async function loadCustomerJobs(
   const quoteIds = jobs.map((job) => job.quote_id);
   const jobIds = jobs.map((job) => job.id);
 
-  const [{ data: quotes }, { data: files }] = await Promise.all([
-    quoteIds.length > 0
-      ? adminClient.from("quotes").select("id, quote_number").in("id", quoteIds)
-      : Promise.resolve({ data: [] as { id: string; quote_number: number }[] }),
-    jobIds.length > 0
-      ? adminClient
-          .from("job_files")
-          .select("id, job_id, upload_status, artwork_status, version_number, deleted_at")
-          .in("job_id", jobIds)
-          .is("deleted_at", null)
-      : Promise.resolve({ data: [] as JobFileRecord[] }),
-  ]);
+  const [{ data: quotes }, { data: files }, { data: quoteVersions }] =
+    await Promise.all([
+      quoteIds.length > 0
+        ? adminClient
+            .from("quotes")
+            .select("id, quote_number, current_version")
+            .in("id", quoteIds)
+        : Promise.resolve({
+            data: [] as {
+              id: string;
+              quote_number: number;
+              current_version: number;
+            }[],
+          }),
+      jobIds.length > 0
+        ? adminClient
+            .from("job_files")
+            .select("id, job_id, upload_status, artwork_status, version_number, deleted_at")
+            .in("job_id", jobIds)
+            .is("deleted_at", null)
+        : Promise.resolve({ data: [] as JobFileRecord[] }),
+      quoteIds.length > 0
+        ? adminClient
+            .from("quote_versions")
+            .select("quote_id, version_number, sent_at")
+            .in("quote_id", quoteIds)
+        : Promise.resolve({
+            data: [] as {
+              quote_id: string;
+              version_number: number;
+              sent_at: string | null;
+            }[],
+          }),
+    ]);
 
   const quoteNumberById = new Map(
     (quotes ?? []).map((quote) => [quote.id, quote.quote_number])
   );
+
+  const quoteLinkPublishedById = new Map<string, boolean>();
+  for (const quote of quotes ?? []) {
+    const currentVersion = (quoteVersions ?? []).find(
+      (version) =>
+        version.quote_id === quote.id &&
+        version.version_number === quote.current_version
+    );
+
+    quoteLinkPublishedById.set(
+      quote.id,
+      isQuoteVersionCustomerPublished(currentVersion?.sent_at ?? null)
+    );
+  }
 
   const filesByJobId = new Map<string, JobFileRecord[]>();
   for (const file of (files ?? []) as JobFileRecord[]) {
@@ -188,6 +227,9 @@ export async function loadCustomerJobs(
       mapJobToCustomerListRecord(
         job,
         quoteNumberById.get(job.quote_id) ?? null,
+        job.quote_id
+          ? (quoteLinkPublishedById.get(job.quote_id) ?? false)
+          : false,
         filesByJobId.get(job.id) ?? [],
         proofStates.get(job.id)
       )
@@ -225,7 +267,11 @@ export async function loadCustomerJobDetail(
   }
 
   const [{ data: quote }, { data: files }] = await Promise.all([
-    adminClient.from("quotes").select("id, quote_number").eq("id", job.quote_id).maybeSingle(),
+    adminClient
+      .from("quotes")
+      .select("id, quote_number, current_version")
+      .eq("id", job.quote_id)
+      .maybeSingle(),
     adminClient
       .from("job_files")
       .select("*")
@@ -234,6 +280,21 @@ export async function loadCustomerJobDetail(
       .is("deleted_at", null)
       .order("created_at", { ascending: false }),
   ]);
+
+  let quoteLinkPublished = false;
+
+  if (quote) {
+    const { data: currentVersion } = await adminClient
+      .from("quote_versions")
+      .select("sent_at")
+      .eq("quote_id", quote.id)
+      .eq("version_number", quote.current_version)
+      .maybeSingle();
+
+    quoteLinkPublished = isQuoteVersionCustomerPublished(
+      currentVersion?.sent_at ?? null
+    );
+  }
 
   const uploaderIds = [
     ...new Set((files ?? []).map((file) => file.uploaded_by_profile_id)),
@@ -292,6 +353,7 @@ export async function loadCustomerJobDetail(
     deliveryDetails,
     quoteId: typedJob.quote_id,
     quoteNumber: quote?.quote_number ? `Q-${quote.quote_number}` : null,
+    quoteLinkPublished,
     artworkRequired: typedJob.artwork_required,
     customerArtworkMessage: getCustomerArtworkStatusMessage(typedJob.status),
     uploadEnabled: isCustomerArtworkUploadEnabled(typedJob),

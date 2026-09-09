@@ -16,7 +16,7 @@ import { CUSTOMER_AWAITING_APPROVAL_PATH, isPendingCustomer } from "@/lib/custom
 import {
   getCustomerQuoteActionLabel,
   getFormalQuoteStatusLabel,
-  isCustomerQuoteViewable,
+  isCustomerQuoteAccessible,
   mapCustomerQuoteStatusToBadge,
 } from "@/lib/customer-quote-request";
 import {
@@ -304,16 +304,27 @@ export default async function QuotesPage() {
                         ? (customerQuoteStatuses.get(linkedQuote.id) ??
                           linkedQuote.status)
                         : undefined;
+                      const linkedQuoteSentAt = linkedQuote?.sentAt ?? null;
                       const quoteActionLabel =
                         quoteDisplay.kind === "load_error" ||
                         quoteDisplay.kind === "integrity_error"
                           ? quoteDisplay.customerLabel
-                          : getCustomerQuoteActionLabel(customerQuoteStatus);
-                      const quoteStatusLabel = customerQuoteStatus
-                        ? getFormalQuoteStatusLabel(customerQuoteStatus)
-                        : quoteDisplay.customerLabel;
-                      const quoteStatusIsClickable =
-                        isCustomerQuoteViewable(customerQuoteStatus);
+                          : getCustomerQuoteActionLabel(
+                              customerQuoteStatus,
+                              linkedQuoteSentAt
+                            );
+                      const quoteStatusLabel =
+                        customerQuoteStatus &&
+                        isCustomerQuoteAccessible(
+                          customerQuoteStatus,
+                          linkedQuoteSentAt
+                        )
+                          ? getFormalQuoteStatusLabel(customerQuoteStatus)
+                          : quoteActionLabel;
+                      const quoteStatusIsClickable = isCustomerQuoteAccessible(
+                        customerQuoteStatus,
+                        linkedQuoteSentAt
+                      );
 
                       return (
                       <tr
