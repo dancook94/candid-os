@@ -5,6 +5,7 @@ import { formatCrmDateTime } from "@/lib/crm/format-datetime";
 import { JobProductionBoardDeadlineControl } from "@/components/production/job-production-board-deadline-control";
 import { StatusBadge } from "@/components/status-badge";
 import { ProductionBoardPrintfactoryPreview } from "@/components/production/production-board-printfactory-preview";
+import { formatPrintFactoryLinkedJobsLabel } from "@/lib/production/job-board-display";
 import type { JobProductionBoardCard } from "@/lib/production/job-board-service";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, ExternalLink } from "lucide-react";
@@ -49,6 +50,8 @@ export function JobProductionBoardCardView({
   isDragging,
   onDeadlineUpdated,
 }: JobProductionBoardCardViewProps) {
+  const printFactoryLabel = formatPrintFactoryLinkedJobsLabel(card.files_detected_count);
+
   return (
     <div
       className={cn(
@@ -125,12 +128,7 @@ export function JobProductionBoardCardView({
             ))}
           </div>
         ) : null}
-        <p>
-          Ripped: {card.ripped_requirements_count} of {card.readiness_active || "0"}
-        </p>
-        {card.files_detected_count > 0 ? (
-          <p>PrintFactory files: {card.files_detected_count}</p>
-        ) : null}
+        {printFactoryLabel ? <p>{printFactoryLabel}</p> : null}
       </div>
 
       <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1">

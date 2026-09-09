@@ -7,6 +7,7 @@ import { JobProductionBoardDeadlineControl } from "@/components/production/job-p
 import { ProductionBoardPrintfactoryPreview } from "@/components/production/production-board-printfactory-preview";
 import { formatProductionBoardDeadline } from "@/lib/jobs/production-deadline";
 import { JOB_PRODUCTION_BOARD_STAGE_LABELS } from "@/lib/production/job-board-constants";
+import { formatPrintFactoryLinkedJobsLabel } from "@/lib/production/job-board-display";
 import { resolveJobProductionBoardCardStage } from "@/lib/production/job-board-mobile";
 import type { JobProductionBoardCard } from "@/lib/production/job-board-service";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,7 @@ function DeadlineSummary({ card }: { card: JobProductionBoardCard }) {
 
 export function JobProductionBoardMobileCard({ card }: JobProductionBoardMobileCardProps) {
   const stage = resolveJobProductionBoardCardStage(card);
+  const printFactoryLabel = formatPrintFactoryLinkedJobsLabel(card.files_detected_count);
 
   return (
     <Link
@@ -117,6 +119,12 @@ export function JobProductionBoardMobileCard({ card }: JobProductionBoardMobileC
             </div>
           </div>
 
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Production readiness: {card.readiness_label}
+          </p>
+          {printFactoryLabel ? (
+            <p className="text-[11px] text-muted-foreground">{printFactoryLabel}</p>
+          ) : null}
           {card.readiness_unresolved_details.length > 0 ? (
             <p className="mt-2 line-clamp-2 text-[11px] text-amber-900/90">
               {card.readiness_unresolved_details[0]}
