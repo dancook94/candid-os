@@ -40,9 +40,11 @@ type PendingMove = {
 function DraggableJobCard({
   card,
   isUpdating,
+  onDeadlineUpdated,
 }: {
   card: JobProductionBoardData["columns"][JobProductionBoardStage][number];
   isUpdating: boolean;
+  onDeadlineUpdated: (updatedCard: JobProductionBoardData["columns"][JobProductionBoardStage][number]) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
@@ -63,7 +65,11 @@ function DraggableJobCard({
       {...attributes}
       className={cn(isUpdating && "pointer-events-none opacity-50")}
     >
-      <JobProductionBoardCardView card={card} isDragging={isDragging} />
+      <JobProductionBoardCardView
+        card={card}
+        isDragging={isDragging}
+        onDeadlineUpdated={onDeadlineUpdated}
+      />
     </div>
   );
 }
@@ -73,11 +79,13 @@ function JobProductionColumn({
   cards,
   count,
   isUpdating,
+  onDeadlineUpdated,
 }: {
   stage: JobProductionBoardStage;
   cards: JobProductionBoardData["columns"][JobProductionBoardStage];
   count: number;
   isUpdating: boolean;
+  onDeadlineUpdated: (updatedCard: JobProductionBoardData["columns"][JobProductionBoardStage][number]) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: stage });
 
@@ -104,6 +112,7 @@ function JobProductionColumn({
             key={card.id}
             card={card}
             isUpdating={isUpdating}
+            onDeadlineUpdated={onDeadlineUpdated}
           />
         ))}
       </div>
@@ -130,6 +139,26 @@ export function JobProductionBoard({ initialData }: JobProductionBoardProps) {
     () => [...JOB_PRODUCTION_BOARD_COLUMNS, "on_hold" as const],
     []
   );
+
+  function handleDeadlineUpdated(
+    updatedCard: JobProductionBoardData["columns"][JobProductionBoardStage][number]
+  ) {
+    const stage = findCardStage(updatedCard.id);
+
+    if (!stage) {
+      return;
+    }
+
+    setBoardData((current) => ({
+      ...current,
+      columns: {
+        ...current.columns,
+        [stage]: current.columns[stage].map((entry) =>
+          entry.id === updatedCard.id ? updatedCard : entry
+        ),
+      },
+    }));
+  }
 
   function findCardStage(cardId: string): JobProductionBoardStage | null {
     for (const stage of allColumns) {
@@ -245,6 +274,7 @@ export function JobProductionBoard({ initialData }: JobProductionBoardProps) {
               cards={boardData.columns[stage] ?? []}
               count={boardData.counts[stage] ?? 0}
               isUpdating={isUpdating}
+              onDeadlineUpdated={handleDeadlineUpdated}
             />
           ))}
         </div>

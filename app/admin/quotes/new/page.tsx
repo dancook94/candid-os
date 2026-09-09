@@ -77,6 +77,7 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
     quoteRequestId: null,
     opportunityId: null,
     projectName: "",
+    productionDeadline: "",
     expiryDate: computeDefaultQuoteExpiryDate(appSettings.default_quote_expiry_days),
     paymentTermsDays: resolveQuotePaymentTermsDays(
       null,
@@ -107,6 +108,7 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
         quoteRequestId: quoteRequest.id,
         opportunityId: quoteRequest.opportunity_id,
         projectName: quoteRequest.project_name,
+        productionDeadline: "",
         expiryDate: computeDefaultQuoteExpiryDate(appSettings.default_quote_expiry_days),
         paymentTermsDays: resolveQuotePaymentTermsDays(
           linkedCompany?.payment_terms_days,

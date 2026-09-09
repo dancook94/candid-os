@@ -24,6 +24,7 @@ import {
   PAYMENT_TERMS_MIN_DAYS,
   resolveQuotePaymentTermsDays,
 } from "@/lib/payment-terms";
+import { resolveQuoteProductionDeadlineForSave } from "@/lib/jobs/production-deadline";
 import {
   deleteOrphanedQuoteItemImages,
   formatSupabaseStorageError,
@@ -74,6 +75,7 @@ export type QuoteBuilderInitialValues = {
   quoteRequestId: string | null;
   opportunityId: string | null;
   projectName: string;
+  productionDeadline: string;
   expiryDate: string;
   paymentTermsDays: number;
   introduction: string;
@@ -420,6 +422,9 @@ export function QuoteBuilderForm({
     initialValues.opportunityId ?? ""
   );
   const [projectName, setProjectName] = useState(initialValues.projectName);
+  const [productionDeadline, setProductionDeadline] = useState(
+    initialValues.productionDeadline
+  );
   const [expiryDate, setExpiryDate] = useState(initialValues.expiryDate);
   const [paymentTermsDays, setPaymentTermsDays] = useState(
     String(initialValues.paymentTermsDays)
@@ -744,6 +749,11 @@ export function QuoteBuilderForm({
         setQuoteRequestId(resolvedQuoteRequestId);
       }
 
+      const quoteRequiredDate = resolveQuoteProductionDeadlineForSave({
+        quoteRequestId: resolvedQuoteRequestId,
+        productionDeadline,
+      });
+
       const versionFields = {
         version_status: "draft" as const,
         expiry_date: expiryDate || null,
@@ -802,6 +812,7 @@ export function QuoteBuilderForm({
             quote_request_id: resolvedQuoteRequestId,
             opportunity_id: linkedOpportunityId,
             project_name: trimmedProjectName,
+            required_date: quoteRequiredDate,
             status: "draft",
             current_version: 1,
             created_by: createdBy,
@@ -925,6 +936,7 @@ export function QuoteBuilderForm({
           quote_request_id: resolvedQuoteRequestId,
           opportunity_id: opportunityId || null,
           project_name: trimmedProjectName,
+          required_date: quoteRequiredDate,
           updated_at: new Date().toISOString(),
         })
         .eq("id", quoteId);
@@ -1248,6 +1260,7 @@ export function QuoteBuilderForm({
 
                   setCompanyId(request.company_id);
                   applyCompanyPaymentTerms(request.company_id);
+                  setProductionDeadline("");
                 }}
                 disabled={isBusy || isReadOnly || !companyId}
                 className="h-8 w-full rounded-lg border border-neutral-300 bg-white px-2.5 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
@@ -1271,6 +1284,22 @@ export function QuoteBuilderForm({
                 required
               />
             </div>
+
+            {!quoteRequestId ? (
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="production-deadline">Production deadline</Label>
+                <Input
+                  id="production-deadline"
+                  type="date"
+                  value={productionDeadline}
+                  onChange={(event) => setProductionDeadline(event.target.value)}
+                  disabled={isBusy || isReadOnly}
+                />
+                <p className="text-xs text-muted-foreground">
+                  The date production needs this job completed by.
+                </p>
+              </div>
+            ) : null}
 
             <div className="space-y-2">
               <Label htmlFor="expiry-date">Expiry date</Label>

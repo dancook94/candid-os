@@ -3,7 +3,9 @@
 import Link from "next/link";
 import { AlertTriangle, Clock } from "lucide-react";
 
+import { JobProductionBoardDeadlineControl } from "@/components/production/job-production-board-deadline-control";
 import { ProductionBoardPrintfactoryPreview } from "@/components/production/production-board-printfactory-preview";
+import { formatProductionBoardDeadline } from "@/lib/jobs/production-deadline";
 import { JOB_PRODUCTION_BOARD_STAGE_LABELS } from "@/lib/production/job-board-constants";
 import { resolveJobProductionBoardCardStage } from "@/lib/production/job-board-mobile";
 import type { JobProductionBoardCard } from "@/lib/production/job-board-service";
@@ -31,17 +33,13 @@ function DeadlineSummary({ card }: { card: JobProductionBoardCard }) {
     return <span className="text-xs font-medium text-amber-800">Due today</span>;
   }
 
-  if (card.required_date) {
-    return (
-      <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-        <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden />
-        {card.required_date}
-        {card.fulfilment_method ? ` · ${card.fulfilment_method}` : ""}
-      </span>
-    );
-  }
-
-  return null;
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+      <Clock className="h-3.5 w-3.5 shrink-0" aria-hidden />
+      {formatProductionBoardDeadline(card.required_date)}
+      {card.required_date && card.fulfilment_method ? ` · ${card.fulfilment_method}` : ""}
+    </span>
+  );
 }
 
 export function JobProductionBoardMobileCard({ card }: JobProductionBoardMobileCardProps) {
@@ -109,8 +107,14 @@ export function JobProductionBoardMobileCard({ card }: JobProductionBoardMobileC
             ) : null}
           </div>
 
-          <div className="mt-2">
+          <div className="mt-2 space-y-1">
             <DeadlineSummary card={card} />
+            <div
+              onClick={(event) => event.preventDefault()}
+              onKeyDown={(event) => event.stopPropagation()}
+            >
+              <JobProductionBoardDeadlineControl card={card} />
+            </div>
           </div>
 
           {card.readiness_unresolved_details.length > 0 ? (

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { AdminJobSchedulingPanel } from "@/components/admin-job-scheduling-panel";
 import { AdminJobSlackPanel } from "@/components/admin-job-slack-panel";
 import { AdminJobArtworkPanel } from "@/components/admin-job-artwork-panel";
 import { AdminJobArtworkSourcePanel } from "@/components/admin-job-artwork-source-panel";
@@ -142,6 +143,11 @@ export default async function AdminJobDetailPage({
               ) : null}
             </div>
           }
+        />
+
+        <AdminJobSchedulingPanel
+          jobId={detail.job.id}
+          initialRequiredDate={detail.job.required_date}
         />
 
         <Card className="portal-surface mb-6 overflow-hidden">

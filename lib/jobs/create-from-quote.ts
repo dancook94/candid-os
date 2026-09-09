@@ -23,6 +23,7 @@ import {
   prepareQuoteAcceptedNotification,
 } from "@/lib/jobs/notifications";
 import type { DropboxSetupStatus, JobRecord } from "@/lib/jobs/types";
+import { resolveJobRequiredDateFromQuoteSources } from "@/lib/jobs/production-deadline";
 import { resolveQuoteRequestIdForQuote } from "@/lib/quote-request-link";
 import { ensureProductionManifestForJob } from "@/lib/manifest/service";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -37,6 +38,7 @@ type QuoteForJob = {
   contact_id: string | null;
   current_version: number;
   status: string;
+  required_date: string | null;
 };
 
 type QuoteVersionForJob = {
@@ -230,7 +232,7 @@ async function loadQuoteForJobCreation(
   const { data, error } = await adminClient
     .from("quotes")
     .select(
-      "id, company_id, quote_number, project_name, opportunity_id, quote_request_id, contact_id, current_version, status"
+      "id, company_id, quote_number, project_name, opportunity_id, quote_request_id, contact_id, current_version, status, required_date"
     )
     .eq("id", quoteId)
     .maybeSingle();
@@ -559,6 +561,11 @@ export async function ensureJobForAcceptedQuote({
     adminClient,
     quoteRequestId
   );
+  const requiredDate = resolveJobRequiredDateFromQuoteSources({
+    quoteRequestId,
+    quoteRequestRequiredDate: requestContext.required_date,
+    quoteRequiredDate: quote.required_date,
+  });
 
   const acceptedAt = version?.accepted_at ?? new Date().toISOString();
 
@@ -577,7 +584,7 @@ export async function ensureJobForAcceptedQuote({
         contact_id: quote.contact_id,
         project_name: quote.project_name,
         fulfilment_method: requestContext.fulfilment_method,
-        required_date: requestContext.required_date,
+        required_date: requiredDate,
         accepted_at: acceptedAt,
         accepted_by: actorProfileId ?? null,
       },

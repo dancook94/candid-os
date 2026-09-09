@@ -2,15 +2,17 @@
 
 import Link from "next/link";
 import { formatCrmDateTime } from "@/lib/crm/format-datetime";
+import { JobProductionBoardDeadlineControl } from "@/components/production/job-production-board-deadline-control";
 import { StatusBadge } from "@/components/status-badge";
 import { ProductionBoardPrintfactoryPreview } from "@/components/production/production-board-printfactory-preview";
 import type { JobProductionBoardCard } from "@/lib/production/job-board-service";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, Clock, ExternalLink } from "lucide-react";
+import { AlertTriangle, ExternalLink } from "lucide-react";
 
 type JobProductionBoardCardViewProps = {
   card: JobProductionBoardCard;
   isDragging?: boolean;
+  onDeadlineUpdated?: (card: JobProductionBoardCard) => void;
 };
 
 function DeadlineBadge({ card }: { card: JobProductionBoardCard }) {
@@ -45,6 +47,7 @@ function DeadlineBadge({ card }: { card: JobProductionBoardCard }) {
 export function JobProductionBoardCardView({
   card,
   isDragging,
+  onDeadlineUpdated,
 }: JobProductionBoardCardViewProps) {
   return (
     <div
@@ -98,13 +101,11 @@ export function JobProductionBoardCardView({
       ) : null}
 
       <div className="mt-3 grid gap-1 text-xs text-muted-foreground">
-        {card.required_date ? (
-          <p className="flex items-center gap-1">
-            <Clock className="h-3 w-3 shrink-0" aria-hidden />
-            Required {card.required_date}
-            {card.fulfilment_method ? ` · ${card.fulfilment_method}` : ""}
-          </p>
-        ) : card.fulfilment_method ? (
+        <JobProductionBoardDeadlineControl
+          card={card}
+          onUpdated={onDeadlineUpdated}
+        />
+        {!card.required_date && card.fulfilment_method ? (
           <p>{card.fulfilment_method}</p>
         ) : null}
         {card.priority_label ? <p>Priority: {card.priority_label}</p> : null}
