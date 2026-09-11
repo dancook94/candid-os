@@ -3,6 +3,7 @@ import { revalidatePath } from "next/cache";
 
 import { verifyApprovedCrmStaff } from "@/lib/crm-auth";
 import { updateJobRequiredDate } from "@/lib/jobs/production-deadline";
+import { postJobProductionDeadlineTimelineEventSafe } from "@/lib/slack/job-timeline";
 import { ProductionError } from "@/lib/production/errors";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -34,7 +35,26 @@ export async function PATCH(
   const adminClient = createAdminClient();
 
   try {
-    const result = await updateJobRequiredDate(adminClient, jobId, body.requiredDate ?? null);
+    const result = await updateJobRequiredDate(
+      adminClient,
+      jobId,
+      body.requiredDate ?? null
+    );
+
+    if (result.changed) {
+      try {
+        await postJobProductionDeadlineTimelineEventSafe(adminClient, {
+          jobId,
+          oldDate: result.previousRequiredDate,
+          newDate: result.requiredDate,
+          actorProfileId: auth.userId,
+        });
+      } catch (slackError) {
+        if (process.env.NODE_ENV === "development") {
+          console.error("[jobs] Slack production deadline timeline failed", slackError);
+        }
+      }
+    }
 
     revalidatePath("/admin/production");
     revalidatePath(`/admin/jobs/${jobId}`);

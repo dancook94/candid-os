@@ -3,7 +3,10 @@ import { describe, it } from "node:test";
 
 import {
   buildSlackJobChannelIdempotencyKey,
+  buildSlackJobTimelineDeadlineIdempotencyKey,
+  buildSlackJobTimelineStageIdempotencyKey,
   SLACK_JOB_CHANNEL_NOTIFICATION_TYPE,
+  SLACK_JOB_TIMELINE_NOTIFICATION_TYPE,
 } from "@/lib/slack/idempotency";
 
 describe("slack delivery idempotency", () => {
@@ -16,6 +19,28 @@ describe("slack delivery idempotency", () => {
 
   it("uses a dedicated notification type for job channel creation", () => {
     assert.equal(SLACK_JOB_CHANNEL_NOTIFICATION_TYPE, "slack_job_channel_created");
+  });
+
+  it("uses stable timeline idempotency keys for deadline transitions", () => {
+    assert.equal(
+      buildSlackJobTimelineDeadlineIdempotencyKey("job-1", null, "2026-09-18"),
+      "slack:job_timeline:job-1:deadline:none:2026-09-18"
+    );
+    assert.equal(
+      buildSlackJobTimelineDeadlineIdempotencyKey("job-1", "2026-09-17", "2026-09-18"),
+      "slack:job_timeline:job-1:deadline:2026-09-17:2026-09-18"
+    );
+  });
+
+  it("uses stage history row id in timeline idempotency keys", () => {
+    assert.equal(
+      buildSlackJobTimelineStageIdempotencyKey("job-1", "hist-99"),
+      "slack:job_timeline:job-1:stage:hist-99"
+    );
+  });
+
+  it("uses a dedicated notification type for job timeline events", () => {
+    assert.equal(SLACK_JOB_TIMELINE_NOTIFICATION_TYPE, "slack_job_timeline_event");
   });
 });
 

@@ -608,14 +608,22 @@ export async function applyJobProductionBoardStageChange(
     throw new ProductionError(updateError.message, 500);
   }
 
-  await adminClient.from("job_production_board_stage_history").insert({
-    job_id: jobId,
-    previous_stage: previousStage,
-    new_stage: newStage,
-    changed_by_profile_id: actorProfileId,
-    change_reason: reason?.trim() || null,
-    is_automatic: false,
-  });
+  const { data: historyRow, error: historyError } = await adminClient
+    .from("job_production_board_stage_history")
+    .insert({
+      job_id: jobId,
+      previous_stage: previousStage,
+      new_stage: newStage,
+      changed_by_profile_id: actorProfileId,
+      change_reason: reason?.trim() || null,
+      is_automatic: false,
+    })
+    .select("id")
+    .single();
+
+  if (historyError) {
+    throw new ProductionError(historyError.message, 500);
+  }
 
   if (closeoutUpdates && updated) {
     await logNonBillableProductionBoardArchive(
@@ -657,6 +665,27 @@ export async function applyJobProductionBoardStageChange(
       taskId: null,
     },
   });
+
+  try {
+    const { postJobProductionStageTimelineEventSafe } = await import(
+      "@/lib/slack/job-timeline"
+    );
+    await postJobProductionStageTimelineEventSafe(adminClient, {
+      jobId,
+      historyRowId: historyRow.id as string,
+      previousLabel: JOB_PRODUCTION_BOARD_STAGE_LABELS[previousStage],
+      newLabel: JOB_PRODUCTION_BOARD_STAGE_LABELS[newStage],
+      actorProfileId,
+    });
+  } catch (slackError) {
+    if (process.env.NODE_ENV === "development") {
+      console.error("[production] Slack stage timeline failed", {
+        jobId,
+        message:
+          slackError instanceof Error ? slackError.message : String(slackError),
+      });
+    }
+  }
 
   return {
     job: updated,

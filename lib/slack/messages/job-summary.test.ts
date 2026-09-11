@@ -14,9 +14,13 @@ function buildContext(
     companyName: "Dan C",
     quoteReference: "Q-6",
     ownerName: null,
-    requiredDateLabel: "10 Sep 2026",
+    requiredDateLabel: "2026-09-10",
     requiredTimeLabel: "10:00",
-    fulfilmentLabel: "DELIVERY",
+    productionDeadlineLabel: "Wed 10 Sep · 10:00",
+    artworkLabel: "Awaiting artwork",
+    proofLabel: "Required",
+    productionStageLabel: "Accepted Quotes",
+    fulfilmentLabel: "Delivery",
     isDelivery: true,
     isCollection: false,
     deliveryAddressLines: [
@@ -36,100 +40,102 @@ function buildContext(
     ],
     notes: "Deliver to loading bay B.",
     jobUrl: "https://app.example.com/admin/jobs/job-1",
+    quoteUrl: "https://app.example.com/admin/quotes/quote-6",
+    dropboxWebUrl: null,
     ...overrides,
   };
 }
 
 describe("slack job summary message", () => {
-  it("renders a delivery job with quote and job numbers that can differ", () => {
+  it("uses job reference and company in the header", () => {
     const message = buildJobSummarySlackMessage(buildContext());
 
-    assert.match(message.text, /JOB ACCEPTED/);
-    assert.match(message.text, /J-7 — September Dibond Panels/);
+    assert.match(message.text, /J-7 · Dan C/);
+    assert.doesNotMatch(message.text, /JOB ACCEPTED/);
+
+    const blockText = JSON.stringify(message.blocks);
+    assert.match(blockText, /J-7 · Dan C/);
+    assert.doesNotMatch(blockText, /J-7 — September/);
+  });
+
+  it("includes project, customer, deadline, fulfilment, quote, artwork, proof and production fields", () => {
+    const message = buildJobSummarySlackMessage(buildContext());
+    const blockText = JSON.stringify(message.blocks);
+
+    assert.match(message.text, /Project: September Dibond Panels/);
     assert.match(message.text, /Customer: Dan C/);
+    assert.match(message.text, /Production deadline:/);
+    assert.match(message.text, /Fulfilment: Delivery/);
     assert.match(message.text, /Quote: Q-6/);
-    assert.match(message.text, /Required: 10 Sep 2026 · 10:00/);
-    assert.match(message.text, /Fulfilment: DELIVERY/);
-    assert.match(message.text, /Delivery:/);
-    assert.match(message.text, /1 × Dibond Panels/);
-    assert.match(message.text, /2440 × 1220mm · 3mm Dibond/);
+    assert.match(message.text, /Artwork: Awaiting artwork/);
+    assert.match(message.text, /Proof: Required/);
+    assert.match(message.text, /Production: Accepted Quotes/);
 
-    const blockText = JSON.stringify(message.blocks);
-    assert.match(blockText, /\*Quote\*/);
-    assert.match(blockText, /Q-6/);
-    assert.match(blockText, /J-7/);
-    assert.doesNotMatch(blockText, /Not specified/);
+    assert.match(blockText, /\*Production deadline\*/);
+    assert.match(blockText, /\*Artwork\*/);
+    assert.match(blockText, /\*Proof\*/);
+    assert.match(blockText, /\*Production\*/);
   });
 
-  it("shows a warning instead of Not specified when fulfilment is missing", () => {
+  it("shows Not set when no production deadline exists", () => {
     const message = buildJobSummarySlackMessage(
       buildContext({
-        fulfilmentLabel: null,
-        isDelivery: false,
-        isCollection: false,
-        deliveryAddressLines: [],
-      })
-    );
-
-    const blockText = JSON.stringify(message.blocks);
-    assert.match(blockText, /Fulfilment details missing/);
-    assert.doesNotMatch(blockText, /Not specified/);
-  });
-
-  it("omits optional PO when missing", () => {
-    const message = buildJobSummarySlackMessage(
-      buildContext({
-        purchaseOrderNumber: null,
-      })
-    );
-
-    assert.doesNotMatch(message.text, /PO:/);
-    assert.doesNotMatch(JSON.stringify(message.blocks), /\*PO\*/);
-  });
-
-  it("formats required date and time cleanly for UK use", () => {
-    const message = buildJobSummarySlackMessage(
-      buildContext({
-        requiredDateLabel: "10 Sep 2026",
-        requiredTimeLabel: "10:00",
-      })
-    );
-
-    assert.match(message.text, /Required: 10 Sep 2026 · 10:00/);
-  });
-
-  it("warns when required date/time is missing instead of showing an empty block", () => {
-    const message = buildJobSummarySlackMessage(
-      buildContext({
+        productionDeadlineLabel: "Not set",
         requiredDateLabel: null,
         requiredTimeLabel: null,
       })
     );
 
-    assert.match(message.text, /Required date\/time missing/);
-    assert.doesNotMatch(message.text, /Required:\s*$/m);
+    assert.match(message.text, /Production deadline: Not set/);
+    assert.doesNotMatch(JSON.stringify(message.blocks), /missing/);
   });
 
-  it("renders production item dimensions and material on a detail line", () => {
+  it("preserves delivery, site contact, PO, notes and production items", () => {
+    const message = buildJobSummarySlackMessage(buildContext());
+
+    assert.match(message.text, /Delivery:/);
+    assert.match(message.text, /ExCeL London/);
+    assert.match(message.text, /Site contact:/);
+    assert.match(message.text, /PO: PO12345/);
+    assert.match(message.text, /Notes: Deliver to loading bay B./);
+    assert.match(message.text, /1 × Dibond Panels/);
+    assert.match(message.text, /2440 × 1220mm · 3mm Dibond/);
+  });
+
+  it("includes Candid OS and quote action buttons when URLs exist", () => {
+    const message = buildJobSummarySlackMessage(buildContext());
+    const blockText = JSON.stringify(message.blocks);
+
+    assert.match(blockText, /Open Job in Candid OS/);
+    assert.match(blockText, /View Quote/);
+    assert.match(blockText, /admin\/jobs\/job-1/);
+    assert.match(blockText, /admin\/quotes\/quote-6/);
+  });
+
+  it("does not add a Dropbox button when only a folder path would be available", () => {
     const message = buildJobSummarySlackMessage(
       buildContext({
-        productionItems: [
-          {
-            headline: "2 × Foamalite panels",
-            detail: "1200 × 800mm · 5mm Foamalite",
-          },
-        ],
+        dropboxWebUrl: null,
       })
     );
 
-    assert.match(message.text, /2 × Foamalite panels/);
-    assert.match(message.text, /1200 × 800mm · 5mm Foamalite/);
+    assert.doesNotMatch(JSON.stringify(message.blocks), /Dropbox/);
+  });
+
+  it("adds a Dropbox button only for genuine web URLs", () => {
+    const message = buildJobSummarySlackMessage(
+      buildContext({
+        dropboxWebUrl: "https://www.dropbox.com/home/Candid/J-7",
+      })
+    );
+
+    assert.match(JSON.stringify(message.blocks), /"text":"Dropbox"/);
   });
 
   it("renders a collection job without an empty delivery section", () => {
     const message = buildJobSummarySlackMessage(
       buildContext({
-        fulfilmentLabel: "COLLECTION",
+        fulfilmentLabel: "Collection",
         isDelivery: false,
         isCollection: true,
         deliveryAddressLines: [],
@@ -140,21 +146,15 @@ describe("slack job summary message", () => {
       })
     );
 
-    assert.match(message.text, /Fulfilment: COLLECTION/);
+    assert.match(message.text, /Fulfilment: Collection/);
     assert.doesNotMatch(message.text, /Delivery:/);
-    assert.doesNotMatch(message.text, /Site contact:/);
-    assert.doesNotMatch(message.text, /PO:/);
-    assert.doesNotMatch(message.text, /Notes:/);
-
-    const blockText = JSON.stringify(message.blocks);
-    assert.match(blockText, /COLLECTION/);
-    assert.doesNotMatch(blockText, /\*Delivery\*/);
   });
 
-  it("omits optional sections when values are missing", () => {
+  it("omits optional quote button and sections when missing", () => {
     const message = buildJobSummarySlackMessage(
       buildContext({
         quoteReference: null,
+        quoteUrl: null,
         productionItems: [],
         jobUrl: null,
         notes: null,
@@ -162,7 +162,17 @@ describe("slack job summary message", () => {
     );
 
     assert.doesNotMatch(message.text, /Quote:/);
-    assert.doesNotMatch(message.text, /Production:/);
+    assert.doesNotMatch(JSON.stringify(message.blocks), /View Quote/);
     assert.doesNotMatch(message.text, /Open Job in Candid OS/);
+  });
+
+  it("escapes dynamic mrkdwn in notes", () => {
+    const message = buildJobSummarySlackMessage(
+      buildContext({
+        notes: "Check A & B <urgent>",
+      })
+    );
+
+    assert.match(JSON.stringify(message.blocks), /A &amp; B &lt;urgent&gt;/);
   });
 });

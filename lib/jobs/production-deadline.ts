@@ -98,9 +98,36 @@ export async function updateJobRequiredDate(
 ) {
   const normalized = normalizeProductionDeadlineDate(requiredDate);
 
+  const { data: existing, error: existingError } = await adminClient
+    .from("jobs")
+    .select("id, required_date")
+    .eq("id", jobId)
+    .maybeSingle();
+
+  if (existingError) {
+    throw new Error(existingError.message);
+  }
+
+  if (!existing) {
+    throw new Error("Job not found.");
+  }
+
+  const previousRequiredDate =
+    (existing.required_date as string | null | undefined)?.trim() || null;
+  const nextRequiredDate = normalized;
+
+  if (previousRequiredDate === nextRequiredDate) {
+    return {
+      jobId: existing.id as string,
+      requiredDate: nextRequiredDate,
+      previousRequiredDate,
+      changed: false as const,
+    };
+  }
+
   const { data, error } = await adminClient
     .from("jobs")
-    .update({ required_date: normalized })
+    .update({ required_date: nextRequiredDate })
     .eq("id", jobId)
     .select("id, required_date")
     .maybeSingle();
@@ -116,5 +143,7 @@ export async function updateJobRequiredDate(
   return {
     jobId: data.id as string,
     requiredDate: (data.required_date as string | null) ?? null,
+    previousRequiredDate,
+    changed: true as const,
   };
 }

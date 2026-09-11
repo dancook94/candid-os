@@ -1,9 +1,5 @@
 import type { SlackJobSummaryContext } from "@/lib/slack/job-context-loader";
-
-function joinRequiredLabel(context: SlackJobSummaryContext) {
-  const parts = [context.requiredDateLabel, context.requiredTimeLabel].filter(Boolean);
-  return parts.length > 0 ? parts.join(" · ") : null;
-}
+import { escapeSlackMrkdwn } from "@/lib/slack/mrkdwn";
 
 function sectionMarkdown(text: string) {
   return {
@@ -22,19 +18,7 @@ function dividerBlock() {
 function fieldMarkdown(label: string, value: string) {
   return {
     type: "mrkdwn",
-    text: `*${label}*\n${value}`,
-  };
-}
-
-function contextWarningBlock(message: string) {
-  return {
-    type: "context",
-    elements: [
-      {
-        type: "mrkdwn",
-        text: `:warning: ${message}`,
-      },
-    ],
+    text: `*${escapeSlackMrkdwn(label)}*\n${escapeSlackMrkdwn(value)}`,
   };
 }
 
@@ -54,11 +38,12 @@ function chunkFields(fields: Array<{ type: string; text: string }>) {
 function formatProductionItemsForMarkdown(items: SlackJobSummaryContext["productionItems"]) {
   return items
     .map((item) => {
+      const headline = escapeSlackMrkdwn(item.headline);
       if (item.detail) {
-        return `• ${item.headline}\n  ${item.detail}`;
+        return `• ${headline}\n  ${escapeSlackMrkdwn(item.detail)}`;
       }
 
-      return `• ${item.headline}`;
+      return `• ${headline}`;
     })
     .join("\n");
 }
@@ -69,60 +54,63 @@ function formatProductionItemsForPlainText(items: SlackJobSummaryContext["produc
     .join("\n");
 }
 
+function buildHeaderText(context: SlackJobSummaryContext) {
+  return `${context.jobReference} · ${context.companyName}`;
+}
+
 export function buildJobSummarySlackMessage(context: SlackJobSummaryContext) {
+  const headerText = buildHeaderText(context);
+
   const blocks: Array<Record<string, unknown>> = [
     {
       type: "header",
       text: {
         type: "plain_text",
-        text: "JOB ACCEPTED",
+        text: headerText.slice(0, 150),
         emoji: false,
       },
     },
-    sectionMarkdown(`*${context.jobReference}* — ${context.projectName}`),
     dividerBlock(),
   ];
 
-  const required = joinRequiredLabel(context);
-  const summaryFields = [fieldMarkdown("Customer", context.companyName)];
-
-  if (context.quoteReference) {
-    summaryFields.push(fieldMarkdown("Quote", context.quoteReference));
-  }
-
-  if (required) {
-    summaryFields.push(fieldMarkdown("Required", required));
-  }
-
-  if (context.fulfilmentLabel) {
-    summaryFields.push(fieldMarkdown("Fulfilment", context.fulfilmentLabel));
-  }
+  const summaryFields = [
+    fieldMarkdown("Project", context.projectName),
+    fieldMarkdown("Customer", context.companyName),
+    fieldMarkdown("Production deadline", context.productionDeadlineLabel),
+    ...(context.fulfilmentLabel
+      ? [fieldMarkdown("Fulfilment", context.fulfilmentLabel)]
+      : []),
+    ...(context.quoteReference
+      ? [fieldMarkdown("Quote", context.quoteReference)]
+      : []),
+    fieldMarkdown("Artwork", context.artworkLabel),
+    fieldMarkdown("Proof", context.proofLabel),
+    fieldMarkdown("Production", context.productionStageLabel),
+  ];
 
   blocks.push(...chunkFields(summaryFields));
 
-  if (!required) {
-    blocks.push(contextWarningBlock("Required date/time missing"));
-  }
-
-  if (!context.fulfilmentLabel) {
-    blocks.push(contextWarningBlock("Fulfilment details missing"));
-  }
-
   if (context.isDelivery && context.deliveryAddressLines.length > 0) {
     blocks.push(
-      sectionMarkdown(`*Delivery*\n${context.deliveryAddressLines.join("\n")}`)
+      sectionMarkdown(
+        `*Delivery*\n${context.deliveryAddressLines.map((line) => escapeSlackMrkdwn(line)).join("\n")}`
+      )
     );
   }
 
   if (context.siteContactName || context.siteContactPhone) {
     const contactLines = [context.siteContactName, context.siteContactPhone].filter(
       Boolean
+    ) as string[];
+    blocks.push(
+      sectionMarkdown(
+        `*Site contact*\n${contactLines.map((line) => escapeSlackMrkdwn(line)).join("\n")}`
+      )
     );
-    blocks.push(sectionMarkdown(`*Site contact*\n${contactLines.join("\n")}`));
   }
 
   if (context.purchaseOrderNumber) {
-    blocks.push(sectionMarkdown(`*PO*\n${context.purchaseOrderNumber}`));
+    blocks.push(sectionMarkdown(`*PO*\n${escapeSlackMrkdwn(context.purchaseOrderNumber)}`));
   }
 
   if (context.productionItems.length > 0) {
@@ -132,24 +120,54 @@ export function buildJobSummarySlackMessage(context: SlackJobSummaryContext) {
   }
 
   if (context.notes) {
-    blocks.push(sectionMarkdown(`*Notes*\n${context.notes}`));
+    blocks.push(sectionMarkdown(`*Notes*\n${escapeSlackMrkdwn(context.notes)}`));
   }
 
+  const actionElements: Array<Record<string, unknown>> = [];
+
   if (context.jobUrl) {
+    actionElements.push({
+      type: "button",
+      text: {
+        type: "plain_text",
+        text: "Open Job in Candid OS",
+        emoji: false,
+      },
+      url: context.jobUrl,
+      action_id: "open_job_in_candid_os",
+    });
+  }
+
+  if (context.quoteUrl) {
+    actionElements.push({
+      type: "button",
+      text: {
+        type: "plain_text",
+        text: "View Quote",
+        emoji: false,
+      },
+      url: context.quoteUrl,
+      action_id: "open_quote_in_candid_os",
+    });
+  }
+
+  if (context.dropboxWebUrl) {
+    actionElements.push({
+      type: "button",
+      text: {
+        type: "plain_text",
+        text: "Dropbox",
+        emoji: false,
+      },
+      url: context.dropboxWebUrl,
+      action_id: "open_dropbox_folder",
+    });
+  }
+
+  if (actionElements.length > 0) {
     blocks.push({
       type: "actions",
-      elements: [
-        {
-          type: "button",
-          text: {
-            type: "plain_text",
-            text: "Open Job in Candid OS",
-            emoji: false,
-          },
-          url: context.jobUrl,
-          action_id: "open_job_in_candid_os",
-        },
-      ],
+      elements: actionElements,
     });
   }
 
@@ -160,29 +178,23 @@ export function buildJobSummarySlackMessage(context: SlackJobSummaryContext) {
 }
 
 function buildPlainTextSummary(context: SlackJobSummaryContext) {
-  const lines: string[] = ["JOB ACCEPTED", ""];
+  const lines: string[] = [buildHeaderText(context), ""];
 
-  lines.push(`${context.jobReference} — ${context.projectName}`, "");
-
+  lines.push(`Project: ${context.projectName}`);
   lines.push(`Customer: ${context.companyName}`);
+  lines.push(`Production deadline: ${context.productionDeadlineLabel}`);
+
+  if (context.fulfilmentLabel) {
+    lines.push(`Fulfilment: ${context.fulfilmentLabel}`);
+  }
 
   if (context.quoteReference) {
     lines.push(`Quote: ${context.quoteReference}`);
   }
 
-  const required = joinRequiredLabel(context);
-  if (required) {
-    lines.push(`Required: ${required}`);
-  } else {
-    lines.push("⚠ Required date/time missing");
-  }
-
-  if (context.fulfilmentLabel) {
-    lines.push(`Fulfilment: ${context.fulfilmentLabel}`);
-  } else {
-    lines.push("⚠ Fulfilment details missing");
-  }
-
+  lines.push(`Artwork: ${context.artworkLabel}`);
+  lines.push(`Proof: ${context.proofLabel}`);
+  lines.push(`Production: ${context.productionStageLabel}`);
   lines.push("");
 
   if (context.isDelivery && context.deliveryAddressLines.length > 0) {
@@ -216,6 +228,14 @@ function buildPlainTextSummary(context: SlackJobSummaryContext) {
 
   if (context.jobUrl) {
     lines.push(`Open Job in Candid OS: ${context.jobUrl}`);
+  }
+
+  if (context.quoteUrl) {
+    lines.push(`View Quote: ${context.quoteUrl}`);
+  }
+
+  if (context.dropboxWebUrl) {
+    lines.push(`Dropbox: ${context.dropboxWebUrl}`);
   }
 
   return lines.join("\n").trim();

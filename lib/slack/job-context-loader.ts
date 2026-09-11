@@ -2,8 +2,16 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { formatCrmDate } from "@/lib/crm/format-datetime";
 import { isLikelyNonPrintLine, MANIFEST_ITEM_SELECT } from "@/lib/manifest/constants";
+import {
+  formatSlackFulfilmentLabel,
+  formatSlackJobArtworkLabel,
+  formatSlackJobProofLabel,
+  formatSlackProductionBoardStageLabel,
+  formatSlackProductionDeadlineLabel,
+  resolveSlackDropboxWebUrl,
+} from "@/lib/slack/summary-labels";
+import type { JobArtworkSource } from "@/lib/jobs/types";
 
 export type SlackJobSummaryProductionItem = {
   headline: string;
@@ -17,9 +25,16 @@ export type SlackJobSummaryContext = {
   companyName: string;
   quoteReference: string | null;
   ownerName: string | null;
+  /** @deprecated Use productionDeadlineLabel — kept for tests migrating gradually */
   requiredDateLabel: string | null;
   requiredTimeLabel: string | null;
+  productionDeadlineLabel: string;
+  artworkLabel: string;
+  proofLabel: string;
+  productionStageLabel: string;
   fulfilmentLabel: string | null;
+  quoteUrl: string | null;
+  dropboxWebUrl: string | null;
   isDelivery: boolean;
   isCollection: boolean;
   deliveryAddressLines: string[];
@@ -101,7 +116,7 @@ export async function loadSlackJobSummaryContext(
   const { data: job, error: jobError } = await adminClient
     .from("jobs")
     .select(
-      "id, job_reference, project_name, company_id, quote_id, quote_request_id, opportunity_id, fulfilment_method, required_date"
+      "id, job_reference, project_name, company_id, quote_id, quote_request_id, opportunity_id, fulfilment_method, required_date, status, artwork_source, proof_required, proof_workflow_status, production_board_stage, dropbox_folder_path"
     )
     .eq("id", jobId)
     .maybeSingle();
@@ -161,14 +176,11 @@ export async function loadSlackJobSummaryContext(
     .is("deleted_at", null)
     .order("created_at", { ascending: true });
 
-  const fulfilmentMethod = (
-    job.fulfilment_method ??
-    quoteRequest?.fulfilment_method ??
-    ""
-  )
-    .toString()
-    .trim()
-    .toLowerCase();
+  const fulfilmentMethodRaw =
+    (job.fulfilment_method as string | null) ??
+    (quoteRequest?.fulfilment_method as string | null) ??
+    "";
+  const fulfilmentMethod = fulfilmentMethodRaw.toString().trim().toLowerCase();
 
   const isDelivery = fulfilmentMethod === "delivery";
   const isCollection = fulfilmentMethod === "collection";
@@ -177,6 +189,16 @@ export async function loadSlackJobSummaryContext(
     (item) => !isLikelyNonPrintLine((item.item_name as string) ?? "")
   );
 
+  const requiredTimeLabel = formatRequiredTime(
+    quoteRequest?.requested_time as string | null
+  );
+  const productionDeadlineLabel = formatSlackProductionDeadlineLabel(
+    job.required_date as string | null,
+    requiredTimeLabel
+  );
+
+  const quoteId = job.quote_id as string | null;
+
   return {
     jobId: job.id as string,
     jobReference: job.job_reference as string,
@@ -184,11 +206,24 @@ export async function loadSlackJobSummaryContext(
     companyName: company?.company_name?.trim() || "Unknown company",
     quoteReference: quote?.quote_number ? `Q-${quote.quote_number}` : null,
     ownerName,
-    requiredDateLabel: job.required_date
-      ? formatCrmDate(job.required_date as string)
-      : null,
-    requiredTimeLabel: formatRequiredTime(quoteRequest?.requested_time as string | null),
-    fulfilmentLabel: isDelivery ? "DELIVERY" : isCollection ? "COLLECTION" : null,
+    requiredDateLabel: job.required_date ? String(job.required_date).slice(0, 10) : null,
+    requiredTimeLabel,
+    productionDeadlineLabel,
+    artworkLabel: formatSlackJobArtworkLabel({
+      artworkSource: job.artwork_source as JobArtworkSource | null,
+      jobStatus: job.status as string,
+    }),
+    proofLabel: formatSlackJobProofLabel({
+      proofRequired: job.proof_required as boolean | null,
+      proofWorkflowStatus: job.proof_workflow_status as string | null,
+    }),
+    productionStageLabel: formatSlackProductionBoardStageLabel(
+      job.production_board_stage as string | null
+    ),
+    fulfilmentLabel: formatSlackFulfilmentLabel(fulfilmentMethodRaw || null),
+    quoteUrl:
+      appBaseUrl && quoteId ? `${appBaseUrl}/admin/quotes/${quoteId}` : null,
+    dropboxWebUrl: resolveSlackDropboxWebUrl(job.dropbox_folder_path as string | null),
     isDelivery,
     isCollection,
     deliveryAddressLines: isDelivery
