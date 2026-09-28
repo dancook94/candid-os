@@ -12,6 +12,7 @@ import {
   FileText,
   Gauge,
   History,
+  Layers,
   LogOut,
   Mail,
   Megaphone,
@@ -117,6 +118,11 @@ const adminLinks: NavLink[] = [
     href: "/admin/jobs",
     label: "Jobs",
     icon: Package,
+  },
+  {
+    href: "/admin/materials",
+    label: "Materials",
+    icon: Layers,
   },
   updatesLink,
   {
