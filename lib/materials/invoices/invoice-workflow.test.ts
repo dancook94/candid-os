@@ -358,9 +358,173 @@ describe("supplier invoice phase 1", () => {
     assert.equal(imageDraft.processingStatus, "extraction_error");
   });
 
+  it("parses a Pyramid sales invoice from the pdfjs text layout", async () => {
+    const text = await readFile(
+      new URL("./fixtures/pyramid-lcan01.txt", import.meta.url),
+      "utf8"
+    );
+    const draft = buildInvoiceDraft({
+      text,
+      extractionStatus: "extracted",
+      suppliers,
+      aliases: [
+        ...aliases,
+        {
+          supplierId: "pyramid",
+          alias: "Pyramid Display Materials Ltd.",
+          normalizedAlias: "pyramid display materials ltd.",
+        },
+      ],
+      products: [
+        {
+          id: "sigwhite-eco",
+          supplierId: "pyramid",
+          sku: null,
+          description:
+            "3mm 1500x3050mm SigWhite Eco DigMatt/Primer (0.15) Easy Release (Digital) PQ 60 (FG-04401)",
+          materialName: "Dibond SigWhite Eco 3mm 1500mm x 3050mm",
+          purchaseUnit: "sheet",
+          thicknessMm: 3,
+          colour: "White",
+          widthMm: 1500,
+          heightMm: 3050,
+          lengthMm: null,
+          currentPrice: 41.15,
+          currentPriceUnit: "sheet",
+        },
+        {
+          id: "foam-3",
+          supplierId: "pyramid",
+          sku: null,
+          description: "3mm 1220x2440mm White P/E Foamalite Xpress Foam PVC (PQ200)",
+          materialName: "Foamalite 3mm PVC 2440mm x 1220mm",
+          purchaseUnit: "sheet",
+          thicknessMm: 3,
+          colour: "White",
+          widthMm: 1220,
+          heightMm: 2440,
+          lengthMm: null,
+          currentPrice: 16.15,
+          currentPriceUnit: "sheet",
+        },
+        {
+          id: "foam-5",
+          supplierId: "pyramid",
+          sku: null,
+          description: "5mm 1220x2440mm White P/E Foamalite Xpress Foam PVC (PQ120)",
+          materialName: "Foamalite 5mm PVC 2440mm x 1220mm",
+          purchaseUnit: "sheet",
+          thicknessMm: 5,
+          colour: "White",
+          widthMm: 1220,
+          heightMm: 2440,
+          lengthMm: null,
+          currentPrice: 25.99,
+          currentPriceUnit: "sheet",
+        },
+        {
+          id: "briteline-removable",
+          supplierId: "pyramid",
+          sku: null,
+          description:
+            "Briteline MT WHT GB Removable 1370mm x 50m Monomeric Vinyl - Grey Adhesive (BLMVMWRG1370)",
+          materialName: "Briteline Greyback Removable 1370mm x 50m",
+          purchaseUnit: "roll",
+          thicknessMm: null,
+          colour: null,
+          widthMm: 1370,
+          heightMm: null,
+          lengthMm: 50000,
+          currentPrice: 89.11,
+          currentPriceUnit: "roll",
+        },
+      ],
+      mappings: [],
+      ignoreRules: [],
+    });
+
+    assert.equal(draft.rawSupplierName, "Pyramid Display Materials Ltd.");
+    assert.equal(draft.supplierId, "pyramid");
+    assert.equal(draft.invoiceNumber, "SI1314778");
+    assert.equal(draft.invoiceDate, "2026-09-29");
+    assert.equal(draft.subtotal, 765.45);
+    assert.equal(draft.vat, 153.09);
+    assert.equal(draft.total, 918.54);
+    assert.equal(draft.lines.length, 4);
+    assert.deepEqual(
+      draft.lines.map((line) => ({
+        sku: line.rawSupplierSku,
+        quantity: line.rawQuantity,
+        unit: line.rawUnit,
+        unitPrice: line.rawUnitPrice,
+        tax: line.rawTax,
+        total: line.rawLineTotal,
+        status: line.reviewStatus,
+        product: line.matchedProductId,
+        confidence: line.matchConfidence,
+      })),
+      [
+        {
+          sku: "BLMV137MWPC",
+          quantity: 1,
+          unit: "Roll",
+          unitPrice: 89.1,
+          tax: 20,
+          total: 89.1,
+          status: "needs_review",
+          product: "briteline-removable",
+          confidence: "low",
+        },
+        {
+          sku: "ALUED33044",
+          quantity: 5,
+          unit: "SHEET",
+          unitPrice: 41.15,
+          tax: 20,
+          total: 205.75,
+          status: "processed",
+          product: "sigwhite-eco",
+          confidence: "high",
+        },
+        {
+          sku: "FLXP32412PE",
+          quantity: 5,
+          unit: "SHEET",
+          unitPrice: 16.15,
+          tax: 20,
+          total: 80.75,
+          status: "processed",
+          product: "foam-3",
+          confidence: "high",
+        },
+        {
+          sku: "FLXP52412PE",
+          quantity: 15,
+          unit: "SHEET",
+          unitPrice: 25.99,
+          tax: 20,
+          total: 389.85,
+          status: "processed",
+          product: "foam-5",
+          confidence: "high",
+        },
+      ]
+    );
+    assert.match(draft.lines[0]?.rawDescription ?? "", /Permanent 1370mm x 50m/);
+    assert.match(draft.lines[0]?.rawDescription ?? "", /BLMVMWPC1370/);
+    assert.match(draft.lines[1]?.rawDescription ?? "", /FG-04401/);
+    assert.match(draft.lines[2]?.rawDescription ?? "", /PQ200/);
+    assert.match(draft.lines[3]?.rawDescription ?? "", /PQ120/);
+    assert.equal(
+      draft.warnings.some((warning) => warning.includes("Subtotal + VAT") || warning.includes("line totals")),
+      false
+    );
+  });
+
   it("has no price write, Gmail client, or material creation in the invoice workflow", async () => {
     const files = [
       "lib/materials/invoices/actions.ts",
+      "lib/materials/invoices/reprocess.ts",
       "lib/materials/invoices/queries.ts",
       "lib/materials/invoices/draft.ts",
       "lib/materials/invoices/match.ts",
@@ -377,9 +541,10 @@ describe("supplier invoice phase 1", () => {
     assert.doesNotMatch(combined, /gmail|googleapis/i);
     assert.doesNotMatch(combined, /from\("material_prices"\)[\s\S]{0,120}\.(insert|update|delete|upsert)/);
     assert.doesNotMatch(sources[0], /material_prices/);
+    assert.doesNotMatch(sources[1], /material_prices/);
     assert.doesNotMatch(combined, /createMaterialRecord/);
     assert.match(combined, /material_prices/);
-    assert.match(sources[1], /\.from\("material_prices"\)/);
-    assert.match(sources[1], /\.select\(/);
+    assert.match(sources[2], /\.from\("material_prices"\)/);
+    assert.match(sources[2], /\.select\(/);
   });
 });

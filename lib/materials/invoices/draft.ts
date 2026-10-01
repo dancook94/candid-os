@@ -66,10 +66,14 @@ export function buildInvoiceDraft(input: {
     warnings.push(supplier.warning);
   }
 
-  warnings.push(...parsed.warnings);
+  warnings.push(
+    ...parsed.warnings.filter(
+      (warning) => supplier.documentLabel == null || warning !== "Supplier was not labelled on the invoice."
+    )
+  );
 
   return {
-    rawSupplierName: parsed.rawSupplierName,
+    rawSupplierName: parsed.rawSupplierName ?? supplier.documentLabel,
     supplierId: supplier.supplierId,
     supplierName: supplier.supplierName,
     supplierWarning: supplier.warning,

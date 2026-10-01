@@ -32,6 +32,7 @@ export function resolveInvoiceSupplier(
     return {
       supplierId: null,
       supplierName: null,
+      documentLabel: null,
       warning,
     };
   }
@@ -40,12 +41,13 @@ export function resolveInvoiceSupplier(
     const match = findSupplier(labeled, suppliers, aliases);
 
     if (match) {
-      return { supplierId: match.id, supplierName: match.name, warning: null };
+      return { supplierId: match.id, supplierName: match.name, documentLabel: null, warning: null };
     }
 
     return {
       supplierId: null,
       supplierName: null,
+      documentLabel: null,
       warning: `No supplier matched “${rawSupplierName}”.`,
     };
   }
@@ -70,6 +72,7 @@ export function resolveInvoiceSupplier(
     return {
       supplierId: supplier.id,
       supplierName: supplier.name,
+      documentLabel: longestDocumentPhrase(documentText, suppliers, aliases, supplier.id),
       warning: null,
     };
   }
@@ -78,6 +81,7 @@ export function resolveInvoiceSupplier(
     return {
       supplierId: null,
       supplierName: null,
+      documentLabel: null,
       warning: "More than one supplier name appears on this invoice.",
     };
   }
@@ -85,8 +89,27 @@ export function resolveInvoiceSupplier(
   return {
     supplierId: null,
     supplierName: null,
+    documentLabel: null,
     warning: "The supplier was not found on this invoice.",
   };
+}
+
+function longestDocumentPhrase(
+  text: string,
+  suppliers: readonly InvoiceSupplierRef[],
+  aliases: readonly InvoiceAliasRef[],
+  supplierId: string
+) {
+  const phrases = [
+    ...suppliers.filter((supplier) => supplier.id === supplierId).map((supplier) => supplier.name),
+    ...aliases.filter((alias) => alias.supplierId === supplierId).map((alias) => alias.alias),
+  ];
+
+  return (
+    phrases
+      .filter((phrase) => phraseAppears(text, phrase))
+      .sort((left, right) => right.length - left.length)[0] ?? null
+  );
 }
 
 function findSupplier(

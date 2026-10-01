@@ -11,19 +11,41 @@ const LINE_PATTERN = new RegExp(
   "i"
 );
 
+const MONTHS: Record<string, string> = {
+  january: "01",
+  february: "02",
+  march: "03",
+  april: "04",
+  may: "05",
+  june: "06",
+  july: "07",
+  august: "08",
+  september: "09",
+  october: "10",
+  november: "11",
+  december: "12",
+};
+
+const TABLE_LINE = new RegExp(
+  `^([A-Za-z][A-Za-z0-9\\-/]{2,})\\s+(.+)\\s+(\\d+(?:\\.\\d+)?)\\s+(${UNIT_TOKEN})\\s+£?\\s*([\\d,]+\\.\\d{2})\\s+(\\d+(?:\\.\\d+)?%?)\\s+£?\\s*([\\d,]+\\.\\d{2})\\s*$`,
+  "i"
+);
+
 export function parseInvoiceText(text: string): ParsedInvoice {
   const warnings: string[] = [];
   const rawSupplierName = labeledText(text, ["supplier", "vendor"]);
-  const invoiceNumber = labeledText(text, [
-    "invoice number",
-    "invoice no",
-    "invoice #",
-    "inv no",
-  ]);
-  const invoiceDate = parseInvoiceDate(labeledText(text, ["invoice date", "date"]));
+  const invoiceNumber =
+    labeledText(text, ["invoice number", "invoice no", "invoice #", "inv no"]) ??
+    invoiceNumberOnFollowingLine(text);
+  const invoiceDate =
+    parseInvoiceDate(labeledText(text, ["invoice date", "document date", "date"])) ??
+    dateOnFollowingLine(text, "document date");
   const subtotal = labeledMoney(text, ["subtotal", "net", "goods total"]);
-  const vat = labeledMoney(text, ["vat", "tax"]);
-  const total = labeledMoney(text, ["invoice total", "amount due", "total"]);
+  const vat = percentVatAmount(text) ?? labeledMoney(text, ["vat", "tax"]);
+  const total =
+    labeledMoney(text, ["invoice total", "amount due"]) ??
+    labeledMoney(text, ["total"]) ??
+    totalWithTrailingWords(text);
   const lines = parseLines(text);
 
   if (!rawSupplierName) {
@@ -71,10 +93,75 @@ export function parseInvoiceText(text: string): ParsedInvoice {
 }
 
 function parseLines(text: string): ParsedInvoiceLine[] {
+  const sourceLines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const headerIndex = sourceLines.findIndex((line) =>
+    /^no\.\s+description\s+quantity\s+unit\b/i.test(line)
+  );
+
+  if (headerIndex >= 0) {
+    return parseTableLines(sourceLines.slice(headerIndex + 1));
+  }
+
+  return parseSimpleLines(sourceLines);
+}
+
+function parseTableLines(sourceLines: string[]): ParsedInvoiceLine[] {
+  const lines: ParsedInvoiceLine[] = [];
+  let current: ParsedInvoiceLine | null = null;
+
+  for (const sourceLine of sourceLines) {
+    if (/^(?:subtotal|total)\b/i.test(sourceLine) || /^\d+(?:\.\d+)?%\s+vat\b/i.test(sourceLine)) {
+      break;
+    }
+
+    const match = sourceLine.match(TABLE_LINE);
+
+    if (match && isSkuToken(match[1])) {
+      if (current) {
+        lines.push(finishLine(current, lines.length + 1));
+      }
+
+      const unitPrice = parseMoney(match[5]);
+      const lineTotal = parseMoney(match[7]);
+      const quantity = Number(match[3]);
+
+      current =
+        unitPrice == null || lineTotal == null || !Number.isFinite(quantity)
+          ? null
+          : {
+              lineNumber: 0,
+              rawDescription: normalizeMaterialLabel(match[2]) ?? match[2],
+              rawSupplierSku: match[1],
+              rawQuantity: quantity,
+              rawUnit: match[4],
+              rawUnitPrice: unitPrice,
+              rawLineTotal: lineTotal,
+              rawTax: parseTaxRate(match[6]),
+            };
+      continue;
+    }
+
+    if (current) {
+      current.rawDescription =
+        normalizeMaterialLabel(`${current.rawDescription} ${sourceLine}`) ?? current.rawDescription;
+    }
+  }
+
+  if (current) {
+    lines.push(finishLine(current, lines.length + 1));
+  }
+
+  return lines;
+}
+
+function parseSimpleLines(sourceLines: string[]): ParsedInvoiceLine[] {
   const lines: ParsedInvoiceLine[] = [];
 
-  for (const sourceLine of text.split(/\r?\n/)) {
-    const match = sourceLine.trim().match(LINE_PATTERN);
+  for (const sourceLine of sourceLines) {
+    const match = sourceLine.match(LINE_PATTERN);
 
     if (!match) {
       continue;
@@ -102,6 +189,19 @@ function parseLines(text: string): ParsedInvoiceLine[] {
   }
 
   return lines;
+}
+
+function finishLine(line: ParsedInvoiceLine, lineNumber: number) {
+  return { ...line, lineNumber };
+}
+
+function isSkuToken(value: string) {
+  return /\d/.test(value) && /[A-Za-z]/.test(value) && !/(?:mm|gsm)$/i.test(value);
+}
+
+function parseTaxRate(value: string) {
+  const parsed = Number(value.replace("%", ""));
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function splitSku(value: string) {
@@ -159,26 +259,63 @@ function labeledMoney(text: string, labels: string[]) {
   return null;
 }
 
+function invoiceNumberOnFollowingLine(text: string) {
+  const match = text.match(
+    /invoice\s*(?:number|no\.?|#)\s*[:\-]?\s*\n+\s*([A-Za-z0-9][A-Za-z0-9\-/]+)/i
+  );
+  const value = match?.[1] ?? "";
+
+  if (!/\d/.test(value) || !/[A-Za-z]/.test(value)) {
+    return null;
+  }
+
+  return value;
+}
+
+function dateOnFollowingLine(text: string, label: string) {
+  const pattern = new RegExp(`${escapeRegExp(label)}[^\\n]*\\n\\s*([^\\n]+)`, "i");
+  return parseInvoiceDate(text.match(pattern)?.[1] ?? null);
+}
+
+function percentVatAmount(text: string) {
+  const match = text.match(
+    /(?:^|\n)\s*\d+(?:\.\d+)?%\s+vat\s*[:\-]?\s*£?\s*([\d,]+\.\d{2})\b/i
+  );
+  return match ? parseMoney(match[1]) : null;
+}
+
+function totalWithTrailingWords(text: string) {
+  const match = text.match(
+    /(?:^|\n)\s*total\b(?:(?![\d,]+\.\d{2})[^\n]){0,40}£?\s*([\d,]+\.\d{2})\b/i
+  );
+  return match ? parseMoney(match[1]) : null;
+}
+
 function parseInvoiceDate(value: string | null) {
   if (!value) {
     return null;
   }
 
-  const iso = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const iso = value.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
 
   if (iso) {
-    return iso[0];
+    return `${iso[1]}-${iso[2]}-${iso[3]}`;
   }
 
-  const uk = value.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  const uk = value.match(/\b(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})\b/);
 
-  if (!uk) {
+  if (uk) {
+    return `${uk[3]}-${uk[2].padStart(2, "0")}-${uk[1].padStart(2, "0")}`;
+  }
+
+  const written = value.match(/\b(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\b/);
+  const month = written ? MONTHS[written[2].toLowerCase()] : null;
+
+  if (!written || !month) {
     return null;
   }
 
-  const day = uk[1].padStart(2, "0");
-  const month = uk[2].padStart(2, "0");
-  return `${uk[3]}-${month}-${day}`;
+  return `${written[3]}-${month}-${written[1].padStart(2, "0")}`;
 }
 
 function parseMoney(value: string) {

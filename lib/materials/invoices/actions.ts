@@ -6,8 +6,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { verifyApprovedAdmin } from "@/lib/admin-auth";
 import { createClient } from "@/lib/supabase/server";
 import { normalizeSupplierDescription } from "@/lib/materials/identity";
+import { invoiceMaterialConflict } from "@/lib/materials/invoices/new-material";
+import { parseMaterialWrite, isMaterialsFieldError } from "@/lib/materials/validation";
 
 import { findDuplicateInvoice } from "@/lib/materials/invoices/duplicate";
+import { rebuildStoredInvoice } from "@/lib/materials/invoices/reprocess";
 import { buildInvoiceDraft } from "@/lib/materials/invoices/draft";
 import { extractInvoiceDocument } from "@/lib/materials/invoices/extract";
 import { classifyInvoiceLine, deriveProcessingStatus } from "@/lib/materials/invoices/match";
@@ -219,6 +222,144 @@ export async function uploadSupplierInvoice(file: File): Promise<
 
   refreshInvoicePages(invoice.id);
   return { ok: true, invoiceId: invoice.id };
+}
+
+export async function reprocessSupplierInvoice(invoiceId: string) {
+  const access = await requireAdmin();
+
+  if (!access.ok) {
+    return access;
+  }
+
+  const result = await rebuildStoredInvoice(access.supabase, invoiceId, access.userId);
+
+  if (result.ok) {
+    refreshInvoicePages(invoiceId);
+  }
+
+  return result;
+}
+
+export async function createMaterialFromInvoiceLine(
+  invoiceId: string,
+  lineId: string,
+  body: Record<string, unknown>
+) {
+  const access = await requireAdmin();
+
+  if (!access.ok) {
+    return access;
+  }
+
+  const parsed = parseMaterialWrite(body, { active: true });
+
+  if (isMaterialsFieldError(parsed)) {
+    return { ok: false as const, status: 400, error: parsed.error };
+  }
+
+  const supplierDescription = textValue(body.supplierDescription);
+  const supplierSku = textValue(body.supplierSku);
+  const price = numberValue(body.price);
+  const effectiveDate = textValue(body.effectiveDate);
+  const preferred = body.preferred !== false;
+
+  if (!supplierDescription) {
+    return { ok: false as const, status: 400, error: "Enter the supplier product description." };
+  }
+
+  if (price == null || price <= 0) {
+    return { ok: false as const, status: 400, error: "The opening price must be greater than zero." };
+  }
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(effectiveDate)) {
+    return { ok: false as const, status: 400, error: "Enter the date this price starts." };
+  }
+
+  const { data: invoice } = await access.supabase
+    .from("supplier_invoices")
+    .select("id, supplier_id")
+    .eq("id", invoiceId)
+    .maybeSingle();
+  const { data: line } = await access.supabase
+    .from("supplier_invoice_lines")
+    .select("id, review_status")
+    .eq("id", lineId)
+    .eq("invoice_id", invoiceId)
+    .maybeSingle();
+
+  if (!invoice || !line || !invoice.supplier_id) {
+    return {
+      ok: false as const,
+      status: 400,
+      error: "Choose the supplier on the invoice before creating a material.",
+    };
+  }
+
+  const [materials, products] = await Promise.all([
+    access.supabase.from("materials").select("identity_key"),
+    access.supabase
+      .from("material_supplier_products")
+      .select("supplier_id, supplier_sku, normalized_description")
+      .eq("supplier_id", invoice.supplier_id),
+  ]);
+  const conflict = invoiceMaterialConflict({
+    reviewStatus: line.review_status,
+    openingPriceAlreadyCreated: false,
+    name: parsed.name,
+    category: parsed.category,
+    thicknessMm: parsed.thicknessMm,
+    colour: parsed.colour,
+    finish: parsed.finish,
+    purchaseUnit: parsed.purchaseUnit,
+    purchaseWidthMm: parsed.purchaseWidthMm,
+    purchaseHeightMm: parsed.purchaseHeightMm,
+    purchaseLengthMm: parsed.purchaseLengthMm,
+    supplierId: invoice.supplier_id,
+    supplierSku: supplierSku || null,
+    supplierDescription,
+    existingIdentityKeys: (materials.data ?? []).map((material) => material.identity_key),
+    existingProducts: (products.data ?? []).map((product) => ({
+      supplierId: product.supplier_id,
+      sku: product.supplier_sku,
+      normalizedDescription: product.normalized_description,
+    })),
+  });
+
+  if (conflict) {
+    return { ok: false as const, status: 409, error: conflict };
+  }
+
+  const { data, error } = await access.supabase.rpc("create_material_from_invoice_line", {
+    p_invoice_line_id: lineId,
+    p_name: parsed.name,
+    p_category: parsed.category,
+    p_thickness_mm: parsed.thicknessMm,
+    p_colour: parsed.colour,
+    p_finish: parsed.finish,
+    p_purchase_unit: parsed.purchaseUnit,
+    p_purchase_width_mm: parsed.purchaseWidthMm,
+    p_purchase_height_mm: parsed.purchaseHeightMm,
+    p_purchase_length_mm: parsed.purchaseLengthMm,
+    p_supplier_id: invoice.supplier_id,
+    p_supplier_description: supplierDescription,
+    p_supplier_sku: supplierSku || null,
+    p_price: price,
+    p_effective_date: effectiveDate,
+    p_preferred: preferred,
+  });
+
+  if (error || !data?.materialId) {
+    return {
+      ok: false as const,
+      status: 400,
+      error: error?.message ?? "The material could not be created.",
+    };
+  }
+
+  refreshInvoicePages(invoiceId);
+  revalidatePath("/admin/materials");
+  revalidatePath(`/admin/materials/${data.materialId}`);
+  return { ok: true as const, materialId: data.materialId as string };
 }
 
 export async function correctInvoiceSupplier(invoiceId: string, supplierId: string) {

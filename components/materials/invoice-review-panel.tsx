@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
@@ -320,13 +321,21 @@ function InvoiceLineCard({
           >
             Query
           </Button>
-          <Button type="button" variant="outline" disabled>
-            Create new material
-          </Button>
+          {supplierChosen && (line.reviewStatus === "needs_review" || line.reviewStatus === "unmatched") ? (
+            <Link href={`/admin/materials/invoices/${invoiceId}/lines/${line.id}/new-material`}>
+              <Button type="button" variant="outline">
+                Create new material
+              </Button>
+            </Link>
+          ) : (
+            <Button type="button" variant="outline" disabled>
+              Create new material
+            </Button>
+          )}
         </div>
         <p className="text-xs text-muted-foreground sm:col-span-2">
-          Creating a material from an invoice line is the next phase. This screen already keeps a
-          place for it. Approving a price is not available, and no approved price is changed.
+          Create new material is for a line that is not already a product. A price change on an
+          existing product is not approved from this screen.
         </p>
         {error ? <p className="text-sm text-red-700 sm:col-span-2">{error}</p> : null}
       </form>
@@ -400,6 +409,41 @@ function AddLineForm({ invoiceId }: { invoiceId: string }) {
       </Button>
       {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
     </form>
+  );
+}
+
+export function InvoiceReprocessButton({ invoiceId }: { invoiceId: string }) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  async function reprocess() {
+    setPending(true);
+    setError(null);
+    const response = await fetch(`/api/admin/materials/invoices/${invoiceId}/reprocess`, {
+      method: "POST",
+    });
+    const payload = await response.json().catch(() => null);
+    setPending(false);
+
+    if (!response.ok) {
+      setError(payload?.error ?? "The invoice could not be read again.");
+      return;
+    }
+
+    router.refresh();
+  }
+
+  return (
+    <div>
+      <Button type="button" variant="outline" disabled={pending} onClick={() => void reprocess()}>
+        {pending ? "Reading again…" : "Re-read stored invoice"}
+      </Button>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Rebuilds the extraction from the original file. Approved prices stay unchanged.
+      </p>
+      {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
+    </div>
   );
 }
 

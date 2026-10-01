@@ -3,6 +3,7 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import {
   InvoiceLineList,
+  InvoiceReprocessButton,
   InvoiceSupplierForm,
 } from "@/components/materials/invoice-review-panel";
 import { PageHeader } from "@/components/page-header";
@@ -145,7 +146,7 @@ export default async function SupplierInvoicePage({
                 <ul className="space-y-2 border-t border-border/70 px-5 py-4 text-sm text-muted-foreground">
                   {result.events.map((event) => (
                     <li key={event.id}>
-                      {event.action.replaceAll("_", " ")} · {formatReceived(event.created_at)}
+                      {eventLabel(event.action, event.metadata)} · {formatReceived(event.created_at)}
                     </li>
                   ))}
                 </ul>
@@ -168,6 +169,7 @@ export default async function SupplierInvoicePage({
             <p className="text-xs text-muted-foreground">
               The file is private and opens only for an approved admin.
             </p>
+            <InvoiceReprocessButton invoiceId={invoice.id} />
           </aside>
         </div>
       </div>
@@ -194,6 +196,10 @@ function SummaryPill({ label, value }: { label: string; value: string | number }
 }
 
 function money(value: unknown) {
+  if (value == null || value === "") {
+    return "Not found";
+  }
+
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? formatGbp(parsed) : "Not found";
 }
@@ -203,6 +209,20 @@ function formatReceived(value: string) {
   return Number.isNaN(date.getTime())
     ? value
     : new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function eventLabel(action: string, metadata: unknown) {
+  const reprocessed =
+    metadata != null &&
+    typeof metadata === "object" &&
+    "reprocessed" in metadata &&
+    metadata.reprocessed === true;
+
+  if (reprocessed && action === "extraction_completed") {
+    return "extraction reprocessed";
+  }
+
+  return action.replaceAll("_", " ");
 }
 
 function extractionLabel(status: InvoiceExtractionStatus) {
