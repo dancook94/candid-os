@@ -20,6 +20,11 @@ export function normalizeSupplierName(value: string) {
   return (normalizeMaterialLabel(value) ?? "").toLowerCase();
 }
 
+/** Matches the supplier-product description trigger: trim, collapse, lowercase. */
+export function normalizeSupplierDescription(value: string) {
+  return normalizeSupplierName(value);
+}
+
 function quantizeMillimetres(value: number | null) {
   if (value == null) {
     return "";

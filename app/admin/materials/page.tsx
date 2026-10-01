@@ -61,6 +61,9 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
           description="One row for each canonical material, with its preferred supplier’s current approved cost."
           actions={
             <div className="flex flex-wrap gap-2">
+              <Link href="/admin/materials/invoices">
+                <Button variant="outline">Invoices</Button>
+              </Link>
               <Link href="/admin/materials/suppliers">
                 <Button variant="outline">Suppliers</Button>
               </Link>
