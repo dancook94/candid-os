@@ -6,8 +6,11 @@ import type { ParsedInvoice, ParsedInvoiceLine } from "@/lib/materials/invoices/
 const UNIT_TOKEN =
   "sheet|sheets|roll|rolls|m|metre|metres|meter|meters|each|unit|units|pack|packs|box|boxes";
 
+const UNIT_PRICE = "[\\d,]+\\.\\d{2,3}";
+const LINE_TOTAL = "[\\d,]+\\.\\d{2}";
+
 const LINE_PATTERN = new RegExp(
-  `^(.+?)\\s+(\\d+(?:\\.\\d+)?)\\s+(?:(${UNIT_TOKEN})\\s+)?£?\\s*([\\d,]+\\.\\d{2})\\s+£?\\s*([\\d,]+\\.\\d{2})\\s*$`,
+  `^(.+?)\\s+(\\d+(?:\\.\\d+)?)\\s+(?:(${UNIT_TOKEN})\\s+)?£?\\s*(${UNIT_PRICE})\\s+£?\\s*(${LINE_TOTAL})\\s*$`,
   "i"
 );
 
@@ -27,7 +30,7 @@ const MONTHS: Record<string, string> = {
 };
 
 const TABLE_LINE = new RegExp(
-  `^([A-Za-z][A-Za-z0-9\\-/]{2,})\\s+(.+)\\s+(\\d+(?:\\.\\d+)?)\\s+(${UNIT_TOKEN})\\s+£?\\s*([\\d,]+\\.\\d{2})\\s+(\\d+(?:\\.\\d+)?%?)\\s+£?\\s*([\\d,]+\\.\\d{2})\\s*$`,
+  `^([A-Za-z][A-Za-z0-9\\-/]{2,})\\s+(.+)\\s+(\\d+(?:\\.\\d+)?)\\s+(${UNIT_TOKEN})\\s+£?\\s*(${UNIT_PRICE})\\s+(\\d+(?:\\.\\d+)?%?)\\s+£?\\s*(${LINE_TOTAL})\\s*$`,
   "i"
 );
 

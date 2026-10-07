@@ -521,6 +521,132 @@ describe("supplier invoice phase 1", () => {
     );
   });
 
+  it("parses Pyramid unit prices with three decimal places and keeps penny comparison", async () => {
+    const text = await readFile(
+      new URL("./fixtures/pyramid-three-decimal-prices.txt", import.meta.url),
+      "utf8"
+    );
+    const draft = buildInvoiceDraft({
+      text,
+      extractionStatus: "extracted",
+      suppliers,
+      aliases: [
+        ...aliases,
+        {
+          supplierId: "pyramid",
+          alias: "Pyramid Display Materials Ltd.",
+          normalizedAlias: "pyramid display materials ltd.",
+        },
+      ],
+      products: [
+        {
+          id: "briteline-greyback",
+          supplierId: "pyramid",
+          sku: null,
+          description:
+            "Briteline MT WHT GB Removable 1370mm x 50m Monomeric Vinyl - Grey Adhesive (BLMVMWRG1370)",
+          materialName: "Briteline Greyback Removable 1370mm x 50m",
+          purchaseUnit: "roll",
+          thicknessMm: null,
+          colour: "White",
+          widthMm: 1370,
+          heightMm: null,
+          lengthMm: 50000,
+          currentPrice: 89.11,
+          currentPriceUnit: "roll",
+        },
+        {
+          id: "swedboard-premium",
+          supplierId: "pyramid",
+          sku: null,
+          description:
+            "16mm 1600 x 3200mm Swedboard Fibre Premium Structured Paper Board (PQ 65) FSC Mix Credit",
+          materialName: "Swedboard 16mm 1600mm x 3200mm Premium",
+          purchaseUnit: "sheet",
+          thicknessMm: 16,
+          colour: null,
+          widthMm: 1600,
+          heightMm: 3200,
+          lengthMm: null,
+          currentPrice: 58.968,
+          currentPriceUnit: "sheet",
+        },
+        {
+          id: "bubble",
+          supplierId: "pyramid",
+          sku: null,
+          description: "Bubble Wrap 1500mm x 100m Small",
+          materialName: "Bubble Wrap 1500mm",
+          purchaseUnit: "roll",
+          thicknessMm: null,
+          colour: null,
+          widthMm: 1500,
+          heightMm: null,
+          lengthMm: 100000,
+          currentPrice: 19.02,
+          currentPriceUnit: "roll",
+        },
+      ],
+      mappings: [],
+      ignoreRules: [],
+    });
+
+    assert.equal(draft.invoiceNumber, "SI1315538");
+    assert.equal(draft.invoiceDate, "2026-10-01");
+    assert.equal(draft.subtotal, 699.12);
+    assert.equal(draft.vat, 139.82);
+    assert.equal(draft.total, 838.94);
+    assert.equal(draft.lines.length, 3);
+    assert.deepEqual(
+      draft.lines.map((line) => ({
+        sku: line.rawSupplierSku,
+        quantity: line.rawQuantity,
+        unit: line.rawUnit,
+        unitPrice: line.rawUnitPrice,
+        total: line.rawLineTotal,
+        status: line.reviewStatus,
+        product: line.matchedProductId,
+      })),
+      [
+        {
+          sku: "BLMV137MWRG",
+          quantity: 3,
+          unit: "Roll",
+          unitPrice: 89.107,
+          total: 267.32,
+          status: "processed",
+          product: "briteline-greyback",
+        },
+        {
+          sku: "SWBP-W/F-61632",
+          quantity: 7,
+          unit: "SHEET",
+          unitPrice: 58.969,
+          total: 412.78,
+          status: "processed",
+          product: "swedboard-premium",
+        },
+        {
+          sku: "BUBBS15",
+          quantity: 1,
+          unit: "Roll",
+          unitPrice: 19.02,
+          total: 19.02,
+          status: "processed",
+          product: "bubble",
+        },
+      ]
+    );
+    assert.match(draft.lines[0]?.rawDescription ?? "", /Grey Adhesive/);
+    assert.match(draft.lines[0]?.rawDescription ?? "", /BLMVMWRG1370/);
+    assert.match(draft.lines[1]?.rawDescription ?? "", /FSC Mix Credit/);
+    assert.equal(
+      draft.warnings.some((warning) => warning.includes("line totals") || warning.includes("Subtotal + VAT")),
+      false
+    );
+    assert.equal(draft.lines.some((line) => line.reviewStatus === "price_change"), false);
+  });
+
   it("has no price write, Gmail client, or material creation in the invoice workflow", async () => {
     const files = [
       "lib/materials/invoices/actions.ts",
