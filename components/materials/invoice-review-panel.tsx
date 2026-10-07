@@ -13,6 +13,8 @@ import {
   formatSignedGbp,
   formatSignedPercent,
 } from "@/lib/materials/invoices/money";
+import { priceApprovalConsequence } from "@/lib/materials/invoices/price-change";
+import { PURCHASE_UNIT_LABELS } from "@/lib/materials/units";
 import {
   REVIEW_STATUS_LABELS,
   type InvoiceReviewStatus,
@@ -98,11 +100,15 @@ export function InvoiceLineList({
   lines,
   products,
   supplierChosen,
+  supplierName,
+  invoiceDate,
 }: {
   invoiceId: string;
   lines: InvoiceDetailLine[];
   products: ProductOption[];
   supplierChosen: boolean;
+  supplierName: string;
+  invoiceDate: string | null;
 }) {
   const exceptions = lines.filter((line) => EXCEPTION_STATUSES.has(line.reviewStatus));
   const settled = lines.filter((line) => !EXCEPTION_STATUSES.has(line.reviewStatus));
@@ -124,6 +130,8 @@ export function InvoiceLineList({
               line={line}
               products={products}
               supplierChosen={supplierChosen}
+              supplierName={supplierName}
+              invoiceDate={invoiceDate}
             />
           ))}
         </div>
@@ -153,11 +161,15 @@ function InvoiceLineCard({
   line,
   products,
   supplierChosen,
+  supplierName,
+  invoiceDate,
 }: {
   invoiceId: string;
   line: InvoiceDetailLine;
   products: ProductOption[];
   supplierChosen: boolean;
+  supplierName: string;
+  invoiceDate: string | null;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -222,13 +234,19 @@ function InvoiceLineCard({
       {line.mathsWarning ? (
         <p className="mt-2 text-sm text-amber-800">{line.mathsWarning}</p>
       ) : null}
-      {line.comparison && line.reviewStatus === "price_change" ? (
-        <p className="mt-3 text-sm">
-          Current {formatGbp(line.comparison.currentPrice)} · Invoice{" "}
-          {formatGbp(line.comparison.invoicePrice)} ·{" "}
-          {formatSignedGbp(line.comparison.difference)} ·{" "}
-          {formatSignedPercent(line.comparison.percent)}
-        </p>
+      {line.reviewStatus === "price_change" ? (
+        <PriceChangePanel
+          invoiceId={invoiceId}
+          line={line}
+          supplierName={supplierName}
+          invoiceDate={invoiceDate}
+          pending={pending}
+          onPending={setPending}
+          onError={setError}
+        />
+      ) : null}
+      {line.decisionSummary && line.reviewStatus === "query" ? (
+        <p className="mt-3 text-sm">{line.decisionSummary}</p>
       ) : null}
       {line.matchedProductLabel ? (
         <p className="mt-2 text-sm">
@@ -309,18 +327,20 @@ function InvoiceLineCard({
           >
             Ignore and remember
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            disabled={pending}
-            onClick={(event) => {
-              const form = event.currentTarget.form;
-              if (!form) return;
-              void send({ action: "query", ...readForm(form) });
-            }}
-          >
-            Query
-          </Button>
+          {line.reviewStatus === "price_change" && line.comparison && line.comparison.difference !== 0 ? null : (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={pending}
+              onClick={(event) => {
+                const form = event.currentTarget.form;
+                if (!form) return;
+                void send({ action: "query", ...readForm(form) });
+              }}
+            >
+              Query
+            </Button>
+          )}
           {supplierChosen && (line.reviewStatus === "needs_review" || line.reviewStatus === "unmatched") ? (
             <Link href={`/admin/materials/invoices/${invoiceId}/lines/${line.id}/new-material`}>
               <Button type="button" variant="outline">
@@ -334,8 +354,8 @@ function InvoiceLineCard({
           )}
         </div>
         <p className="text-xs text-muted-foreground sm:col-span-2">
-          Create new material is for a line that is not already a product. A price change on an
-          existing product is not approved from this screen.
+          Create new material is for a line that is not already a product. A price change is
+          approved, kept, or queried from the price panel. Confirm match does not change a price.
         </p>
         {error ? <p className="text-sm text-red-700 sm:col-span-2">{error}</p> : null}
       </form>
@@ -345,13 +365,160 @@ function InvoiceLineCard({
 
 function SettledLine({ line }: { line: InvoiceDetailLine }) {
   return (
-    <p className="text-sm">
-      <span className="font-medium">Line {line.lineNumber}.</span> {line.rawDescription}
-      {line.comparison ? ` · ${formatGbp(line.comparison.invoicePrice)}` : ""}
-      {line.matchedProductLabel ? ` · ${line.matchedProductLabel}` : ""}
-      {" · "}
-      {REVIEW_STATUS_LABELS[line.reviewStatus]}
-    </p>
+    <div className="text-sm">
+      <p>
+        <span className="font-medium">Line {line.lineNumber}.</span> {line.rawDescription}
+        {line.comparison ? ` · ${formatGbp(line.comparison.invoicePrice)}` : ""}
+        {line.matchedProductLabel ? ` · ${line.matchedProductLabel}` : ""}
+        {" · "}
+        {REVIEW_STATUS_LABELS[line.reviewStatus]}
+      </p>
+      {line.decisionSummary ? (
+        <p className="mt-1 text-muted-foreground">{line.decisionSummary}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function PriceChangePanel({
+  invoiceId,
+  line,
+  supplierName,
+  invoiceDate,
+  pending,
+  onPending,
+  onError,
+}: {
+  invoiceId: string;
+  line: InvoiceDetailLine;
+  supplierName: string;
+  invoiceDate: string | null;
+  pending: boolean;
+  onPending: (pending: boolean) => void;
+  onError: (error: string | null) => void;
+}) {
+  const router = useRouter();
+  const comparison = line.comparison;
+  const consequence =
+    comparison?.currentEffectiveDate
+      ? priceApprovalConsequence({
+          invoiceDate,
+          currentEffectiveDate: comparison.currentEffectiveDate,
+          invoicePrice: comparison.invoicePrice,
+          currentPrice: comparison.currentPrice,
+        })
+      : null;
+  const comparable = Boolean(
+    comparison?.currentPriceId && line.matchedProductId && comparison.difference !== 0
+  );
+  const canApprove = comparable && consequence?.effect !== "missing_date";
+
+  async function decide(decision: "approve" | "keep" | "query") {
+    if (!comparison?.currentPriceId || !line.matchedProductId) {
+      return;
+    }
+
+    const note = document.querySelector<HTMLInputElement>(`#note-${line.id}`)?.value ?? "";
+    onPending(true);
+    onError(null);
+    const response = await fetch(
+      `/api/admin/materials/invoices/${invoiceId}/lines/${line.id}/price`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          decision,
+          expectedProductId: line.matchedProductId,
+          expectedPriceId: comparison.currentPriceId,
+          expectedInvoicePrice: comparison.invoicePrice,
+          note,
+        }),
+      }
+    );
+    const payload = await response.json().catch(() => null);
+    onPending(false);
+
+    if (!response.ok) {
+      onError(payload?.error ?? "The price decision could not be saved.");
+      router.refresh();
+      return;
+    }
+
+    router.refresh();
+  }
+
+  return (
+    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+      <dl className="grid gap-2 sm:grid-cols-2">
+        <PriceFact label="Material" value={line.materialName || "Not matched"} />
+        <PriceFact label="Supplier product" value={line.productDescription || "Not matched"} />
+        <PriceFact label="Supplier" value={supplierName || "Not chosen"} />
+        <PriceFact label="Invoice date" value={invoiceDate || "Not found"} />
+        <PriceFact
+          label="Current approved price"
+          value={
+            comparison
+              ? `${formatGbp(comparison.currentPrice)} per ${PURCHASE_UNIT_LABELS[comparison.priceUnit].toLowerCase()}`
+              : "Not comparable"
+          }
+        />
+        <PriceFact
+          label="Current price effective date"
+          value={comparison?.currentEffectiveDate || "Not found"}
+        />
+        <PriceFact
+          label="Invoice price ex-VAT"
+          value={comparison ? `${formatGbp(comparison.invoicePrice)} per ${PURCHASE_UNIT_LABELS[comparison.priceUnit].toLowerCase()}` : "Not comparable"}
+        />
+        <PriceFact
+          label="Difference"
+          value={
+            comparison
+              ? `${formatSignedGbp(comparison.difference)} · ${formatSignedPercent(comparison.percent)}`
+              : "Not comparable"
+          }
+        />
+        <PriceFact
+          label="Direction"
+          value={comparison ? (comparison.difference > 0 ? "Increase" : "Decrease") : "Not comparable"}
+        />
+        <PriceFact
+          label="Match"
+          value={`${line.matchConfidence ?? "unknown"} confidence · ${line.matchMethod ?? "unknown"} match`}
+        />
+      </dl>
+      {comparison && comparison.difference === 0 ? (
+        <p className="mt-3 font-medium">
+          This invoice price now matches the current approved price. Save the line to mark it
+          matched. No new price is created.
+        </p>
+      ) : consequence ? <p className="mt-3 font-medium">{consequence.message}</p> : (
+        <p className="mt-3 font-medium">
+          This invoice price cannot be compared with the current approved price. Check the unit
+          before approving anything.
+        </p>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button type="button" disabled={pending || !canApprove} onClick={() => void decide("approve")}>
+          Approve new price
+        </Button>
+        <Button type="button" variant="outline" disabled={pending || !comparable} onClick={() => void decide("keep")}>
+          Keep current price
+        </Button>
+        <Button type="button" variant="outline" disabled={pending || !comparable} onClick={() => void decide("query")}>
+          Query
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function PriceFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs text-amber-800">{label}</dt>
+      <dd className="font-medium">{value}</dd>
+    </div>
   );
 }
 
@@ -412,7 +579,13 @@ function AddLineForm({ invoiceId }: { invoiceId: string }) {
   );
 }
 
-export function InvoiceReprocessButton({ invoiceId }: { invoiceId: string }) {
+export function InvoiceReprocessButton({
+  invoiceId,
+  blockedReason,
+}: {
+  invoiceId: string;
+  blockedReason?: string | null;
+}) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -436,11 +609,17 @@ export function InvoiceReprocessButton({ invoiceId }: { invoiceId: string }) {
 
   return (
     <div>
-      <Button type="button" variant="outline" disabled={pending} onClick={() => void reprocess()}>
+      <Button
+        type="button"
+        variant="outline"
+        disabled={pending || Boolean(blockedReason)}
+        onClick={() => void reprocess()}
+      >
         {pending ? "Reading again…" : "Re-read stored invoice"}
       </Button>
       <p className="mt-2 text-xs text-muted-foreground">
-        Rebuilds the extraction from the original file. Approved prices stay unchanged.
+        {blockedReason ??
+          "Rebuilds the extraction from the original file. Approved prices stay unchanged."}
       </p>
       {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
     </div>

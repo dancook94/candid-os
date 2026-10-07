@@ -63,6 +63,8 @@ export type InvoiceMatchProduct = {
   lengthMm: number | null;
   currentPrice: number | null;
   currentPriceUnit: PurchaseUnit | null;
+  currentPriceId?: string | null;
+  currentEffectiveDate?: string | null;
 };
 
 export type DescriptionMappingRef = {
@@ -100,6 +102,8 @@ export type ParsedInvoice = {
 
 export type PriceComparison = {
   currentPrice: number;
+  currentPriceId: string | null;
+  currentEffectiveDate: string | null;
   invoicePrice: number;
   difference: number;
   percent: number;

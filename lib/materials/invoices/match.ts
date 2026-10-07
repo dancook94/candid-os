@@ -151,7 +151,11 @@ export function classifyInvoiceLine(input: {
       ? compareApprovedPrice(
           product.currentPrice,
           identity.unitPrice,
-          product.currentPriceUnit
+          product.currentPriceUnit,
+          {
+            currentPriceId: product.currentPriceId,
+            currentEffectiveDate: product.currentEffectiveDate,
+          }
         )
       : null;
 
@@ -170,12 +174,16 @@ export function classifyInvoiceLine(input: {
   } else if (!purchaseUnit) {
     reviewStatus = "needs_review";
     note = "The purchase unit was not extracted, so the price was not treated as matched.";
+  } else if (
+    product &&
+    (purchaseUnit !== product.purchaseUnit ||
+      (product.currentPriceUnit != null && purchaseUnit !== product.currentPriceUnit))
+  ) {
+    reviewStatus = "needs_review";
+    note = "The invoice unit does not match the material purchase unit.";
   } else if (!product || comparison == null) {
     reviewStatus = "needs_review";
     note = "This product has no current approved price in the same unit.";
-  } else if (purchaseUnit !== product.purchaseUnit) {
-    reviewStatus = "needs_review";
-    note = "The invoice unit does not match the material purchase unit.";
   } else if (moneyMatches(comparison.currentPrice, comparison.invoicePrice)) {
     reviewStatus = "processed";
   } else {

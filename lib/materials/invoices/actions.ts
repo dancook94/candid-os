@@ -11,9 +11,11 @@ import { parseMaterialWrite, isMaterialsFieldError } from "@/lib/materials/valid
 
 import { findDuplicateInvoice } from "@/lib/materials/invoices/duplicate";
 import { rebuildStoredInvoice } from "@/lib/materials/invoices/reprocess";
+import { permanentInvoiceLineIds } from "@/lib/materials/invoices/reprocess-guard";
 import { buildInvoiceDraft } from "@/lib/materials/invoices/draft";
 import { extractInvoiceDocument } from "@/lib/materials/invoices/extract";
 import { classifyInvoiceLine, deriveProcessingStatus } from "@/lib/materials/invoices/match";
+import { recordPriceChangeDetections } from "@/lib/materials/invoices/price-change-events";
 import {
   SUPPLIER_INVOICE_FILES_BUCKET,
   type InvoiceReviewStatus,
@@ -201,6 +203,27 @@ export async function uploadSupplierInvoice(file: File): Promise<
       await access.supabase.from("supplier_invoices").delete().eq("id", invoice.id);
       return { ok: false, status: 400, error: "The invoice lines could not be stored." };
     }
+
+    const { data: storedLines } = await access.supabase
+      .from("supplier_invoice_lines")
+      .select("id, line_number, review_status, matched_supplier_product_id")
+      .eq("invoice_id", invoice.id);
+
+    await recordPriceChangeDetections(access.supabase, {
+      invoiceId: invoice.id,
+      actorId: access.userId,
+      invoiceDate: draft.invoiceDate,
+      lines: (storedLines ?? []).map((stored) => {
+        const classified = draft.lines.find((item) => item.lineNumber === stored.line_number);
+        return {
+          id: stored.id,
+          previousStatus: null,
+          reviewStatus: stored.review_status,
+          productId: stored.matched_supplier_product_id,
+          comparison: classified?.comparison ?? null,
+        };
+      }),
+    });
   }
 
   await recordEvent(access.supabase, {
@@ -238,6 +261,84 @@ export async function reprocessSupplierInvoice(invoiceId: string) {
   }
 
   return result;
+}
+
+export async function resolveInvoicePriceChange(
+  invoiceId: string,
+  lineId: string,
+  body: Record<string, unknown>
+) {
+  const access = await requireAdmin();
+
+  if (!access.ok) {
+    return access;
+  }
+
+  const decision = textValue(body.decision);
+
+  if (decision !== "approve" && decision !== "keep" && decision !== "query") {
+    return { ok: false as const, status: 400, error: "Choose approve, keep, or query." };
+  }
+
+  const expectedProductId = textValue(body.expectedProductId);
+  const expectedPriceId = textValue(body.expectedPriceId);
+  const expectedInvoicePrice = numberValue(body.expectedInvoicePrice);
+  const note = textValue(body.note);
+
+  if (!isUuid(expectedProductId) || !isUuid(expectedPriceId)) {
+    return { ok: false as const, status: 400, error: "Reload this invoice before deciding." };
+  }
+
+  if (expectedInvoicePrice == null || expectedInvoicePrice <= 0) {
+    return { ok: false as const, status: 400, error: "The invoice unit price must be greater than zero." };
+  }
+
+  if (note.length > 1000) {
+    return { ok: false as const, status: 400, error: "The note must be 1000 characters or fewer." };
+  }
+
+  const { data: line } = await access.supabase
+    .from("supplier_invoice_lines")
+    .select("id")
+    .eq("id", lineId)
+    .eq("invoice_id", invoiceId)
+    .maybeSingle();
+
+  if (!line) {
+    return { ok: false as const, status: 404, error: "Invoice line not found." };
+  }
+
+  const { data, error } = await access.supabase.rpc("resolve_invoice_price_change", {
+    p_invoice_line_id: lineId,
+    p_decision: decision,
+    p_expected_product_id: expectedProductId,
+    p_expected_price_id: expectedPriceId,
+    p_expected_invoice_price: expectedInvoicePrice,
+    p_note: note || null,
+  });
+
+  if (error) {
+    const message = error.message || "The price decision could not be saved.";
+    const stale = /Reload this invoice|changed|already created|now matches/i.test(message);
+    return {
+      ok: false as const,
+      status: stale ? 409 : 400,
+      error: message.replace(/^.*ERROR:\s*/i, "").split("\n")[0],
+    };
+  }
+
+  refreshInvoicePages(invoiceId);
+  revalidatePath("/admin/materials");
+  const materialId =
+    data && typeof data === "object" && data !== null && "materialId" in data
+      ? String(data.materialId)
+      : "";
+
+  if (materialId && materialId !== "null" && materialId !== "undefined") {
+    revalidatePath(`/admin/materials/${materialId}`);
+  }
+
+  return { ok: true as const, result: data };
 }
 
 export async function createMaterialFromInvoiceLine(
@@ -412,7 +513,7 @@ export async function correctInvoiceSupplier(invoiceId: string, supplierId: stri
     return { ok: false, status: 400, error: "The supplier could not be saved." };
   }
 
-  await reclassifyStoredLines(access.supabase, invoiceId, supplierId, catalog);
+  await reclassifyStoredLines(access.supabase, invoiceId, supplierId, catalog, access.userId);
   await recordEvent(access.supabase, {
     invoiceId,
     actorId: access.userId,
@@ -442,7 +543,7 @@ export async function reviewInvoiceLine(
 
   const { data: invoice } = await access.supabase
     .from("supplier_invoices")
-    .select("id, supplier_id, extraction_status, extraction_warnings")
+    .select("id, supplier_id, extraction_status, extraction_warnings, invoice_date")
     .eq("id", invoiceId)
     .maybeSingle();
   const { data: line } = await access.supabase
@@ -559,6 +660,20 @@ export async function reviewInvoiceLine(
       after: reviewed,
     },
   });
+  await recordPriceChangeDetections(access.supabase, {
+    invoiceId,
+    actorId: access.userId,
+    invoiceDate: invoice.invoice_date,
+    lines: [
+      {
+        id: lineId,
+        previousStatus: line.review_status,
+        reviewStatus: classified.reviewStatus,
+        productId: classified.matchedProductId,
+        comparison: classified.comparison,
+      },
+    ],
+  });
   await refreshProcessingStatus(access.supabase, invoiceId);
   refreshInvoicePages(invoiceId);
   return { ok: true as const };
@@ -588,7 +703,7 @@ export async function addInvoiceLine(
 
   const { data: invoice } = await access.supabase
     .from("supplier_invoices")
-    .select("id, supplier_id")
+    .select("id, supplier_id, invoice_date")
     .eq("id", invoiceId)
     .maybeSingle();
   const { data: existingLines } = await access.supabase
@@ -619,26 +734,45 @@ export async function addInvoiceLine(
     mappings: catalog.mappings,
     ignoreRules: catalog.ignoreRules,
   });
-  const { error } = await access.supabase.from("supplier_invoice_lines").insert({
-    invoice_id: invoiceId,
-    line_number: lineNumber,
-    raw_description: parsed.rawDescription,
-    raw_supplier_sku: parsed.rawSupplierSku,
-    raw_quantity: parsed.rawQuantity,
-    raw_unit: parsed.rawUnit,
-    raw_unit_price: parsed.rawUnitPrice,
-    raw_line_total: parsed.rawLineTotal,
-    matched_supplier_product_id: classified.matchedProductId,
-    match_confidence: classified.matchConfidence,
-    match_method: classified.matchMethod,
-    review_status: classified.reviewStatus,
-    maths_warning: classified.mathsWarning,
-    internal_note: classified.note,
-  });
+  const { data: added, error } = await access.supabase
+    .from("supplier_invoice_lines")
+    .insert({
+      invoice_id: invoiceId,
+      line_number: lineNumber,
+      raw_description: parsed.rawDescription,
+      raw_supplier_sku: parsed.rawSupplierSku,
+      raw_quantity: parsed.rawQuantity,
+      raw_unit: parsed.rawUnit,
+      raw_unit_price: parsed.rawUnitPrice,
+      raw_line_total: parsed.rawLineTotal,
+      matched_supplier_product_id: classified.matchedProductId,
+      match_confidence: classified.matchConfidence,
+      match_method: classified.matchMethod,
+      review_status: classified.reviewStatus,
+      maths_warning: classified.mathsWarning,
+      internal_note: classified.note,
+    })
+    .select("id")
+    .single();
 
-  if (error) {
+  if (error || !added) {
     return { ok: false, status: 400, error: "The line could not be added." };
   }
+
+  await recordPriceChangeDetections(access.supabase, {
+    invoiceId,
+    actorId: access.userId,
+    invoiceDate: invoice.invoice_date,
+    lines: [
+      {
+        id: added.id,
+        previousStatus: null,
+        reviewStatus: classified.reviewStatus,
+        productId: classified.matchedProductId,
+        comparison: classified.comparison,
+      },
+    ],
+  });
 
   await recordEvent(access.supabase, {
     invoiceId,
@@ -653,9 +787,10 @@ export async function addInvoiceLine(
 
 async function confirmLineMatch(
   access: { supabase: SupabaseClient; userId: string },
-  invoice: { id: string; supplier_id: string | null },
+  invoice: { id: string; supplier_id: string | null; invoice_date?: string | null },
   line: {
     id: string;
+    review_status?: string;
     raw_description: string;
     matched_supplier_product_id: string | null;
     raw_supplier_sku: string | null;
@@ -780,6 +915,20 @@ async function confirmLineMatch(
     action: "description_mapping_created",
     metadata: { description, productId: product.id },
   });
+  await recordPriceChangeDetections(access.supabase, {
+    invoiceId: invoice.id,
+    actorId: access.userId,
+    invoiceDate: invoice.invoice_date ?? null,
+    lines: [
+      {
+        id: line.id,
+        previousStatus: line.review_status ?? null,
+        reviewStatus: classified.reviewStatus,
+        productId: classified.matchedProductId,
+        comparison: classified.comparison,
+      },
+    ],
+  });
   await refreshProcessingStatus(access.supabase, invoice.id);
   refreshInvoicePages(invoice.id);
   return { ok: true as const };
@@ -861,15 +1010,18 @@ async function reclassifyStoredLines(
   supabase: SupabaseClient,
   invoiceId: string,
   supplierId: string,
-  catalog: Awaited<ReturnType<typeof loadInvoiceMatchCatalog>> & { ok: true }
+  catalog: Awaited<ReturnType<typeof loadInvoiceMatchCatalog>> & { ok: true },
+  actorId: string
 ) {
-  const { data: lines } = await supabase
-    .from("supplier_invoice_lines")
-    .select("*")
-    .eq("invoice_id", invoiceId);
+  const [{ data: lines }, { data: header }, lockedLines] = await Promise.all([
+    supabase.from("supplier_invoice_lines").select("*").eq("invoice_id", invoiceId),
+    supabase.from("supplier_invoices").select("invoice_date").eq("id", invoiceId).maybeSingle(),
+    permanentInvoiceLineIds(supabase, invoiceId),
+  ]);
+  const detections: Parameters<typeof recordPriceChangeDetections>[1]["lines"][number][] = [];
 
   for (const line of lines ?? []) {
-    if (line.review_status === "query") {
+    if (line.review_status === "query" || lockedLines.has(line.id)) {
       continue;
     }
 
@@ -897,8 +1049,22 @@ async function reclassifyStoredLines(
         maths_warning: classified.mathsWarning,
       })
       .eq("id", line.id);
+
+    detections.push({
+      id: line.id,
+      previousStatus: line.review_status,
+      reviewStatus: classified.reviewStatus,
+      productId: classified.matchedProductId,
+      comparison: classified.comparison,
+    });
   }
 
+  await recordPriceChangeDetections(supabase, {
+    invoiceId,
+    actorId,
+    invoiceDate: header?.invoice_date ?? null,
+    lines: detections,
+  });
   await refreshProcessingStatus(supabase, invoiceId);
 }
 
@@ -995,6 +1161,10 @@ function safeFileName(fileName: string) {
     .toLowerCase();
 
   return cleaned || "invoice";
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
 function textValue(value: unknown) {

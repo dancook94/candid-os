@@ -2,6 +2,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { normalizeSupplierDescription } from "@/lib/materials/identity";
 import { isMaterialsSchemaMissing } from "@/lib/materials/write-error";
+import { formatPriceDecision } from "@/lib/materials/invoices/price-change";
+import { normalizePurchaseUnit } from "@/lib/materials/invoices/match";
+import { compareApprovedPrice } from "@/lib/materials/invoices/money";
 import { selectCurrentApprovedPrice } from "@/lib/materials/pricing";
 import { coercePurchaseUnit } from "@/lib/materials/present";
 import type { PurchaseUnit } from "@/lib/materials/units";
@@ -55,7 +58,7 @@ export async function loadInvoiceMatchCatalog(supabase: SupabaseClient) {
       supabase
         .from("material_prices")
         .select(
-          "material_supplier_product_id, price, price_unit, effective_date, approved_at, created_at"
+          "id, material_supplier_product_id, price, price_unit, effective_date, approved_at, created_at"
         ),
       supabase
         .from("supplier_product_description_mappings")
@@ -107,10 +110,10 @@ export async function loadInvoiceMatchCatalog(supabase: SupabaseClient) {
 
     const list = pricesByProduct.get(row.material_supplier_product_id) ?? [];
     list.push({
-      id: row.material_supplier_product_id,
+      id: row.id,
       price,
       priceUnit,
-      effectiveDate: row.effective_date,
+      effectiveDate: String(row.effective_date).slice(0, 10),
       approvedAt: row.approved_at,
       createdAt: row.created_at,
     });
@@ -147,6 +150,8 @@ export async function loadInvoiceMatchCatalog(supabase: SupabaseClient) {
       lengthMm: numeric(material.purchase_length_mm),
       currentPrice: current?.price ?? null,
       currentPriceUnit: current?.priceUnit ?? null,
+      currentPriceId: current?.id ?? null,
+      currentEffectiveDate: current?.effectiveDate ?? null,
     });
   }
 
@@ -294,8 +299,13 @@ export type InvoiceDetailLine = {
   reviewStatus: InvoiceReviewStatus;
   mathsWarning: string | null;
   internalNote: string | null;
+  materialName: string | null;
+  productDescription: string | null;
+  decisionSummary: string | null;
   comparison: {
     currentPrice: number;
+    currentPriceId: string | null;
+    currentEffectiveDate: string | null;
     invoicePrice: number;
     difference: number;
     percent: number;
@@ -347,22 +357,28 @@ export async function loadInvoiceDetail(supabase: SupabaseClient, invoiceId: str
       ? productById.get(row.matched_supplier_product_id) ?? null
       : null;
     const invoicePrice = numeric(row.reviewed_unit_price) ?? numeric(row.raw_unit_price);
+    const purchaseUnit = normalizePurchaseUnit(row.reviewed_unit ?? row.raw_unit);
     const comparison =
       product &&
       product.currentPrice != null &&
       product.currentPriceUnit &&
-      invoicePrice != null
-        ? {
-            currentPrice: product.currentPrice,
-            invoicePrice,
-            difference: Math.round((invoicePrice - product.currentPrice) * 100) / 100,
-            percent:
-              Math.round(
-                ((invoicePrice - product.currentPrice) / product.currentPrice) * 10000
-              ) / 100,
-            priceUnit: product.currentPriceUnit,
-          }
+      product.currentPriceId &&
+      product.currentEffectiveDate &&
+      invoicePrice != null &&
+      purchaseUnit === product.purchaseUnit &&
+      purchaseUnit === product.currentPriceUnit
+        ? compareApprovedPrice(product.currentPrice, invoicePrice, product.currentPriceUnit, {
+            currentPriceId: product.currentPriceId,
+            currentEffectiveDate: product.currentEffectiveDate,
+          })
         : null;
+    const decision = (events.data ?? []).find(
+      (event) =>
+        event.invoice_line_id === row.id &&
+        (event.action === "price_change_approved" ||
+          event.action === "price_change_rejected" ||
+          event.action === "price_change_queried")
+    );
 
     return {
       id: row.id,
@@ -383,6 +399,9 @@ export async function loadInvoiceDetail(supabase: SupabaseClient, invoiceId: str
       matchedProductLabel: product
         ? `${product.materialName} — ${product.description}`
         : null,
+      materialName: product?.materialName ?? null,
+      productDescription: product?.description ?? null,
+      decisionSummary: decision ? formatPriceDecision(decision.action, decision.metadata) : null,
       matchConfidence: row.match_confidence as MatchConfidence | null,
       matchMethod: row.match_method as MatchMethod | null,
       reviewStatus: row.review_status as InvoiceReviewStatus,

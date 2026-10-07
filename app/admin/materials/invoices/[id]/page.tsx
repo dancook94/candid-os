@@ -18,6 +18,7 @@ import {
   type InvoiceProcessingStatus,
 } from "@/lib/materials/invoices/model";
 import { loadInvoiceDetail } from "@/lib/materials/invoices/queries";
+import { findInvoiceReprocessBlock } from "@/lib/materials/invoices/reprocess-guard";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -68,7 +69,7 @@ export default async function SupplierInvoicePage({
         <PageHeader
           eyebrow="Costing"
           title={invoice.invoice_number || "Supplier invoice"}
-          description="Exceptions are shown first. Matched lines stay folded. Approved material prices are not changed from this screen."
+          description="Exceptions are shown first. A price change can be approved, kept, or queried. Existing approved prices are never overwritten."
           actions={
             <Link href="/admin/materials/invoices">
               <Button variant="outline">All invoices</Button>
@@ -132,6 +133,8 @@ export default async function SupplierInvoicePage({
               invoiceId={invoice.id}
               lines={result.lines}
               supplierChosen={Boolean(invoice.supplier_id)}
+              supplierName={supplierName || ""}
+              invoiceDate={invoice.invoice_date}
               products={result.products.map((product) => ({
                 id: product.id,
                 label: `${product.materialName} — ${product.description}`,
@@ -169,7 +172,10 @@ export default async function SupplierInvoicePage({
             <p className="text-xs text-muted-foreground">
               The file is private and opens only for an approved admin.
             </p>
-            <InvoiceReprocessButton invoiceId={invoice.id} />
+            <InvoiceReprocessButton
+              invoiceId={invoice.id}
+              blockedReason={await findInvoiceReprocessBlock(supabase, invoice.id)}
+            />
           </aside>
         </div>
       </div>

@@ -532,6 +532,7 @@ describe("supplier invoice phase 1", () => {
       "app/admin/materials/invoices/page.tsx",
       "app/admin/materials/invoices/[id]/page.tsx",
       "components/materials/invoice-review-panel.tsx",
+      "lib/materials/invoices/reprocess-guard.ts",
     ];
     const sources = await Promise.all(
       files.map((file) => readFile(new URL(`../../../${file}`, import.meta.url), "utf8"))
@@ -546,5 +547,7 @@ describe("supplier invoice phase 1", () => {
     assert.match(combined, /material_prices/);
     assert.match(sources[2], /\.from\("material_prices"\)/);
     assert.match(sources[2], /\.select\(/);
+    assert.match(sources[sources.length - 1], /\.from\("material_prices"\)/);
+    assert.doesNotMatch(sources[sources.length - 1], /\.(insert|update|delete|upsert)\(/);
   });
 });

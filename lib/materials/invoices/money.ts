@@ -13,15 +13,21 @@ export function moneyMatches(left: number, right: number) {
 export function compareApprovedPrice(
   currentPrice: number,
   invoicePrice: number,
-  priceUnit: PurchaseUnit
+  priceUnit: PurchaseUnit,
+  details?: {
+    currentPriceId?: string | null;
+    currentEffectiveDate?: string | null;
+  }
 ): PriceComparison {
   const current = roundMoney(currentPrice);
   const invoice = roundMoney(invoicePrice);
   const difference = roundMoney(invoice - current);
-  const percent = roundMoney((difference / current) * 100);
+  const percent = current === 0 ? 0 : roundMoney((difference / current) * 100);
 
   return {
     currentPrice: current,
+    currentPriceId: details?.currentPriceId ?? null,
+    currentEffectiveDate: details?.currentEffectiveDate ?? null,
     invoicePrice: invoice,
     difference,
     percent,

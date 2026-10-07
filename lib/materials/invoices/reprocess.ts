@@ -4,7 +4,9 @@ import { findDuplicateInvoice } from "@/lib/materials/invoices/duplicate";
 import { buildInvoiceDraft } from "@/lib/materials/invoices/draft";
 import { extractInvoiceDocument } from "@/lib/materials/invoices/extract";
 import { SUPPLIER_INVOICE_FILES_BUCKET } from "@/lib/materials/invoices/model";
+import { recordPriceChangeDetections } from "@/lib/materials/invoices/price-change-events";
 import { loadInvoiceMatchCatalog } from "@/lib/materials/invoices/queries";
+import { findInvoiceReprocessBlock } from "@/lib/materials/invoices/reprocess-guard";
 
 export async function rebuildStoredInvoice(
   supabase: SupabaseClient,
@@ -30,6 +32,12 @@ export async function rebuildStoredInvoice(
 
   if (invoiceError || fileError || !invoice || !file) {
     return { ok: false as const, status: 404, error: "The stored invoice could not be read." };
+  }
+
+  const reprocessBlock = await findInvoiceReprocessBlock(supabase, invoiceId);
+
+  if (reprocessBlock) {
+    return { ok: false as const, status: 409, error: reprocessBlock };
   }
 
   const downloaded = await supabase.storage
@@ -128,6 +136,27 @@ export async function rebuildStoredInvoice(
     if (lineError) {
       return { ok: false as const, status: 400, error: "The invoice lines could not be stored." };
     }
+
+    const { data: storedLines } = await supabase
+      .from("supplier_invoice_lines")
+      .select("id, line_number, review_status, matched_supplier_product_id")
+      .eq("invoice_id", invoiceId);
+
+    await recordPriceChangeDetections(supabase, {
+      invoiceId,
+      actorId,
+      invoiceDate: draft.invoiceDate,
+      lines: (storedLines ?? []).map((line) => {
+        const classified = draft.lines.find((item) => item.lineNumber === line.line_number);
+        return {
+          id: line.id,
+          previousStatus: null,
+          reviewStatus: line.review_status,
+          productId: line.matched_supplier_product_id,
+          comparison: classified?.comparison ?? null,
+        };
+      }),
+    });
   }
 
   await supabase.from("supplier_invoice_events").insert({
