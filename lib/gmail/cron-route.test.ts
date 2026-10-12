@@ -112,6 +112,10 @@ test("a valid bearer token with no discovery run stays idle", async () => {
     assert.equal(body.ongoing.reason, "disabled");
     assert.equal(GMAIL_ONGOING_SYNC_ENABLED, false);
     assert.equal(memory.tables.some((table) => FORBIDDEN.includes(table)), false);
+    const loaded = (
+      (process as NodeJS.Process & { moduleLoadList?: string[] }).moduleLoadList ?? []
+    ).join("\n");
+    assert.doesNotMatch(loaded, /pdfjs-dist/);
   } finally {
     if (previous === undefined) {
       delete process.env.CRON_SECRET;
@@ -131,6 +135,7 @@ test("the cron route authenticates before loading the discovery worker", async (
     new URL("../materials/invoices/extract.ts", import.meta.url),
     "utf8"
   );
+  const discovery = await readFile(new URL("./discovery.ts", import.meta.url), "utf8");
 
   assert.match(route, /export const runtime = "nodejs"/);
   assert.doesNotMatch(route, /pdfjs-dist|@\/lib\/gmail\/cron"|@\/lib\/gmail\/discovery/);
@@ -142,4 +147,6 @@ test("the cron route authenticates before loading the discovery worker", async (
   const pdfImport = extract.indexOf('from "pdfjs-dist/legacy/build/pdf.mjs"');
   const serverImport = extract.indexOf('import "@/lib/materials/invoices/pdf-server"');
   assert.ok(serverImport >= 0 && pdfImport > serverImport);
+  assert.doesNotMatch(discovery, /from "@\/lib\/materials\/invoices\/extract"/);
+  assert.match(discovery, /import\("@\/lib\/materials\/invoices\/extract"\)/);
 });

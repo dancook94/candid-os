@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { extractInvoiceDocument } from "@/lib/materials/invoices/extract";
 import { parseInvoiceText } from "@/lib/materials/invoices/parse";
 import { resolveInvoiceSupplier } from "@/lib/materials/invoices/supplier";
 import type { InvoiceAliasRef, InvoiceSupplierRef } from "@/lib/materials/invoices/model";
@@ -264,6 +263,7 @@ async function processPdf(input: {
   suppliers: readonly InvoiceSupplierRef[];
   aliases: readonly InvoiceAliasRef[];
 }) {
+  const { extractInvoiceDocument } = await import("@/lib/materials/invoices/extract");
   const checksum = checksumOf(input.bytes);
   const [{ data: manual }, { data: prior }] = await Promise.all([
     input.admin
