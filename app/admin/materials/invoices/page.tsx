@@ -56,9 +56,14 @@ export default async function SupplierInvoicesPage({ searchParams }: InvoicesPag
           title="Supplier invoices"
           description="Upload a supplier invoice, check the lines against current approved prices, and resolve the exceptions. Nothing on this page changes an approved price."
           actions={
-            <Link href="/admin/materials">
-              <Button variant="outline">Materials</Button>
-            </Link>
+            <div className="flex flex-wrap gap-2">
+              <Link href="/admin/materials/invoices/gmail">
+                <Button variant="outline">Gmail import</Button>
+              </Link>
+              <Link href="/admin/materials">
+                <Button variant="outline">Materials</Button>
+              </Link>
+            </div>
           }
         />
 

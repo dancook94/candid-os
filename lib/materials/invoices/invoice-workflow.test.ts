@@ -839,8 +839,12 @@ describe("supplier invoice phase 1", () => {
       files.map((file) => readFile(new URL(`../../../${file}`, import.meta.url), "utf8"))
     );
     const combined = sources.join("\n");
+    const pipeline = sources.filter(
+      (_, index) => files[index] !== "app/admin/materials/invoices/page.tsx"
+    );
 
-    assert.doesNotMatch(combined, /gmail|googleapis/i);
+    assert.doesNotMatch(pipeline.join("\n"), /gmail|googleapis/i);
+    assert.match(sources[6], /\/admin\/materials\/invoices\/gmail/);
     assert.doesNotMatch(combined, /from\("material_prices"\)[\s\S]{0,120}\.(insert|update|delete|upsert)/);
     assert.doesNotMatch(sources[0], /material_prices/);
     assert.doesNotMatch(sources[1], /material_prices/);
