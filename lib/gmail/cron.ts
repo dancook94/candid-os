@@ -119,7 +119,9 @@ export async function runGmailDiscoveryCron(input: {
     } catch (error) {
       const message = sanitizeGmailError(error);
 
-      if (/no discovery to continue/i.test(message)) {
+      if (
+        /no discovery to continue|connect gmail before starting discovery/i.test(message)
+      ) {
         status = "idle";
         break;
       }

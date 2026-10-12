@@ -2,6 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+import "@/lib/materials/invoices/pdf-server";
 import { getDocument } from "pdfjs-dist/legacy/build/pdf.mjs";
 
 import type { InvoiceExtractionStatus } from "@/lib/materials/invoices/model";
