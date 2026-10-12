@@ -6,10 +6,11 @@ import { PDFDocument, StandardFonts } from "pdf-lib";
 
 import { findDuplicateInvoice } from "@/lib/materials/invoices/duplicate";
 import { buildInvoiceDraft } from "@/lib/materials/invoices/draft";
-import { extractPdfText } from "@/lib/materials/invoices/extract";
+import { extractPdfText, joinPositionedText } from "@/lib/materials/invoices/extract";
 import { classifyInvoiceLine } from "@/lib/materials/invoices/match";
 import type { InvoiceMatchProduct } from "@/lib/materials/invoices/model";
 import { parseInvoiceText } from "@/lib/materials/invoices/parse";
+import { resolveInvoiceSupplier } from "@/lib/materials/invoices/supplier";
 
 const FIXTURE = `Supplier: Pyramid Display Materials
 Invoice number: PY-2041
@@ -645,6 +646,180 @@ describe("supplier invoice phase 1", () => {
       false
     );
     assert.equal(draft.lines.some((line) => line.reviewStatus === "price_change"), false);
+  });
+
+  it("reads All Print Supplies identity, columns, and slit lines without matching another width", async () => {
+    const text = await readFile(
+      new URL("./fixtures/all-print-quantity-lines.txt", import.meta.url),
+      "utf8"
+    );
+    const fromWebsite = resolveInvoiceSupplier(
+      null,
+      "Candid Creative Ltd\nwww.allprint.co.uk",
+      suppliers,
+      aliases
+    );
+    const fromSales = resolveInvoiceSupplier(null, "sales@allprint.co.uk", suppliers, aliases);
+    const fromLegalName = resolveInvoiceSupplier(
+      null,
+      "all print supplies ltd.",
+      suppliers,
+      aliases
+    );
+    const fromApsToken = resolveInvoiceSupplier(null, "APS products remain the property of APS", suppliers, aliases);
+    const labeledAps = resolveInvoiceSupplier("APS", "accounts@allprint.co.uk", suppliers, aliases);
+    const draft = buildInvoiceDraft({
+      text,
+      extractionStatus: "extracted",
+      suppliers,
+      aliases,
+      products: [
+        {
+          id: "pyramid-ww300-1371",
+          supplierId: "pyramid",
+          sku: "WW300",
+          description: "WW300 MATT WHITE 50M X 1371MM",
+          materialName: "WW300 Matt White 1371mm x 50m",
+          purchaseUnit: "roll",
+          thicknessMm: null,
+          colour: "White",
+          widthMm: 1371,
+          heightMm: null,
+          lengthMm: 50000,
+          currentPrice: 298.62,
+          currentPriceUnit: "roll",
+        },
+        {
+          id: "aps-ww300-1371",
+          supplierId: "all-print",
+          sku: "WW300",
+          description: "WW300 MATT WHITE 50M X 1371MM",
+          materialName: "WW300 Matt White 1371mm x 50m",
+          purchaseUnit: "roll",
+          thicknessMm: null,
+          colour: "White",
+          widthMm: 1371,
+          heightMm: null,
+          lengthMm: 50000,
+          currentPrice: 300,
+          currentPriceUnit: "roll",
+        },
+        {
+          id: "aps-su3-1560",
+          supplierId: "all-print",
+          sku: "SU3-70",
+          description: "SU3-70 SEMI-MATT UV SEAL 50M X 1560MM",
+          materialName: "SU3-70 Semi-matt UV Laminate 1560mm x 50m",
+          purchaseUnit: "roll",
+          thicknessMm: null,
+          colour: null,
+          widthMm: 1560,
+          heightMm: null,
+          lengthMm: 50000,
+          currentPrice: 141.39,
+          currentPriceUnit: "roll",
+        },
+      ],
+      mappings: [],
+      ignoreRules: [],
+    });
+
+    assert.equal(fromWebsite.supplierId, "all-print");
+    assert.equal(fromSales.supplierId, "all-print");
+    assert.equal(fromLegalName.supplierId, "all-print");
+    assert.equal(fromApsToken.supplierId, null);
+    assert.equal(labeledAps.supplierId, null);
+    assert.match(labeledAps.warning ?? "", /not treated as All Print Supplies/);
+    assert.equal(draft.supplierId, "all-print");
+    assert.equal(draft.supplierName, "All Print Supplies");
+    assert.equal(draft.rawSupplierName, "accounts@allprint.co.uk");
+    assert.equal(draft.invoiceNumber, "146237");
+    assert.equal(draft.invoiceDate, "2026-10-07");
+    assert.equal(draft.subtotal, 728.06);
+    assert.equal(draft.vat, 145.61);
+    assert.equal(draft.total, 873.67);
+    assert.equal(draft.lines.length, 3);
+    assert.deepEqual(
+      draft.lines.map((line) => ({
+        sku: line.rawSupplierSku,
+        description: line.rawDescription,
+        quantity: line.rawQuantity,
+        unit: line.rawUnit,
+        unitPrice: line.rawUnitPrice,
+        total: line.rawLineTotal,
+        status: line.reviewStatus,
+        product: line.matchedProductId,
+        comparison: line.comparison,
+      })),
+      [
+        {
+          sku: "WW300",
+          description: "WW300 MATT WHITE 50M X 1524MM",
+          quantity: 1,
+          unit: null,
+          unitPrice: 332.25,
+          total: 332.25,
+          status: "needs_review",
+          product: null,
+          comparison: null,
+        },
+        {
+          sku: "SU3-70",
+          description: "SU3-70 SEMI-MATT UV SEAL 50M X 1560MM SLIT TO 1510MM",
+          quantity: 1,
+          unit: null,
+          unitPrice: 141.39,
+          total: 141.39,
+          status: "needs_review",
+          product: null,
+          comparison: null,
+        },
+        {
+          sku: "SU3-70",
+          description:
+            "SU3-70 SEMI-MATT UV SEAL 50M X 1560MM BOTH SLIT TO 1350MM PRICE DUE TO STOCK",
+          quantity: 2,
+          unit: null,
+          unitPrice: 127.21,
+          total: 254.42,
+          status: "needs_review",
+          product: null,
+          comparison: null,
+        },
+      ]
+    );
+    assert.match(draft.lines[0]?.note ?? "", /width does not match/);
+    assert.match(draft.lines[1]?.note ?? "", /width does not match/);
+    assert.match(draft.lines[2]?.note ?? "", /width does not match/);
+    assert.equal(draft.lines.some((line) => line.matchedProductId === "pyramid-ww300-1371"), false);
+    assert.equal(draft.lines.some((line) => line.reviewStatus === "processed"), false);
+    assert.equal(draft.lines.some((line) => line.reviewStatus === "price_change"), false);
+    assert.equal(
+      draft.warnings.some((warning) => warning.includes("line totals") || warning.includes("Subtotal + VAT")),
+      false
+    );
+    assert.equal(joinPositionedText([
+      { text: "INVOICE DATE", x: 137, y: 594 },
+      { text: "INVOICE No.", x: 79, y: 594 },
+      { text: "SALES ORDER No. DESPATCH DATE", x: 378, y: 594 },
+      { text: "ACCOUNT No.", x: 204, y: 594 },
+      { text: "CUST. ORDER No.", x: 269, y: 594 },
+      { text: "06/10/2026", x: 461, y: 575 },
+      { text: "146237", x: 82, y: 575 },
+      { text: "170505", x: 396, y: 575 },
+      { text: "07/10/2026", x: 140, y: 575 },
+      { text: "VBL", x: 309, y: 575 },
+      { text: "CZ500", x: 215, y: 575 },
+      { text: "2", x: 110, y: 455 },
+      { text: "254.42", x: 457, y: 455 },
+      { text: "S", x: 501, y: 455 },
+      { text: "SU3-70 SEMI-MATT UV SEAL 50M X 1560MM", x: 125, y: 455 },
+      { text: "127.21", x: 388, y: 454 },
+    ]), [
+      "INVOICE No. INVOICE DATE ACCOUNT No. CUST. ORDER No. SALES ORDER No. DESPATCH DATE",
+      "146237 07/10/2026 CZ500 VBL 170505 06/10/2026",
+      "2 SU3-70 SEMI-MATT UV SEAL 50M X 1560MM 127.21 254.42 S",
+    ].join("\n"));
   });
 
   it("has no price write, Gmail client, or material creation in the invoice workflow", async () => {

@@ -99,8 +99,9 @@ export async function extractPdfText(bytes: Uint8Array) {
         return [];
       }
 
+      const x = Array.isArray(item.transform) ? item.transform[4] : 0;
       const y = Array.isArray(item.transform) ? item.transform[5] : 0;
-      return [{ text: item.str, y }];
+      return [{ text: item.str, x, y }];
     });
     pages.push(joinPositionedText(positioned));
   }
@@ -112,22 +113,30 @@ export async function extractPdfText(bytes: Uint8Array) {
   return pages.join("\n");
 }
 
-function joinPositionedText(items: Array<{ text: string; y: number }>) {
-  const rows: Array<{ y: number; text: string[] }> = [];
+export function joinPositionedText(items: Array<{ text: string; x?: number; y: number }>) {
+  const rows: Array<{ y: number; parts: Array<{ x: number; text: string }> }> = [];
 
-  for (const item of items) {
+  items.forEach((item, index) => {
     const row = rows.find((candidate) => Math.abs(candidate.y - item.y) < 2);
+    const part = { x: item.x ?? index, text: item.text };
 
     if (row) {
-      row.text.push(item.text);
+      row.parts.push(part);
     } else {
-      rows.push({ y: item.y, text: [item.text] });
+      rows.push({ y: item.y, parts: [part] });
     }
-  }
+  });
 
   return rows
     .sort((left, right) => right.y - left.y)
-    .map((row) => row.text.join(" ").replace(/\s+/g, " ").trim())
+    .map((row) =>
+      row.parts
+        .sort((left, right) => left.x - right.x)
+        .map((part) => part.text)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim()
+    )
     .filter(Boolean)
     .join("\n");
 }

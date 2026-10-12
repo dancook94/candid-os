@@ -34,22 +34,40 @@ const TABLE_LINE = new RegExp(
   "i"
 );
 
+const INVOICE_COLUMNS: Array<{ key: "invoiceNumber" | "invoiceDate"; pattern: RegExp }> = [
+  { key: "invoiceNumber", pattern: /invoice\s*(?:number|no\.?|#)/i },
+  { key: "invoiceDate", pattern: /invoice\s*date/i },
+];
+
+const OTHER_INVOICE_COLUMNS = [
+  /account\s*no\.?/i,
+  /cust(?:omer)?\.?\s*order\s*no\.?/i,
+  /sales\s*order\s*no\.?/i,
+  /despatch\s*date|dispatch\s*date/i,
+];
+
 export function parseInvoiceText(text: string): ParsedInvoice {
   const warnings: string[] = [];
+  const sourceLines = invoiceSourceLines(text);
+  const columns = readInvoiceColumns(sourceLines);
   const rawSupplierName = labeledText(text, ["supplier", "vendor"]);
   const invoiceNumber =
     labeledText(text, ["invoice number", "invoice no", "invoice #", "inv no"]) ??
-    invoiceNumberOnFollowingLine(text);
+    invoiceNumberOnFollowingLine(text) ??
+    columns?.invoiceNumber ??
+    null;
   const invoiceDate =
     parseInvoiceDate(labeledText(text, ["invoice date", "document date", "date"])) ??
-    dateOnFollowingLine(text, "document date");
-  const subtotal = labeledMoney(text, ["subtotal", "net", "goods total"]);
+    dateOnFollowingLine(text, "document date") ??
+    columns?.invoiceDate ??
+    null;
+  const subtotal = labeledMoney(text, ["subtotal", "total goods", "net", "goods total"]);
   const vat = percentVatAmount(text) ?? labeledMoney(text, ["vat", "tax"]);
   const total =
-    labeledMoney(text, ["invoice total", "amount due"]) ??
+    labeledMoney(text, ["invoice total", "amount due", "total due"]) ??
     labeledMoney(text, ["total"]) ??
     totalWithTrailingWords(text);
-  const lines = parseLines(text);
+  const lines = parseLines(sourceLines);
 
   if (!rawSupplierName) {
     warnings.push("Supplier was not labelled on the invoice.");
@@ -95,11 +113,14 @@ export function parseInvoiceText(text: string): ParsedInvoice {
   };
 }
 
-function parseLines(text: string): ParsedInvoiceLine[] {
-  const sourceLines = text
+function invoiceSourceLines(text: string) {
+  return text
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+function parseLines(sourceLines: string[]): ParsedInvoiceLine[] {
   const headerIndex = sourceLines.findIndex((line) =>
     /^no\.\s+description\s+quantity\s+unit\b/i.test(line)
   );
@@ -108,7 +129,71 @@ function parseLines(text: string): ParsedInvoiceLine[] {
     return parseTableLines(sourceLines.slice(headerIndex + 1));
   }
 
+  const quantityHeader = sourceLines.findIndex((line) =>
+    /^quantity\s+description\s+unit\s+price\s+line\s+value\b/i.test(line)
+  );
+
+  if (quantityHeader >= 0) {
+    return parseQuantityLines(sourceLines.slice(quantityHeader + 1));
+  }
+
   return parseSimpleLines(sourceLines);
+}
+
+function parseQuantityLines(sourceLines: string[]): ParsedInvoiceLine[] {
+  const lines: ParsedInvoiceLine[] = [];
+  let current: ParsedInvoiceLine | null = null;
+  const pattern = new RegExp(
+    `^(\\d+(?:\\.\\d+)?)\\s+(.+?)\\s+£?\\s*(${UNIT_PRICE})\\s+£?\\s*(${LINE_TOTAL})(?:\\s+[A-Za-z])?\\s*$`,
+    "i"
+  );
+
+  for (const sourceLine of sourceLines) {
+    if (
+      /^(?:total\s+goods|total\s+due|subtotal|vat|our bank|remittances)\b/i.test(sourceLine)
+    ) {
+      break;
+    }
+
+    const match = sourceLine.match(pattern);
+
+    if (match) {
+      if (current) {
+        lines.push(finishLine(current, lines.length + 1));
+      }
+
+      const description = normalizeMaterialLabel(match[2]) ?? match[2];
+      const quantity = Number(match[1]);
+      const unitPrice = parseMoney(match[3]);
+      const lineTotal = parseMoney(match[4]);
+
+      current =
+        unitPrice == null || lineTotal == null || !Number.isFinite(quantity)
+          ? null
+          : {
+              lineNumber: 0,
+              rawDescription: description,
+              rawSupplierSku: splitSku(description).sku,
+              rawQuantity: quantity,
+              rawUnit: null,
+              rawUnitPrice: unitPrice,
+              rawLineTotal: lineTotal,
+              rawTax: null,
+            };
+      continue;
+    }
+
+    if (current) {
+      current.rawDescription =
+        normalizeMaterialLabel(`${current.rawDescription} ${sourceLine}`) ?? current.rawDescription;
+    }
+  }
+
+  if (current) {
+    lines.push(finishLine(current, lines.length + 1));
+  }
+
+  return lines;
 }
 
 function parseTableLines(sourceLines: string[]): ParsedInvoiceLine[] {
@@ -257,6 +342,76 @@ function labeledMoney(text: string, labels: string[]) {
     if (match) {
       return parseMoney(match[1]);
     }
+  }
+
+  return null;
+}
+
+function readInvoiceColumns(sourceLines: string[]) {
+  for (let index = 0; index < sourceLines.length - 1; index += 1) {
+    const columns = columnKeys(sourceLines[index]);
+
+    if (!columns.includes("invoiceNumber") || !columns.includes("invoiceDate")) {
+      continue;
+    }
+
+    const tokens = sourceLines[index + 1].split(/\s+/);
+
+    if (tokens.length !== columns.length) {
+      continue;
+    }
+
+    const invoiceNumber = acceptInvoiceNumber(tokens[columns.indexOf("invoiceNumber")] ?? "");
+    const invoiceDate = parseInvoiceDate(tokens[columns.indexOf("invoiceDate")] ?? null);
+
+    if (!invoiceNumber || !invoiceDate) {
+      continue;
+    }
+
+    return { invoiceNumber, invoiceDate };
+  }
+
+  return null;
+}
+
+function columnKeys(line: string) {
+  const labels = [
+    ...INVOICE_COLUMNS,
+    ...OTHER_INVOICE_COLUMNS.map((pattern) => ({ key: "other" as const, pattern })),
+  ];
+  const found: Array<"invoiceNumber" | "invoiceDate" | "other"> = [];
+  let rest = line;
+
+  while (rest.length > 0) {
+    let earliest: { key: "invoiceNumber" | "invoiceDate" | "other"; index: number; length: number } | null =
+      null;
+
+    for (const label of labels) {
+      const match = rest.match(label.pattern);
+
+      if (match?.index == null) {
+        continue;
+      }
+
+      if (!earliest || match.index < earliest.index) {
+        earliest = { key: label.key, index: match.index, length: match[0].length };
+      }
+    }
+
+    if (!earliest) {
+      break;
+    }
+
+    found.push(earliest.key);
+    rest = rest.slice(earliest.index + earliest.length);
+  }
+
+  return found;
+}
+
+function acceptInvoiceNumber(value: string) {
+  if (/^\d{4,12}$/.test(value) || (/[A-Za-z]/.test(value) && /\d/.test(value))) {
+    return value;
   }
 
   return null;

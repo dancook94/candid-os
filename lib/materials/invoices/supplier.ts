@@ -12,6 +12,14 @@ const BLOCKED_SUPPLIER_NAMES = new Set([
   "aps",
 ]);
 
+/**
+ * Invoice-only supplier evidence. These domains are not supplier aliases:
+ * the bare token APS must not resolve to All Print Supplies.
+ */
+const INVOICE_SUPPLIER_DOMAINS = [
+  { domain: "allprint.co.uk", canonicalName: "All Print Supplies" },
+] as const;
+
 export function isBlockedSupplierName(value: string) {
   return BLOCKED_SUPPLIER_NAMES.has(normalizeSupplierName(value));
 }
@@ -63,16 +71,22 @@ export function resolveInvoiceSupplier(
     const supplier = suppliers.find((item) => item.id === alias.supplierId);
     return supplier ? [supplier] : [];
   });
+  const domainHits = domainSuppliers(documentText, suppliers);
   const unique = new Map(
-    [...hits, ...aliasHits].map((supplier) => [supplier.id, supplier])
+    [...hits, ...aliasHits, ...domainHits.map((hit) => hit.supplier)].map((supplier) => [
+      supplier.id,
+      supplier,
+    ])
   );
 
   if (unique.size === 1) {
     const supplier = [...unique.values()][0];
+    const domainLabel = domainHits.find((hit) => hit.supplier.id === supplier.id)?.evidence ?? null;
+    const phraseLabel = longestDocumentPhrase(documentText, suppliers, aliases, supplier.id);
     return {
       supplierId: supplier.id,
       supplierName: supplier.name,
-      documentLabel: longestDocumentPhrase(documentText, suppliers, aliases, supplier.id),
+      documentLabel: longerLabel(phraseLabel, domainLabel),
       warning: null,
     };
   }
@@ -130,6 +144,40 @@ function findSupplier(
   }
 
   return suppliers.find((supplier) => supplier.id === alias.supplierId) ?? null;
+}
+
+function domainSuppliers(text: string, suppliers: readonly InvoiceSupplierRef[]) {
+  return INVOICE_SUPPLIER_DOMAINS.flatMap((identity) => {
+    const evidence = domainEvidence(text, identity.domain);
+
+    if (!evidence) {
+      return [];
+    }
+
+    const supplier = suppliers.find(
+      (item) => item.normalizedName === normalizeSupplierName(identity.canonicalName)
+    );
+
+    return supplier ? [{ supplier, evidence }] : [];
+  });
+}
+
+function domainEvidence(text: string, domain: string) {
+  const escaped = domain.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = text.match(
+    new RegExp(
+      `(?:^|[^a-z0-9.])((?:[a-z0-9._%+-]+@|(?:https?:\\/\\/)?(?:www\\.)?)${escaped})(?![a-z0-9.])`,
+      "i"
+    )
+  );
+
+  return match?.[1] ?? null;
+}
+
+function longerLabel(left: string | null, right: string | null) {
+  return [left, right]
+    .filter((value): value is string => Boolean(value))
+    .sort((first, second) => second.length - first.length)[0] ?? null;
 }
 
 function phraseAppears(text: string, phrase: string) {

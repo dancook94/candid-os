@@ -107,6 +107,9 @@ export function classifyInvoiceLine(input: {
   const supplierProducts = input.supplierId
     ? input.products.filter((product) => product.supplierId === input.supplierId)
     : [];
+  const compatibleProducts = supplierProducts.filter(
+    (product) => !invoiceWidthConflicts(identity.description, product)
+  );
 
   if (
     !input.forcedProductId &&
@@ -139,7 +142,14 @@ export function classifyInvoiceLine(input: {
           ? null
           : "That supplier product is not sold by this supplier.",
       }
-    : findMatch(identity, normalized, input.supplierId, supplierProducts, input.mappings);
+    : findSupplierMatch(
+        identity,
+        normalized,
+        input.supplierId,
+        supplierProducts,
+        compatibleProducts,
+        input.mappings
+      );
   const purchaseUnit = normalizePurchaseUnit(identity.unit);
   const product = supplierProducts.find((item) => item.id === match.productId) ?? null;
   const comparison =
@@ -167,6 +177,8 @@ export function classifyInvoiceLine(input: {
     note = "Choose the supplier before this line can be matched.";
   } else if (mathsWarning) {
     reviewStatus = "extraction_error";
+  } else if (match.note === WIDTH_CONFLICT_NOTE) {
+    reviewStatus = "needs_review";
   } else if (!match.productId || !match.confidence) {
     reviewStatus = "unmatched";
   } else if (match.confidence !== "high") {
@@ -252,6 +264,88 @@ export function normalizePurchaseUnit(value: string | null): PurchaseUnit | null
   }
 
   return isPurchaseUnit(value) ? value : null;
+}
+
+const WIDTH_CONFLICT_NOTE = "The invoice width does not match a product from this supplier.";
+
+function findSupplierMatch(
+  identity: LineIdentity,
+  normalizedDescription: string,
+  supplierId: string | null,
+  supplierProducts: readonly InvoiceMatchProduct[],
+  compatibleProducts: readonly InvoiceMatchProduct[],
+  mappings: readonly DescriptionMappingRef[]
+) {
+  const match = findMatch(
+    identity,
+    normalizedDescription,
+    supplierId,
+    compatibleProducts,
+    mappings
+  );
+
+  if (match.productId || compatibleProducts.length === supplierProducts.length) {
+    return match;
+  }
+
+  const rejected = findMatch(
+    identity,
+    normalizedDescription,
+    supplierId,
+    supplierProducts,
+    mappings
+  );
+  const rejectedProduct = supplierProducts.find((product) => product.id === rejected.productId);
+
+  if (rejectedProduct && invoiceWidthConflicts(identity.description, rejectedProduct)) {
+    return {
+      productId: null,
+      confidence: null,
+      method: null,
+      note: WIDTH_CONFLICT_NOTE,
+    };
+  }
+
+  return match;
+}
+
+export function invoiceWidthConflicts(description: string, product: InvoiceMatchProduct) {
+  if (product.widthMm == null) {
+    return false;
+  }
+
+  const width = Math.round(product.widthMm);
+  const slitWidths = [...description.matchAll(/\bslit to\s+(\d{3,4}(?:\.\d+)?)\s*mm\b/gi)]
+    .map((match) => Math.round(Number(match[1])))
+    .filter((value) => Number.isFinite(value));
+
+  if (slitWidths.length > 0) {
+    return slitWidths.some((value) => value !== width);
+  }
+
+  const stated = statedRollWidthMm(description);
+
+  if (stated == null) {
+    return false;
+  }
+
+  return Math.round(stated) !== width;
+}
+
+function statedRollWidthMm(description: string) {
+  const metreThenWidth = description.match(
+    /\b(\d+(?:\.\d+)?)\s*m\s*[x×]\s*(\d{3,4}(?:\.\d+)?)\s*mm\b/i
+  );
+
+  if (metreThenWidth) {
+    return Number(metreThenWidth[2]);
+  }
+
+  const widthThenMetre = description.match(
+    /\b(\d{3,4}(?:\.\d+)?)\s*mm\s*[x×]\s*(\d+(?:\.\d+)?)\s*m\b/i
+  );
+
+  return widthThenMetre ? Number(widthThenMetre[1]) : null;
 }
 
 function findMatch(
