@@ -4,6 +4,10 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "re
 import { useRouter } from "next/navigation";
 
 import { QuoteBuilderLineItemCard } from "@/components/quote-builder-line-item";
+import {
+  QuoteLineCostingPanel,
+  QuoteProfitabilitySummary,
+} from "@/components/quote-line-costing-panel";
 import { CompanyContactSelect } from "@/components/crm/company-contact-select";
 import { Button } from "@/components/ui/button";
 import { TestCommunicationHint } from "@/components/communication-mode-banner";
@@ -24,6 +28,7 @@ import {
   PAYMENT_TERMS_MIN_DAYS,
   resolveQuotePaymentTermsDays,
 } from "@/lib/payment-terms";
+import { quoteDateInputValue } from "@/lib/app-settings";
 import { resolveQuoteProductionDeadlineForSave } from "@/lib/jobs/production-deadline";
 import {
   deleteOrphanedQuoteItemImages,
@@ -32,6 +37,16 @@ import {
   toQuoteItemImageInsertFields,
   type QuoteItemImageMetadata,
 } from "@/lib/quote-item-images";
+import {
+  buildReplaceDraftLinesPayload,
+  detachQuoteLineCostIdentity,
+  canEditQuoteVersion,
+  emptyQuoteLineCost,
+  estimateQuoteLineCost,
+  quoteProfitFigures,
+  type QuoteLineCostDraft,
+} from "@/lib/quotes/costing";
+import type { QuoteMaterialCatalogItem } from "@/lib/quotes/material-catalog";
 
 const VAT_RATE = 0.2;
 
@@ -52,6 +67,7 @@ type LineItemFormState = {
   previewUrl: string | null;
   imageRemoved: boolean;
   previousStoragePath: string | null;
+  cost: QuoteLineCostDraft;
 };
 
 export type QuoteBuilderLineItem = {
@@ -67,6 +83,7 @@ export type QuoteBuilderLineItem = {
   imageFileType?: string | null;
   imageFileSize?: number | null;
   imagePreviewUrl?: string | null;
+  cost?: QuoteLineCostDraft | null;
 };
 
 export type QuoteBuilderInitialValues = {
@@ -116,6 +133,8 @@ type QuoteBuilderFormProps = {
   lockCompany?: boolean;
   lockContact?: boolean;
   inheritedContactLabel?: string | null;
+  materialCatalog?: QuoteMaterialCatalogItem[];
+  showInternalCosting?: boolean;
 };
 
 function formatSupabaseError(error: unknown) {
@@ -217,6 +236,7 @@ function createEmptyLineItem(clientKey: string): LineItemFormState {
     previewUrl: null,
     imageRemoved: false,
     previousStoragePath: null,
+    cost: emptyQuoteLineCost(),
   };
 }
 
@@ -241,6 +261,7 @@ function toLineItemFormState(
     previewUrl: item.imagePreviewUrl ?? null,
     imageRemoved: false,
     previousStoragePath: item.imageStoragePath ?? null,
+    cost: item.cost ?? emptyQuoteLineCost(),
   };
 }
 
@@ -279,21 +300,6 @@ function getImageInsertFields(
   >
 ) {
   return toQuoteItemImageInsertFields(getPreservedImageMetadata(item));
-}
-
-function buildItemsPayload(
-  activeItems: ReturnType<typeof calculateTotals>["parsedItems"]
-) {
-  return activeItems.map((item, index) => ({
-    title: item.title.trim(),
-    description: item.description.trim() || null,
-    quantity: item.quantity,
-    unit_price: item.unitPrice,
-    is_optional: item.isOptional,
-    line_total: item.lineTotal,
-    sort_order: index + 1,
-    ...getImageInsertFields(item),
-  }));
 }
 
 async function syncQuoteOpportunityStage(
@@ -409,6 +415,8 @@ export function QuoteBuilderForm({
   lockCompany = false,
   lockContact = false,
   inheritedContactLabel = null,
+  materialCatalog = [],
+  showInternalCosting = false,
 }: QuoteBuilderFormProps) {
   const router = useRouter();
   const supabase = createClient();
@@ -425,7 +433,9 @@ export function QuoteBuilderForm({
   const [productionDeadline, setProductionDeadline] = useState(
     initialValues.productionDeadline
   );
-  const [expiryDate, setExpiryDate] = useState(initialValues.expiryDate);
+  const [expiryDate, setExpiryDate] = useState(() =>
+    quoteDateInputValue(initialValues.expiryDate)
+  );
   const [paymentTermsDays, setPaymentTermsDays] = useState(
     String(initialValues.paymentTermsDays)
   );
@@ -464,6 +474,22 @@ export function QuoteBuilderForm({
     () => calculateTotals(lineItems, vatRate),
     [lineItems, vatRate]
   );
+  const profitFigures = useMemo(
+    () =>
+      quoteProfitFigures(
+        totals.parsedItems
+          .filter((item) => item.title.trim())
+          .map((item) => ({
+            isOptional: item.isOptional,
+            sellExVat: item.lineTotal,
+            estimate: estimateQuoteLineCost({
+              cost: item.cost,
+              quantity: item.quantity,
+            }),
+          }))
+      ),
+    [totals]
+  );
 
   const filteredQuoteRequests = quoteRequests.filter(
     (request) => !companyId || request.company_id === companyId
@@ -485,7 +511,7 @@ export function QuoteBuilderForm({
     );
   }
 
-  const isReadOnly = !canEdit;
+  const isReadOnly = !canEdit || (mode === "edit" && !canEditQuoteVersion(versionStatus));
 
   const lineItemsRef = useRef(lineItems);
   lineItemsRef.current = lineItems;
@@ -544,6 +570,7 @@ export function QuoteBuilderForm({
           : source.previewUrl,
         imageRemoved: false,
         previousStoragePath: source.imageStoragePath,
+        cost: detachQuoteLineCostIdentity(source.cost),
       };
 
       const next = [...current];
@@ -756,7 +783,7 @@ export function QuoteBuilderForm({
 
       const versionFields = {
         version_status: "draft" as const,
-        expiry_date: expiryDate || null,
+        expiry_date: quoteDateInputValue(expiryDate) || null,
         payment_terms_days: parsedPaymentTerms,
         introduction: introduction.trim() || null,
         customer_notes: customerNotes.trim() || null,
@@ -767,7 +794,63 @@ export function QuoteBuilderForm({
         total: totals.total,
       };
 
-      const itemsPayload = buildItemsPayload(activeItems);
+      async function replaceVersionLines(versionId: string) {
+        const imageFields = (item: (typeof activeItems)[number]) =>
+          getImageInsertFields(item);
+        const payload = buildReplaceDraftLinesPayload(
+          activeItems.map((item) => {
+            const image = imageFields(item);
+            return {
+              id: item.id ?? null,
+              title: item.title,
+              description: item.description,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              isOptional: item.isOptional,
+              imageStoragePath: image.image_storage_path,
+              imageFileName: image.image_file_name,
+              imageFileType: image.image_file_type,
+              imageFileSize: image.image_file_size,
+              cost: item.cost,
+            };
+          })
+        );
+
+        if (!payload.ok) {
+          throw new Error(payload.error);
+        }
+
+        const { error: replaceError } = await supabase.rpc(
+          "replace_draft_quote_lines",
+          {
+            p_quote_version_id: versionId,
+            p_version: {
+              expiry_date: quoteDateInputValue(expiryDate) || null,
+              payment_terms_days: parsedPaymentTerms,
+              introduction: introduction.trim() || null,
+              customer_notes: customerNotes.trim() || null,
+              internal_notes: internalNotes.trim() || null,
+              vat_rate: vatRate,
+            },
+            p_lines: payload.lines,
+          }
+        );
+
+        if (replaceError) {
+          throw replaceError;
+        }
+
+        const { data: savedItems, error: savedItemsError } = await supabase
+          .from("quote_items")
+          .select("id, sort_order")
+          .eq("quote_version_id", versionId);
+
+        if (savedItemsError) {
+          throw savedItemsError;
+        }
+
+        return savedItems ?? [];
+      }
 
       if (mode === "create") {
         const nextQuoteNumber = await getNextQuoteNumber();
@@ -841,18 +924,12 @@ export function QuoteBuilderForm({
           );
         }
 
-        if (itemsPayload.length > 0) {
-          const { data: insertedItems, error: itemsError } = await supabase
-            .from("quote_items")
-            .insert(
-              itemsPayload.map((item) => ({
-                ...item,
-                quote_version_id: createdVersion.id,
-              }))
-            )
-            .select("id, sort_order");
+        if (activeItems.length > 0) {
+          let insertedItems: { id: string; sort_order: number }[];
 
-          if (itemsError) {
+          try {
+            insertedItems = await replaceVersionLines(createdVersion.id);
+          } catch (itemsError) {
             await rollbackCreatedQuote(createdQuote.id, createdVersion.id);
             throw itemsError;
           }
@@ -862,7 +939,7 @@ export function QuoteBuilderForm({
             createdQuote.id,
             createdVersion.id,
             activeItems,
-            insertedItems ?? []
+            insertedItems
           );
 
           const previousPaths = activeItems
@@ -945,45 +1022,28 @@ export function QuoteBuilderForm({
         throw quoteUpdateError;
       }
 
-      const { error: versionUpdateError } = await supabase
-        .from("quote_versions")
-        .update(versionFields)
-        .eq("id", selectedQuoteVersionId);
+      const insertedItems = await replaceVersionLines(selectedQuoteVersionId);
+      const savedIdByClientKey = new Map(
+        activeItems.flatMap((item, index) => {
+          const saved = insertedItems.find((row) => row.sort_order === index + 1);
+          return saved ? [[item.clientKey, saved.id] as const] : [];
+        })
+      );
 
-      if (versionUpdateError) {
-        throw versionUpdateError;
-      }
+      setLineItems((current) =>
+        current.map((item) => {
+          const savedId = savedIdByClientKey.get(item.clientKey);
+          return savedId ? { ...item, id: savedId } : item;
+        })
+      );
 
-      const { error: deleteItemsError } = await supabase
-        .from("quote_items")
-        .delete()
-        .eq("quote_version_id", selectedQuoteVersionId);
-
-      if (deleteItemsError) {
-        throw deleteItemsError;
-      }
-
-      if (itemsPayload.length > 0) {
-        const { data: insertedItems, error: itemsError } = await supabase
-          .from("quote_items")
-          .insert(
-            itemsPayload.map((item) => ({
-              ...item,
-              quote_version_id: selectedQuoteVersionId,
-            }))
-          )
-          .select("id, sort_order");
-
-        if (itemsError) {
-          throw itemsError;
-        }
-
+      if (insertedItems.length > 0) {
         const retainedPaths = await syncSavedLineItemImages(
           supabase,
           quoteId,
           selectedQuoteVersionId,
           activeItems,
-          insertedItems ?? []
+          insertedItems
         );
 
         await deleteOrphanedQuoteItemImages(
@@ -1365,7 +1425,7 @@ export function QuoteBuilderForm({
         </CardContent>
       </Card>
 
-      <Card className="portal-surface overflow-hidden">
+      <Card className="portal-surface">
         <CardHeader className="border-b border-border pb-4">
           <CardTitle className="text-lg font-semibold text-neutral-950">
             Line items
@@ -1401,7 +1461,20 @@ export function QuoteBuilderForm({
                 onSelectImage={handleSelectLineItemImage}
                 onRemoveImage={handleRemoveLineItemImage}
                 canDelete={lineItems.length > 1}
-              />
+              >
+                {showInternalCosting ? (
+                  <QuoteLineCostingPanel
+                    clientKey={item.clientKey}
+                    cost={item.cost}
+                    quantity={item.quantity}
+                    sellExVat={lineTotal}
+                    isOptional={item.isOptional}
+                    materials={materialCatalog}
+                    disabled={isBusy || isReadOnly}
+                    onChange={(cost) => updateLineItem(item.clientKey, { cost })}
+                  />
+                ) : null}
+              </QuoteBuilderLineItemCard>
             );
           })}
 
@@ -1417,8 +1490,15 @@ export function QuoteBuilderForm({
             </Button>
           )}
 
-          <div className="flex justify-end pt-2">
-            <div className="w-full max-w-sm rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div
+            className={`grid gap-3 pt-2 ${showInternalCosting ? "lg:grid-cols-2" : "justify-items-end"}`}
+          >
+            {showInternalCosting ? (
+              <QuoteProfitabilitySummary figures={profitFigures} />
+            ) : null}
+            <div
+              className={`w-full rounded-xl border border-border bg-card p-4 shadow-sm lg:justify-self-end ${showInternalCosting ? "" : "max-w-sm"}`}
+            >
               <dl className="space-y-2 text-sm">
                 <div className="flex items-center justify-between gap-4">
                   <dt className="text-neutral-500">Subtotal</dt>

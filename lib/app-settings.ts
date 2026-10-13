@@ -111,6 +111,16 @@ export function computeDefaultQuoteExpiryDate(expiryDays: number) {
   return date.toISOString().slice(0, 10);
 }
 
+/** Date inputs need YYYY-MM-DD. Timestamps from the database keep their calendar date. */
+export function quoteDateInputValue(value: string | null | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(value.trim());
+  return match?.[1] ?? "";
+}
+
 export function normalizeAppSettings(
   row: Partial<AppSettings> | null | undefined
 ): AppSettings {

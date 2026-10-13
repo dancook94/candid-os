@@ -43,6 +43,10 @@ import {
 } from "@/lib/crm/get-crm-timeline";
 import { loadQuoteContactDisplay } from "@/lib/crm/quote-contact-display";
 import { createClient } from "@/lib/supabase/server";
+import { quoteDateInputValue } from "@/lib/app-settings";
+import { loadQuoteLineCosts } from "@/lib/quotes/load-quote-costs";
+import { loadQuoteMaterialCatalog } from "@/lib/quotes/material-catalog";
+import { isCandidAdminRole } from "@/lib/staff-roles";
 import { createQuoteItemImageSignedUrl } from "@/lib/quote-item-images";
 import {
   canStaffAcceptQuoteOnBehalf,
@@ -190,7 +194,7 @@ export default async function QuoteDetailPage({
     }))
   );
 
-  const [companiesResult, quoteRequestsResult, linkedOpportunity, linkableOpportunities, quoteContact] =
+  const [companiesResult, quoteRequestsResult, linkedOpportunity, linkableOpportunities, quoteContact, materialCatalogResult, lineCosts] =
     await Promise.all([
       supabase
         .from("companies")
@@ -204,6 +208,11 @@ export default async function QuoteDetailPage({
       loadLinkedOpportunityForQuote(supabase, quote.opportunity_id),
       loadLinkableOpportunitiesForCompany(supabase, quote.company_id),
       loadQuoteContactDisplay(supabase, quote.contact_id),
+      loadQuoteMaterialCatalog(supabase),
+      loadQuoteLineCosts(
+        supabase,
+        quoteItems.map((item) => item.id)
+      ),
     ]);
 
   logDevQuery("companies.active", {
@@ -234,7 +243,7 @@ export default async function QuoteDetailPage({
         productionDeadline: quote.quote_request_id
           ? ""
           : (quote.required_date ?? "").slice(0, 10),
-        expiryDate: quoteVersion.expiry_date ?? "",
+        expiryDate: quoteDateInputValue(quoteVersion.expiry_date),
         paymentTermsDays: quoteVersion.payment_terms_days ?? 14,
         introduction: quoteVersion.introduction ?? "",
         customerNotes: quoteVersion.customer_notes ?? "",
@@ -254,6 +263,7 @@ export default async function QuoteDetailPage({
             imageFileType,
             imageFileSize,
             imagePreviewUrl,
+            cost: lineCosts.get(item.id) ?? null,
           })
         ),
         defaultVatRate: Number(quoteVersion.vat_rate ?? 0.2),
@@ -410,32 +420,7 @@ export default async function QuoteDetailPage({
 
               <CreateQuoteVersionButton
                 quoteId={quote.id}
-                sourceVersion={{
-                  id: quoteVersion.id,
-                  version_number: quoteVersion.version_number,
-                  introduction: quoteVersion.introduction,
-                  customer_notes: quoteVersion.customer_notes,
-                  internal_notes: quoteVersion.internal_notes,
-                  expiry_date: quoteVersion.expiry_date,
-                  payment_terms_days: quoteVersion.payment_terms_days,
-                  subtotal: quoteVersion.subtotal,
-                  vat_rate: quoteVersion.vat_rate,
-                  vat_amount: quoteVersion.vat_amount,
-                  total: quoteVersion.total,
-                }}
-                sourceItems={quoteItems.map((item) => ({
-                  title: item.title,
-                  description: item.description,
-                  quantity: Number(item.quantity),
-                  unit_price: Number(item.unit_price),
-                  is_optional: Boolean(item.is_optional),
-                  line_total: Number(item.line_total),
-                  sort_order: Number(item.sort_order),
-                  image_storage_path: item.image_storage_path,
-                  image_file_name: item.image_file_name,
-                  image_file_type: item.image_file_type,
-                  image_file_size: item.image_file_size,
-                }))}
+                sourceVersionId={quoteVersion.id}
               />
             </CardContent>
           </Card>
@@ -506,6 +491,10 @@ export default async function QuoteDetailPage({
             currentVersionNumber={quote.current_version}
             canEdit={canEdit}
             lockContact={Boolean(quote.opportunity_id && quote.contact_id)}
+            materialCatalog={
+              materialCatalogResult.ok ? materialCatalogResult.materials : []
+            }
+            showInternalCosting={isCandidAdminRole(profile.user_role)}
           />
         ) : null}
 

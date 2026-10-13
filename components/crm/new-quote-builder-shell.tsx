@@ -6,6 +6,7 @@ import {
   QuoteBuilderForm,
   type QuoteBuilderInitialValues,
 } from "@/components/quote-builder-form";
+import type { QuoteMaterialCatalogItem } from "@/lib/quotes/material-catalog";
 import { QuoteLinkSetup } from "@/components/crm/quote-link-setup";
 
 type CompanyOption = {
@@ -35,6 +36,8 @@ type NewQuoteBuilderShellProps = {
   initialValues: QuoteBuilderInitialValues;
   fallbackQuotePaymentTermsDays: number;
   prefilledOpportunityId?: string | null;
+  materialCatalog?: QuoteMaterialCatalogItem[];
+  showInternalCosting?: boolean;
 };
 
 export function NewQuoteBuilderShell({
@@ -45,6 +48,8 @@ export function NewQuoteBuilderShell({
   initialValues,
   fallbackQuotePaymentTermsDays,
   prefilledOpportunityId,
+  materialCatalog = [],
+  showInternalCosting = false,
 }: NewQuoteBuilderShellProps) {
   const [linkMode, setLinkMode] = useState<
     "existing" | "new" | "none" | "prefilled" | null
@@ -97,6 +102,8 @@ export function NewQuoteBuilderShell({
       createOpportunityOnSave={createOpportunityOnSave}
       lockCompany={Boolean(linkedOpportunity)}
       lockContact={Boolean(linkedOpportunity?.contact_id)}
+      materialCatalog={materialCatalog}
+      showInternalCosting={showInternalCosting}
     />
   );
 }

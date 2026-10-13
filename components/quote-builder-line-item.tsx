@@ -46,6 +46,7 @@ type QuoteBuilderLineItemCardProps = {
   onSelectImage: (clientKey: string, file: File) => void;
   onRemoveImage: (clientKey: string) => void;
   canDelete: boolean;
+  children?: React.ReactNode;
 };
 
 function IconActionButton({
@@ -95,6 +96,7 @@ export function QuoteBuilderLineItemCard({
   onSelectImage,
   onRemoveImage,
   canDelete,
+  children,
 }: QuoteBuilderLineItemCardProps) {
   const titleRef = useRef<HTMLInputElement>(null);
   const isFirst = index === 0;
@@ -109,7 +111,7 @@ export function QuoteBuilderLineItemCard({
   }, [shouldFocusTitle, onFocusTitle]);
 
   return (
-    <article className="rounded-xl border border-neutral-200 bg-white p-3 shadow-sm">
+    <article className="relative rounded-xl border border-neutral-200 bg-white p-3 shadow-sm">
       <header className="mb-3 flex flex-wrap items-center gap-2 border-b border-neutral-100 pb-3">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <h3 className="text-sm font-medium text-neutral-950">
@@ -273,6 +275,7 @@ export function QuoteBuilderLineItemCard({
           </div>
         </div>
       </div>
+      {children}
     </article>
   );
 }

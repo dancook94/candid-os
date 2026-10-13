@@ -20,6 +20,8 @@ import { findQuoteRequestIdForOpportunity } from "@/lib/quote-request-link";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { createClient } from "@/lib/supabase/server";
+import { loadQuoteMaterialCatalog } from "@/lib/quotes/material-catalog";
+import { isCandidAdminRole } from "@/lib/staff-roles";
 
 type NewQuotePageProps = {
   searchParams: Promise<{
@@ -49,7 +51,7 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
     data: { user },
   } = await supabase.auth.getUser();
 
-  const [{ data: companies }, { data: quoteRequests }, { data: opportunities }, appSettingsResult] =
+  const [{ data: companies }, { data: quoteRequests }, { data: opportunities }, appSettingsResult, materialCatalogResult] =
     await Promise.all([
       supabase
         .from("companies")
@@ -67,7 +69,12 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
         .order("updated_at", { ascending: false })
         .limit(200),
       loadAppSettings(supabase),
+      loadQuoteMaterialCatalog(supabase),
     ]);
+  const materialCatalog = materialCatalogResult.ok
+    ? materialCatalogResult.materials
+    : [];
+  const showInternalCosting = isCandidAdminRole(profile.user_role);
 
   const appSettings = appSettingsResult.settings;
 
@@ -215,6 +222,8 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
               quoteRequests={quoteRequests ?? []}
               initialValues={initialValues}
               fallbackQuotePaymentTermsDays={appSettings.default_payment_terms_days}
+              materialCatalog={materialCatalog}
+              showInternalCosting={showInternalCosting}
               lockCompany
               lockContact
               inheritedContactLabel={
@@ -276,6 +285,8 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
             quoteRequests={quoteRequests ?? []}
             initialValues={initialValues}
             fallbackQuotePaymentTermsDays={appSettings.default_payment_terms_days}
+            materialCatalog={materialCatalog}
+            showInternalCosting={showInternalCosting}
             lockCompany
             inheritedContactLabel={
               contact
@@ -318,6 +329,8 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
             quoteRequests={quoteRequests ?? []}
             initialValues={initialValues}
             fallbackQuotePaymentTermsDays={appSettings.default_payment_terms_days}
+            materialCatalog={materialCatalog}
+            showInternalCosting={showInternalCosting}
           />
         ) : (
           <NewQuoteBuilderShell
@@ -327,6 +340,8 @@ export default async function NewQuotePage({ searchParams }: NewQuotePageProps) 
             opportunities={opportunities ?? []}
             initialValues={initialValues}
             fallbackQuotePaymentTermsDays={appSettings.default_payment_terms_days}
+            materialCatalog={materialCatalog}
+            showInternalCosting={showInternalCosting}
           />
         )}
       </div>
