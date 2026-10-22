@@ -3,6 +3,8 @@ import { notFound } from "next/navigation";
 
 import { AdminQuoteRequestActions } from "@/components/admin-quote-request-actions";
 import { AppShell } from "@/components/app-shell";
+import { WebsiteEnquiryArtwork } from "@/components/website-enquiry-artwork";
+import { WebsiteEnquiryManagement } from "@/components/website-enquiry-management";
 import { PageHeader } from "@/components/page-header";
 import { QuoteRequestAttachmentsList } from "@/components/quote-request-attachments-list";
 import { StatusBadge } from "@/components/status-badge";
@@ -16,9 +18,15 @@ import {
 import type { AdminQuoteRequestDetail } from "@/lib/admin-quote-request-detail";
 import { loadAdminQuoteRequestDetail } from "@/lib/admin-quote-request-detail";
 import { formatAdminQuoteStatusLabel } from "@/lib/admin-quote-status";
+import { loadAppSettings } from "@/lib/app-settings-server";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { formatCountryLabel } from "@/lib/quote-request/normalize-address";
+import {
+  quoteRequestSourceLabel,
+  websiteEnquiryDetailItems,
+  websiteSuggestionSummary,
+} from "@/lib/quote-request/website-enquiry-display";
 import type { QuoteRequestQuoteDisplayState } from "@/lib/quote-request-link";
 import { createClient } from "@/lib/supabase/server";
 
@@ -77,7 +85,11 @@ function formatDate(dateString: string) {
   });
 }
 
-function formatFulfilmentMethod(fulfilmentMethod: string) {
+function formatFulfilmentMethod(fulfilmentMethod: string | null) {
+  if (!fulfilmentMethod) {
+    return "Not specified";
+  }
+
   return fulfilmentMethod === "collection" ? "Collection" : "Delivery";
 }
 
@@ -263,7 +275,40 @@ export default async function AdminQuoteRequestDetailPage({
   }
 
   const { quoteRequest, related, warnings } = loadResult;
+  const isWebsite = quoteRequest.source === "website";
   const isDelivery = quoteRequest.fulfilment_method === "delivery";
+  const [{ data: websiteCompanies }, appSettingsResult] = isWebsite
+    ? await Promise.all([
+        supabase
+          .from("companies")
+          .select("id, company_name")
+          .eq("is_active", true)
+          .order("company_name"),
+        loadAppSettings(supabase),
+      ])
+    : [{ data: [] }, null];
+  const websiteDetails = isWebsite
+    ? websiteEnquiryDetailItems({
+        submitterName: quoteRequest.submitter_name,
+        submitterCompanyName: quoteRequest.submitter_company_name,
+        submitterEmail: quoteRequest.submitter_email,
+        submitterPhone: quoteRequest.submitter_phone,
+        projectName: quoteRequest.project_name,
+        description: quoteRequest.description,
+        requestedDateLabel: quoteRequest.requested_date
+          ? formatDate(quoteRequest.requested_date)
+          : null,
+        requestedTime: quoteRequest.requested_time,
+        projectLocation: quoteRequest.project_location,
+        existingJobReference: quoteRequest.existing_job_reference,
+        artworkPending: quoteRequest.artwork_pending,
+        submittedAtLabel: formatDate(quoteRequest.created_at),
+        requestStatusLabel: formatStatusLabel(quoteRequest.request_status),
+        linkedCompanyName: related.company?.company_name ?? null,
+        companyId: quoteRequest.company_id,
+      })
+    : [];
+  const suggestion = websiteSuggestionSummary(related.suggestion);
   const quoteDisplay = related.linkedQuoteDisplay;
   const linkedQuote = related.linkedQuote;
   const linkedOpportunity = related.linkedOpportunity;
@@ -293,7 +338,7 @@ export default async function AdminQuoteRequestDetailPage({
                 >
                   <Button>Create quote</Button>
                 </Link>
-              ) : quoteDisplay.kind === "awaiting" ? (
+              ) : quoteDisplay.kind === "awaiting" && quoteRequest.source !== "website" ? (
                 <Link href={`/admin/quotes/new?quoteRequestId=${quoteRequest.id}`}>
                   <Button>Create quote</Button>
                 </Link>
@@ -424,7 +469,26 @@ export default async function AdminQuoteRequestDetailPage({
               <SectionWarning message={quoteDisplay.message} />
             ) : null}
 
+            {isWebsite ? (
+              <dl className="space-y-5 text-sm">
+                {websiteDetails.map((item) => (
+                  <div key={item.label}>
+                    <dt className="text-neutral-500">{item.label}</dt>
+                    <dd className="mt-1 whitespace-pre-wrap font-medium text-neutral-950">
+                      {item.value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            ) : (
             <dl className="space-y-5 text-sm">
+              <div>
+                <dt className="text-neutral-500">Source</dt>
+                <dd className="mt-1 font-medium text-neutral-950">
+                  {quoteRequestSourceLabel(quoteRequest.source)}
+                </dd>
+              </div>
+
               <div>
                 <dt className="text-neutral-500">Project name</dt>
                 <dd className="mt-1 font-medium text-neutral-950">
@@ -442,7 +506,9 @@ export default async function AdminQuoteRequestDetailPage({
               <div>
                 <dt className="text-neutral-500">Company</dt>
                 <dd className="mt-1 font-medium text-neutral-950">
-                  {related.company?.company_name || "Unknown company"}
+                  {quoteRequest.company_id
+                    ? related.company?.company_name || "Unknown company"
+                    : "Unlinked"}
                 </dd>
                 {related.companyWarning ? (
                   <p className="mt-1 text-xs text-amber-800">
@@ -454,7 +520,9 @@ export default async function AdminQuoteRequestDetailPage({
               <div>
                 <dt className="text-neutral-500">Requester</dt>
                 <dd className="mt-1 font-medium text-neutral-950">
-                  {related.requester?.full_name || "Unknown requester"}
+                  {quoteRequest.requested_by
+                    ? related.requester?.full_name || "Unknown requester"
+                    : "No portal account"}
                 </dd>
                 {related.requesterWarning ? (
                   <p className="mt-1 text-xs text-amber-800">
@@ -473,7 +541,9 @@ export default async function AdminQuoteRequestDetailPage({
               <div>
                 <dt className="text-neutral-500">Requested date</dt>
                 <dd className="mt-1 text-neutral-950">
-                  {formatDate(quoteRequest.requested_date)}
+                  {quoteRequest.requested_date
+                    ? formatDate(quoteRequest.requested_date)
+                    : "Not specified"}
                 </dd>
               </div>
 
@@ -538,13 +608,17 @@ export default async function AdminQuoteRequestDetailPage({
                     <div>
                       <dt className="text-neutral-500">Saved address link</dt>
                       <dd className="mt-1 text-neutral-950">
-                        <Link
-                          href={`/admin/companies/${quoteRequest.company_id}`}
-                          className="underline-offset-4 hover:underline"
-                        >
-                          {related.linkedAddress.label || "Saved address"}
-                          {!related.linkedAddress.is_active ? " (inactive)" : ""}
-                        </Link>
+                        {quoteRequest.company_id ? (
+                          <Link
+                            href={`/admin/companies/${quoteRequest.company_id}`}
+                            className="underline-offset-4 hover:underline"
+                          >
+                            {related.linkedAddress.label || "Saved address"}
+                            {!related.linkedAddress.is_active ? " (inactive)" : ""}
+                          </Link>
+                        ) : (
+                          related.linkedAddress.label || "Saved address"
+                        )}
                       </dd>
                     </div>
                   ) : related.linkedAddressWarning ? (
@@ -620,8 +694,53 @@ export default async function AdminQuoteRequestDetailPage({
                 </dd>
               </div>
             </dl>
+            )}
+
+            {suggestion ? (
+              <div className="rounded-xl border border-border bg-muted/20 px-4 py-4 text-sm">
+                <p className="font-medium text-neutral-950">Suggested existing record</p>
+                <p className="mt-2 text-neutral-600">{suggestion.note}</p>
+                <dl className="mt-3 grid gap-3 sm:grid-cols-2">
+                  {suggestion.contactName ? (
+                    <div>
+                      <dt className="text-neutral-500">Suggested contact</dt>
+                      <dd className="mt-1 font-medium text-neutral-950">
+                        {suggestion.contactName}
+                        {suggestion.contactEmail ? ` · ${suggestion.contactEmail}` : ""}
+                      </dd>
+                    </div>
+                  ) : null}
+                  {suggestion.companyName ? (
+                    <div>
+                      <dt className="text-neutral-500">Suggested company</dt>
+                      <dd className="mt-1 font-medium text-neutral-950">{suggestion.companyName}</dd>
+                    </div>
+                  ) : null}
+                </dl>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
+
+        {isWebsite ? (
+          <WebsiteEnquiryManagement
+            quoteRequestId={quoteRequest.id}
+            companyId={quoteRequest.company_id}
+            linkedCompanyName={related.company?.company_name ?? null}
+            canChangeCompany={!quoteRequest.opportunity_id && !linkedQuote}
+            companies={websiteCompanies ?? []}
+            prefilledCompanyName={quoteRequest.submitter_company_name ?? ""}
+            prefilledEmail={quoteRequest.submitter_email ?? ""}
+            prefilledPhone={quoteRequest.submitter_phone ?? ""}
+            prefilledContactName={quoteRequest.submitter_name ?? ""}
+            defaultPaymentTermsDays={
+              appSettingsResult?.settings.default_payment_terms_days ?? 14
+            }
+            confirmedContact={related.confirmedContact}
+            hasOpportunity={Boolean(quoteRequest.opportunity_id)}
+            hasQuote={Boolean(linkedQuote)}
+          />
+        ) : null}
 
         {related.attachmentsWarning ? (
           <div className="mt-4">
@@ -629,7 +748,18 @@ export default async function AdminQuoteRequestDetailPage({
           </div>
         ) : null}
 
-        <QuoteRequestAttachmentsList attachments={related.attachments} />
+        {isWebsite ? (
+          <WebsiteEnquiryArtwork
+            quoteRequestId={quoteRequest.id}
+            artworkPending={quoteRequest.artwork_pending}
+            files={related.dropboxFiles}
+            warning={related.dropboxFilesWarning}
+          />
+        ) : null}
+
+        {!isWebsite || related.attachments.length > 0 ? (
+          <QuoteRequestAttachmentsList attachments={related.attachments} />
+        ) : null}
 
         <AdminQuoteRequestActions
           quoteRequestId={quoteRequest.id}

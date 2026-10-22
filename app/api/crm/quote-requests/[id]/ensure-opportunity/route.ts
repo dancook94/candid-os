@@ -86,8 +86,26 @@ async function verifyQuoteRequestAccess(
   }
 }
 
+async function staffContactId(request: Request) {
+  const text = await request.text();
+
+  if (!text.trim()) {
+    return null;
+  }
+
+  try {
+    const body = JSON.parse(text) as { contactId?: unknown };
+
+    return typeof body.contactId === "string" && body.contactId.trim()
+      ? body.contactId.trim()
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ id: string }> }
 ) {
   const { id: quoteRequestId } = await context.params;
@@ -106,7 +124,7 @@ export async function POST(
     const result = await createOpportunityFromQuoteRequest(writeClient, {
       quoteRequestId,
       actorProfileId: access.actorProfileId,
-      contactId: access.contactId,
+      contactId: access.useAdminClient ? access.contactId : await staffContactId(request),
     });
 
     revalidateQuoteWorkflowRoutes({ quoteRequestId });

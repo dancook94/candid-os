@@ -337,6 +337,18 @@ export async function copyDropboxFile({
   return response.metadata;
 }
 
+export async function getDropboxTemporaryLink(path: string) {
+  const response = await dropboxApiRequest<{ link?: string }>("/2/files/get_temporary_link", {
+    body: { path },
+  });
+
+  if (!response.link?.startsWith("https://")) {
+    throw new DropboxError("Dropbox did not return a download link.", 502);
+  }
+
+  return response.link;
+}
+
 export async function downloadDropboxFile(path: string) {
   const accessToken = await getDropboxAccessToken();
   const response = await fetch("https://content.dropboxapi.com/2/files/download", {

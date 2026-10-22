@@ -51,6 +51,8 @@ export const CRM_ACTIVITY_TYPES = {
   companyAddressDeactivated: "company_address_deactivated",
   notificationPreferencesUpdated: "notification_preferences_updated",
   quoteRequestCreated: "quote_request_created",
+  quoteRequestCompanyLinked: "quote_request_company_linked",
+  quoteRequestContactConfirmed: "quote_request_contact_confirmed",
   customerArtworkUploaded: "customer_artwork_uploaded",
   customerArtworkReplaced: "customer_artwork_replaced",
   artworkReviewStarted: "artwork_review_started",

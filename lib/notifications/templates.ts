@@ -354,6 +354,36 @@ export function renderNotificationEmail(
 
     case "internal_quote_request_received":
     case "new_quote_request":
+      if (metadata.enquirySource === "website") {
+        const description = String(metadata.projectDescription ?? "").trim();
+
+        return {
+          subject: `Website enquiry — ${project}`,
+          html: renderEmailShell({
+            headline: "New website enquiry",
+            bodyParagraphs: [
+              `${customerName} submitted a website enquiry for ${project}.`,
+              ...(description ? [description] : []),
+            ],
+            detailRows: [
+              { label: "Source", value: "Website" },
+              { label: "Name", value: customerName },
+              { label: "Company", value: company },
+              { label: "Email", value: String(metadata.email ?? "") },
+              ...(metadata.phone ? [{ label: "Phone", value: String(metadata.phone) }] : []),
+              { label: "Project", value: project },
+              ...(metadata.requiredDate
+                ? [{ label: "Required date", value: String(metadata.requiredDate) }]
+                : []),
+            ],
+            ctaLabel: "Review enquiry",
+            ctaHref: buildAbsoluteUrl(
+              String(metadata.quoteRequestUrl ?? `/admin/quote-requests/${metadata.quoteRequestId ?? ""}`)
+            ),
+          }),
+        };
+      }
+
       return {
         subject: `New quote request — ${project}`,
         html: renderEmailShell({

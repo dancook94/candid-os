@@ -25,6 +25,7 @@ type CompanyContactSelectProps = {
   id?: string;
   label?: string;
   lockContact?: boolean;
+  allowCreate?: boolean;
   onContactsLoaded?: (contacts: CompanyContactOption[]) => void;
 };
 
@@ -38,6 +39,7 @@ export function CompanyContactSelect({
   id = "contact",
   label = "Contact",
   lockContact = false,
+  allowCreate = true,
   onContactsLoaded,
 }: CompanyContactSelectProps) {
   const [contacts, setContacts] = useState<CompanyContactOption[]>([]);
@@ -129,7 +131,7 @@ export function CompanyContactSelect({
           <p className="text-sm text-muted-foreground">
             This company has no contacts yet.
           </p>
-          {!disabled && !lockContact ? (
+          {!disabled && !lockContact && allowCreate ? (
             <NewContactButton
               companies={companies}
               defaultCompanyId={companyId}
@@ -155,7 +157,7 @@ export function CompanyContactSelect({
             ))}
           </Select>
 
-          {!disabled && !lockContact ? (
+          {!disabled && !lockContact && allowCreate ? (
             <div className="flex flex-wrap items-center gap-2">
               <NewContactButton
                 companies={companies}

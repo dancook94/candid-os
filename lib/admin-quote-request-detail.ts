@@ -7,6 +7,7 @@ import {
   normalizeSupabaseQueryError,
 } from "@/lib/customer-settings/query-errors";
 import type { QuoteRequestAttachmentRecord } from "@/lib/quote-request-attachments";
+import type { WebsiteArtworkListItem } from "@/components/website-enquiry-artwork";
 import {
   buildQuoteRequestDisplayState,
   loadLinkedOpportunity,
@@ -33,12 +34,12 @@ const QUOTE_REQUEST_OPTIONAL_METADATA_COLUMNS = [
 
 export type AdminQuoteRequestDetail = {
   id: string;
-  company_id: string;
-  requested_by: string;
+  company_id: string | null;
+  requested_by: string | null;
   project_name: string;
   description: string;
-  fulfilment_method: string;
-  requested_date: string;
+  fulfilment_method: string | null;
+  requested_date: string | null;
   requested_time: string | null;
   delivery_address_line_1: string | null;
   delivery_address_line_2: string | null;
@@ -58,6 +59,16 @@ export type AdminQuoteRequestDetail = {
   request_status: string;
   opportunity_id: string | null;
   created_at: string;
+  source: "website" | "customer_portal";
+  submitter_name: string | null;
+  submitter_company_name: string | null;
+  submitter_email: string | null;
+  submitter_phone: string | null;
+  project_location: string | null;
+  existing_job_reference: string | null;
+  artwork_pending: boolean;
+  suggested_contact_id: string | null;
+  suggested_company_id: string | null;
 };
 
 export type AdminQuoteRequestRelatedData = {
@@ -67,6 +78,8 @@ export type AdminQuoteRequestRelatedData = {
   requesterWarning: string | null;
   attachments: QuoteRequestAttachmentRecord[];
   attachmentsWarning: string | null;
+  dropboxFiles: WebsiteArtworkListItem[];
+  dropboxFilesWarning: string | null;
   linkedQuote: LinkedQuoteSummary | null;
   linkedOpportunity: LinkedOpportunitySummary | null;
   linkedOpportunityWarning: string | null;
@@ -74,6 +87,12 @@ export type AdminQuoteRequestRelatedData = {
   linkedQuoteWarning: string | null;
   linkedAddress: { id: string; label: string | null; is_active: boolean } | null;
   linkedAddressWarning: string | null;
+  suggestion: {
+    contactName: string | null;
+    contactEmail: string | null;
+    companyName: string | null;
+  } | null;
+  confirmedContact: { id: string; fullName: string; email: string | null } | null;
 };
 
 export type LoadAdminQuoteRequestDetailResult =
@@ -94,6 +113,7 @@ function logAdminQuoteRequestQueryError(
     | "contact"
     | "requester"
     | "attachments"
+    | "website artwork"
     | "linked quote"
     | "saved address",
   error: unknown,
@@ -109,6 +129,76 @@ function logAdminQuoteRequestQueryError(
     details: normalized.details ?? null,
     hint: normalized.hint ?? null,
   });
+}
+
+const QUOTE_REQUEST_WEBSITE_SELECT =
+  "source, submitter_name, submitter_company_name, submitter_email, submitter_phone, project_location, existing_job_reference, artwork_pending, suggested_contact_id, suggested_company_id";
+
+function emptyWebsiteFields(): Pick<
+  AdminQuoteRequestDetail,
+  | "source"
+  | "submitter_name"
+  | "submitter_company_name"
+  | "submitter_email"
+  | "submitter_phone"
+  | "project_location"
+  | "existing_job_reference"
+  | "artwork_pending"
+  | "suggested_contact_id"
+  | "suggested_company_id"
+> {
+  return {
+    source: "customer_portal",
+    submitter_name: null,
+    submitter_company_name: null,
+    submitter_email: null,
+    submitter_phone: null,
+    project_location: null,
+    existing_job_reference: null,
+    artwork_pending: false,
+    suggested_contact_id: null,
+    suggested_company_id: null,
+  };
+}
+
+function mapWebsiteFields(data: Record<string, unknown> | null | undefined) {
+  const fields = emptyWebsiteFields();
+
+  if (!data) {
+    return fields;
+  }
+
+  fields.source = data.source === "website" ? "website" : "customer_portal";
+  fields.submitter_name = typeof data.submitter_name === "string" ? data.submitter_name : null;
+  fields.submitter_company_name =
+    typeof data.submitter_company_name === "string" ? data.submitter_company_name : null;
+  fields.submitter_email = typeof data.submitter_email === "string" ? data.submitter_email : null;
+  fields.submitter_phone = typeof data.submitter_phone === "string" ? data.submitter_phone : null;
+  fields.project_location = typeof data.project_location === "string" ? data.project_location : null;
+  fields.existing_job_reference =
+    typeof data.existing_job_reference === "string" ? data.existing_job_reference : null;
+  fields.artwork_pending = data.artwork_pending === true;
+  fields.suggested_contact_id =
+    typeof data.suggested_contact_id === "string" ? data.suggested_contact_id : null;
+  fields.suggested_company_id =
+    typeof data.suggested_company_id === "string" ? data.suggested_company_id : null;
+
+  return fields;
+}
+
+async function loadWebsiteFields(supabase: SupabaseClient, routeId: string) {
+  const { data, error } = await supabase
+    .from("quote_requests")
+    .select(QUOTE_REQUEST_WEBSITE_SELECT)
+    .eq("id", routeId)
+    .maybeSingle();
+
+  if (error) {
+    logAdminQuoteRequestQueryError("core request", error);
+    return { fields: emptyWebsiteFields(), warning: "Website enquiry details could not be loaded." };
+  }
+
+  return { fields: mapWebsiteFields(data as Record<string, unknown> | null), warning: null };
 }
 
 function emptyAddressMetadata(): Pick<
@@ -262,6 +352,70 @@ async function loadAddressMetadata(
   }
 }
 
+function isMissingArtworkRpc(error: { code?: string; message?: string }) {
+  return (
+    error.code === "42883" ||
+    error.code === "PGRST202" ||
+    Boolean(error.message?.includes("Could not find the function")) ||
+    Boolean(error.message?.includes("does not exist"))
+  );
+}
+
+async function loadWebsiteArtwork(supabase: SupabaseClient, routeId: string) {
+  const { error: expireError } = await supabase.rpc("quote_request_dropbox_expire_enquiry", {
+    p_quote_request_id: routeId,
+  });
+
+  if (expireError && !isMissingArtworkRpc(normalizeSupabaseQueryError(expireError))) {
+    logAdminQuoteRequestQueryError("website artwork", expireError);
+  }
+
+  const { data, error } = await supabase
+    .from("quote_request_dropbox_files")
+    .select("id, original_file_name, file_size_bytes, mime_type, upload_status, created_at")
+    .eq("quote_request_id", routeId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    logAdminQuoteRequestQueryError("website artwork", error);
+
+    if (isMissingRelationError(normalizeSupabaseQueryError(error))) {
+      return {
+        files: [],
+        warning: "Website artwork could not be loaded because its table is unavailable.",
+      };
+    }
+
+    return {
+      files: [],
+      warning: "Website artwork could not be loaded.",
+    };
+  }
+
+  const files: WebsiteArtworkListItem[] = [];
+
+  for (const row of data ?? []) {
+    if (
+      row.upload_status !== "pending" &&
+      row.upload_status !== "uploaded" &&
+      row.upload_status !== "failed"
+    ) {
+      continue;
+    }
+
+    files.push({
+      id: row.id,
+      originalFileName: row.original_file_name,
+      fileSizeBytes: row.file_size_bytes,
+      mimeType: row.mime_type,
+      uploadStatus: row.upload_status,
+      createdAt: row.created_at,
+    });
+  }
+
+  return { files, warning: null };
+}
+
 export async function loadAdminQuoteRequestDetail(
   supabase: SupabaseClient,
   routeId: string
@@ -298,18 +452,23 @@ export async function loadAdminQuoteRequestDetail(
   }
 
   const warnings: string[] = [];
-  const { metadata, warning: metadataWarning } = await loadAddressMetadata(
-    supabase,
-    routeId
-  );
+  const [{ metadata, warning: metadataWarning }, websiteLoad] = await Promise.all([
+    loadAddressMetadata(supabase, routeId),
+    loadWebsiteFields(supabase, routeId),
+  ]);
 
   if (metadataWarning) {
     warnings.push(metadataWarning);
   }
 
+  if (websiteLoad.warning) {
+    warnings.push(websiteLoad.warning);
+  }
+
   const quoteRequest: AdminQuoteRequestDetail = {
     ...coreRequest,
     ...metadata,
+    ...websiteLoad.fields,
   };
 
   const related: AdminQuoteRequestRelatedData = {
@@ -319,6 +478,8 @@ export async function loadAdminQuoteRequestDetail(
     requesterWarning: null,
     attachments: [],
     attachmentsWarning: null,
+    dropboxFiles: [],
+    dropboxFilesWarning: null,
     linkedQuote: null,
     linkedOpportunity: null,
     linkedOpportunityWarning: null,
@@ -329,32 +490,38 @@ export async function loadAdminQuoteRequestDetail(
     linkedQuoteWarning: null,
     linkedAddress: null,
     linkedAddressWarning: null,
+    suggestion: null,
+    confirmedContact: null,
   };
 
-  const { data: company, error: companyError } = await supabase
-    .from("companies")
-    .select("company_name")
-    .eq("id", quoteRequest.company_id)
-    .maybeSingle();
+  if (quoteRequest.company_id) {
+    const { data: company, error: companyError } = await supabase
+      .from("companies")
+      .select("company_name")
+      .eq("id", quoteRequest.company_id)
+      .maybeSingle();
 
-  if (companyError) {
-    logAdminQuoteRequestQueryError("company", companyError);
-    related.companyWarning = "Company details could not be loaded.";
-  } else {
-    related.company = company;
+    if (companyError) {
+      logAdminQuoteRequestQueryError("company", companyError);
+      related.companyWarning = "Company details could not be loaded.";
+    } else {
+      related.company = company;
+    }
   }
 
-  const { data: requester, error: requesterError } = await supabase
-    .from("profiles")
-    .select("full_name")
-    .eq("id", quoteRequest.requested_by)
-    .maybeSingle();
+  if (quoteRequest.requested_by) {
+    const { data: requester, error: requesterError } = await supabase
+      .from("profiles")
+      .select("full_name")
+      .eq("id", quoteRequest.requested_by)
+      .maybeSingle();
 
-  if (requesterError) {
-    logAdminQuoteRequestQueryError("requester", requesterError);
-    related.requesterWarning = "Requester details could not be loaded.";
-  } else {
-    related.requester = requester;
+    if (requesterError) {
+      logAdminQuoteRequestQueryError("requester", requesterError);
+      related.requesterWarning = "Requester details could not be loaded.";
+    } else {
+      related.requester = requester;
+    }
   }
 
   const { data: attachments, error: attachmentsError } = await supabase
@@ -374,6 +541,12 @@ export async function loadAdminQuoteRequestDetail(
     }
   } else {
     related.attachments = attachments ?? [];
+  }
+
+  if (quoteRequest.source === "website") {
+    const artwork = await loadWebsiteArtwork(supabase, routeId);
+    related.dropboxFiles = artwork.files;
+    related.dropboxFilesWarning = artwork.warning;
   }
 
   const linkedQuoteLoad = await loadLinkedQuoteForRequest(supabase, {
@@ -408,6 +581,73 @@ export async function loadAdminQuoteRequestDetail(
       linkedOpportunity: related.linkedOpportunity,
       loadError: linkedQuoteLoad.loadError ?? opportunityLoad.loadError,
     });
+  }
+
+  if (quoteRequest.source === "website") {
+    const [suggestedContact, suggestedCompany] = await Promise.all([
+      quoteRequest.suggested_contact_id
+        ? supabase
+            .from("contacts")
+            .select("full_name, email")
+            .eq("id", quoteRequest.suggested_contact_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+      quoteRequest.suggested_company_id
+        ? supabase
+            .from("companies")
+            .select("company_name")
+            .eq("id", quoteRequest.suggested_company_id)
+            .maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+
+    if (suggestedContact.data || suggestedCompany.data) {
+      related.suggestion = {
+        contactName: suggestedContact.data?.full_name ?? null,
+        contactEmail: suggestedContact.data?.email ?? null,
+        companyName: suggestedCompany.data?.company_name ?? null,
+      };
+    }
+
+    let confirmedContactId: string | null = null;
+
+    if (quoteRequest.opportunity_id) {
+      const { data: opportunity } = await supabase
+        .from("opportunities")
+        .select("contact_id")
+        .eq("id", quoteRequest.opportunity_id)
+        .maybeSingle();
+      confirmedContactId = opportunity?.contact_id ?? null;
+    }
+
+    if (!confirmedContactId && quoteRequest.company_id) {
+      const { data: activity } = await supabase
+        .from("crm_activity")
+        .select("contact_id")
+        .eq("activity_type", "quote_request_contact_confirmed")
+        .eq("company_id", quoteRequest.company_id)
+        .contains("metadata", { quote_request_id: routeId })
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      confirmedContactId = activity?.contact_id ?? null;
+    }
+
+    if (confirmedContactId) {
+      const { data: confirmed } = await supabase
+        .from("contacts")
+        .select("id, full_name, email")
+        .eq("id", confirmedContactId)
+        .maybeSingle();
+
+      if (confirmed) {
+        related.confirmedContact = {
+          id: confirmed.id,
+          fullName: confirmed.full_name,
+          email: confirmed.email,
+        };
+      }
+    }
   }
 
   if (quoteRequest.selected_company_address_id) {

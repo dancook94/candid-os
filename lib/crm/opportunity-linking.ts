@@ -84,7 +84,7 @@ export async function createOpportunityFromQuoteRequest(
 ) {
   const { data: quoteRequest, error: requestError } = await supabase
     .from("quote_requests")
-    .select("id, company_id, project_name, description, opportunity_id")
+    .select("id, company_id, project_name, description, opportunity_id, source, requested_by")
     .eq("id", quoteRequestId)
     .maybeSingle();
 
@@ -100,9 +100,20 @@ export async function createOpportunityFromQuoteRequest(
     return { opportunityId: quoteRequest.opportunity_id, created: false };
   }
 
+  if (!quoteRequest.company_id) {
+    throw new Error(
+      "A quote request must be linked to a company before an opportunity can be created."
+    );
+  }
+
   const ownerProfileId = await resolveDefaultOpportunityOwnerId(supabase);
 
+  const enquirySource = quoteRequest.source === "website" ? "website" : "customer_portal";
   let resolvedContactId: string | null = contactId ?? null;
+
+  if (enquirySource === "website" && !resolvedContactId) {
+    throw new Error("Choose a contact before creating an opportunity.");
+  }
 
   if (resolvedContactId) {
     const contactValidation = await validateActiveContactForCompany(
@@ -125,7 +136,8 @@ export async function createOpportunityFromQuoteRequest(
       title: quoteRequest.project_name,
       description: quoteRequest.description,
       stage: "new_enquiry",
-      source: "customer_portal" satisfies OpportunitySource,
+      // The opportunity_source enum has no website value. Activity metadata keeps the website origin.
+      source: (enquirySource === "website" ? "other" : "customer_portal") satisfies OpportunitySource,
       owner_profile_id: ownerProfileId,
       created_by: ownerProfileId,
       currency: "GBP",
@@ -152,10 +164,14 @@ export async function createOpportunityFromQuoteRequest(
     companyId: quoteRequest.company_id,
     contactId: resolvedContactId,
     activityType: OPPORTUNITY_ACTIVITY_TYPES.opportunityCreated,
-    description: `Opportunity created from customer quote request.`,
+    description:
+      enquirySource === "website"
+        ? "Opportunity created from a website enquiry."
+        : "Opportunity created from customer quote request.",
     metadata: {
       quote_request_id: quoteRequestId,
       submitted_by_profile_id: actorProfileId,
+      enquiry_source: enquirySource,
     },
     createdBy: actorProfileId,
   });

@@ -15,20 +15,24 @@ import {
   buildQuoteRequestDisplayState,
   loadLinkedQuotesByRequestIds,
 } from "@/lib/quote-request-link";
+import { buildQuoteRequestInboxRow } from "@/lib/quote-request/website-enquiry-display";
 import { createClient } from "@/lib/supabase/server";
 
 type QuoteRequestRow = {
   id: string;
-  company_id: string;
-  requested_by: string;
+  company_id: string | null;
+  requested_by: string | null;
   project_name: string;
-  fulfilment_method: string;
-  requested_date: string;
+  fulfilment_method: string | null;
+  requested_date: string | null;
   requested_time: string | null;
   deadline_status: string;
   request_status: string;
   opportunity_id: string | null;
   created_at: string;
+  source: string | null;
+  submitter_name: string | null;
+  submitter_company_name: string | null;
 };
 
 type BadgeStatus =
@@ -88,9 +92,13 @@ function formatDate(dateString: string) {
 }
 
 function formatRequestedDeadline(
-  requestedDate: string,
+  requestedDate: string | null,
   requestedTime: string | null
 ) {
+  if (!requestedDate) {
+    return "Not specified";
+  }
+
   const formattedDate = formatDate(requestedDate);
 
   if (!requestedTime) {
@@ -100,7 +108,11 @@ function formatRequestedDeadline(
   return `${formattedDate}, ${requestedTime}`;
 }
 
-function formatFulfilmentMethod(fulfilmentMethod: string) {
+function formatFulfilmentMethod(fulfilmentMethod: string | null) {
+  if (!fulfilmentMethod) {
+    return "Not specified";
+  }
+
   return fulfilmentMethod === "collection" ? "Collection" : "Delivery";
 }
 
@@ -153,14 +165,21 @@ type AdminQuoteRequestsPageProps = {
     q?: string;
     request_status?: string;
     deadline_status?: string;
+    source?: string;
   }>;
 };
 
 export default async function AdminQuoteRequestsPage({
   searchParams,
 }: AdminQuoteRequestsPageProps) {
-  const { q, request_status: requestStatusFilter, deadline_status: deadlineStatusFilter } =
-    await searchParams;
+  const {
+    q,
+    request_status: requestStatusFilter,
+    deadline_status: deadlineStatusFilter,
+    source: sourceFilter,
+  } = await searchParams;
+  const selectedSource =
+    sourceFilter === "website" || sourceFilter === "customer_portal" ? sourceFilter : "";
 
   const supabase = await createClient();
   const profile = await requireAdminPageAccess(supabase, "/admin/quote-requests");
@@ -168,7 +187,7 @@ export default async function AdminQuoteRequestsPage({
   let query = supabase
     .from("quote_requests")
     .select(
-      "id, company_id, requested_by, project_name, fulfilment_method, requested_date, requested_time, deadline_status, request_status, opportunity_id, created_at"
+      "id, company_id, requested_by, project_name, fulfilment_method, requested_date, requested_time, deadline_status, request_status, opportunity_id, created_at, source, submitter_name, submitter_company_name"
     )
     .order("created_at", { ascending: false });
 
@@ -180,14 +199,26 @@ export default async function AdminQuoteRequestsPage({
     query = query.eq("deadline_status", deadlineStatusFilter);
   }
 
+  if (selectedSource) {
+    query = query.eq("source", selectedSource);
+  }
+
   const { data, error } = await query;
 
   const quoteRequests: QuoteRequestRow[] = data ?? [];
   const queryError = error?.message ?? null;
   const isDevelopment = process.env.NODE_ENV === "development";
 
-  const companyIds = [...new Set(quoteRequests.map((row) => row.company_id))];
-  const requesterIds = [...new Set(quoteRequests.map((row) => row.requested_by))];
+  const companyIds = [
+    ...new Set(
+      quoteRequests.flatMap((row) => (row.company_id ? [row.company_id] : []))
+    ),
+  ];
+  const requesterIds = [
+    ...new Set(
+      quoteRequests.flatMap((row) => (row.requested_by ? [row.requested_by] : []))
+    ),
+  ];
 
   const [{ data: companies }, { data: requesters }] = await Promise.all([
     companyIds.length > 0
@@ -231,10 +262,27 @@ export default async function AdminQuoteRequestsPage({
   const filteredQuoteRequests = searchQuery
     ? quoteRequests.filter((request) => {
         const companyName =
-          companyNameById.get(request.company_id)?.toLowerCase() ?? "";
+          (request.company_id ? companyNameById.get(request.company_id) : "")?.toLowerCase() ?? "";
+        const inbox = buildQuoteRequestInboxRow({
+          source: request.source,
+          projectName: request.project_name,
+          submitterName: request.submitter_name,
+          submitterCompanyName: request.submitter_company_name,
+          requesterName: request.requested_by
+            ? requesterNameById.get(request.requested_by) ?? null
+            : null,
+          companyId: request.company_id,
+          linkedCompanyName: request.company_id
+            ? companyNameById.get(request.company_id) ?? null
+            : null,
+          requestStatus: request.request_status,
+          createdAt: request.created_at,
+        });
         return (
           request.project_name.toLowerCase().includes(searchQuery) ||
-          companyName.includes(searchQuery)
+          companyName.includes(searchQuery) ||
+          inbox.submitterName.toLowerCase().includes(searchQuery) ||
+          (inbox.submittedCompanyName?.toLowerCase().includes(searchQuery) ?? false)
         );
       })
     : quoteRequests;
@@ -247,12 +295,12 @@ export default async function AdminQuoteRequestsPage({
         <PageHeader
           eyebrow="Administration"
           title="Quote requests"
-          description="Review incoming customer quote requests."
+          description="Review customer portal requests and website enquiries."
         />
 
         <Card className="portal-surface mb-6">
           <CardContent className="pt-6">
-            <form method="get" className="grid gap-4 lg:grid-cols-4">
+            <form method="get" className="grid gap-4 lg:grid-cols-5">
               <div className="space-y-2 lg:col-span-2">
                 <Label htmlFor="q">Search</Label>
                 <Input
@@ -281,6 +329,15 @@ export default async function AdminQuoteRequestsPage({
               </div>
 
               <div className="space-y-2">
+                <Label htmlFor="source">Source</Label>
+                <Select id="source" name="source" defaultValue={selectedSource}>
+                  <option value="">All sources</option>
+                  <option value="website">Website</option>
+                  <option value="customer_portal">Customer portal</option>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
                 <Label htmlFor="deadline_status">Deadline status</Label>
                 <Select
                   id="deadline_status"
@@ -298,7 +355,7 @@ export default async function AdminQuoteRequestsPage({
 
               <div className="flex items-end gap-2 lg:col-span-4">
                 <Button type="submit">Apply filters</Button>
-                {(q || requestStatusFilter || deadlineStatusFilter) && (
+                {(q || requestStatusFilter || deadlineStatusFilter || selectedSource) && (
                   <Link href="/admin/quote-requests">
                     <Button type="button" variant="outline">
                       Clear
@@ -325,9 +382,9 @@ export default async function AdminQuoteRequestsPage({
           <EmptyState
             title="No quote requests found"
             description={
-              q || requestStatusFilter || deadlineStatusFilter
+              q || requestStatusFilter || deadlineStatusFilter || selectedSource
                 ? "Try adjusting your filters or search query."
-                : "Customer quote requests will appear here once submitted."
+                : "Customer quote requests and website enquiries will appear here once submitted."
             }
           />
         ) : (
@@ -337,8 +394,11 @@ export default async function AdminQuoteRequestsPage({
                 <table className="portal-table">
                   <thead>
                     <tr>
+                      <th>Source</th>
                       <th>Project</th>
-                      <th>Company</th>
+                      <th>Submitter</th>
+                      <th>Submitted company</th>
+                      <th>Linked company</th>
                       <th>Requested by</th>
                       <th>Submitted</th>
                       <th>Requested deadline</th>
@@ -359,6 +419,21 @@ export default async function AdminQuoteRequestsPage({
                         linkedOpportunity,
                         loadError: linkedQuotesLoadError,
                       });
+                      const inbox = buildQuoteRequestInboxRow({
+                        source: request.source,
+                        projectName: request.project_name,
+                        submitterName: request.submitter_name,
+                        submitterCompanyName: request.submitter_company_name,
+                        requesterName: request.requested_by
+                          ? requesterNameById.get(request.requested_by) ?? null
+                          : null,
+                        companyId: request.company_id,
+                        linkedCompanyName: request.company_id
+                          ? companyNameById.get(request.company_id) ?? null
+                          : null,
+                        requestStatus: request.request_status,
+                        createdAt: request.created_at,
+                      });
 
                       return (
                       <tr
@@ -368,9 +443,18 @@ export default async function AdminQuoteRequestsPage({
                         <td className="p-0">
                           <Link
                             href={`/admin/quote-requests/${request.id}`}
+                            className="block p-4 text-muted-foreground"
+                          >
+                            {inbox.sourceLabel}
+                          </Link>
+                        </td>
+
+                        <td className="p-0">
+                          <Link
+                            href={`/admin/quote-requests/${request.id}`}
                             className="block p-4 font-medium text-foreground"
                           >
-                            {request.project_name}
+                            {inbox.projectName}
                           </Link>
                         </td>
 
@@ -379,8 +463,7 @@ export default async function AdminQuoteRequestsPage({
                             href={`/admin/quote-requests/${request.id}`}
                             className="block p-4 text-muted-foreground"
                           >
-                            {companyNameById.get(request.company_id) ||
-                              "Unknown company"}
+                            {inbox.submitterName}
                           </Link>
                         </td>
 
@@ -389,8 +472,27 @@ export default async function AdminQuoteRequestsPage({
                             href={`/admin/quote-requests/${request.id}`}
                             className="block p-4 text-muted-foreground"
                           >
-                            {requesterNameById.get(request.requested_by) ||
-                              "Unknown requester"}
+                            {inbox.submittedCompanyName || "Not supplied"}
+                          </Link>
+                        </td>
+
+                        <td className="p-0">
+                          <Link
+                            href={`/admin/quote-requests/${request.id}`}
+                            className={`block p-4 ${inbox.unlinked ? "font-medium text-foreground" : "text-muted-foreground"}`}
+                          >
+                            {inbox.companyLabel}
+                          </Link>
+                        </td>
+
+                        <td className="p-0">
+                          <Link
+                            href={`/admin/quote-requests/${request.id}`}
+                            className="block p-4 text-muted-foreground"
+                          >
+                            {(request.requested_by
+                              ? requesterNameById.get(request.requested_by)
+                              : null) || "No portal account"}
                           </Link>
                         </td>
 

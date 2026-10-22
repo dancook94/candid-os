@@ -20,6 +20,10 @@ import {
 } from "@/lib/notifications/errors";
 import { sendNotification } from "@/lib/notifications/send-notification";
 import { buildAbsoluteUrl } from "@/lib/notifications/templates";
+import {
+  buildWebsiteEnquiryNotificationMetadata,
+  type WebsiteEnquiryNotificationInput,
+} from "@/lib/notifications/website-enquiry-notification";
 
 function logNotificationFailure(event: string, error: unknown) {
   console.error(`[notifications] ${event}`, {
@@ -861,6 +865,35 @@ export async function notifyInternalQuoteRequestReceivedSafe(
     return await notifyInternalQuoteRequestReceived(adminClient, input);
   } catch (error) {
     logNotificationFailure("internal_quote_request_received", error);
+    return {
+      ok: false,
+      notificationIds: [],
+      results: [],
+      skippedReason: error instanceof Error ? error.message : "notification_failed",
+    };
+  }
+}
+
+export async function notifyWebsiteEnquiryReceived(
+  adminClient: SupabaseClient,
+  input: WebsiteEnquiryNotificationInput
+) {
+  return sendNotification(adminClient, {
+    type: "internal_quote_request_received",
+    quoteRequestId: input.quoteRequestId,
+    idempotencyKey: `quote_request_submitted:${input.quoteRequestId}`,
+    metadata: buildWebsiteEnquiryNotificationMetadata(input),
+  });
+}
+
+export async function notifyWebsiteEnquiryReceivedSafe(
+  adminClient: SupabaseClient,
+  input: WebsiteEnquiryNotificationInput
+) {
+  try {
+    return await notifyWebsiteEnquiryReceived(adminClient, input);
+  } catch (error) {
+    logNotificationFailure("website_enquiry_received", error);
     return {
       ok: false,
       notificationIds: [],
