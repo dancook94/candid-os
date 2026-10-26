@@ -1,5 +1,9 @@
 import { buildMaterialIdentityKey, normalizeSupplierDescription } from "@/lib/materials/identity";
-import { normalizePurchaseUnit } from "@/lib/materials/invoices/match";
+import {
+  normalizePurchaseUnit,
+  reliableRollSize,
+  reliableSheetSize,
+} from "@/lib/materials/invoices/match";
 import type { InvoiceReviewStatus } from "@/lib/materials/invoices/model";
 import type { PurchaseUnit } from "@/lib/materials/units";
 
@@ -33,11 +37,15 @@ export function proposeMaterialFromInvoiceLine(input: {
   sku: string | null;
   unit: string | null;
   unitPrice: number | null;
+  enteredWidthMm?: number | null;
+  enteredHeightMm?: number | null;
+  enteredLengthMm?: number | null;
 }): InvoiceMaterialDraft {
   const description = input.description.replace(/\s+/g, " ").trim();
-  const size = rollSize(description);
   const purchaseUnit = normalizePurchaseUnit(input.unit);
-  const familyName = britelineWhitebackName(description, size);
+  const dimensions = purchaseDimensions(description, purchaseUnit);
+  const roll = purchaseUnit === "roll" ? reliableRollSize(description) : null;
+  const familyName = britelineWhitebackName(description, roll);
   const notes = [
     "Product family stays in the material name. There is no separate brand field.",
     "Blank specification fields were not stated on the invoice.",
@@ -56,15 +64,47 @@ export function proposeMaterialFromInvoiceLine(input: {
     colour: /\b(?:wht|white)\b/i.test(description) ? "White" : null,
     finish: explicitFinish(description),
     purchaseUnit,
-    purchaseWidthMm: size?.widthMm ?? null,
-    purchaseHeightMm: null,
-    purchaseLengthMm: purchaseUnit === "roll" ? size?.lengthMm ?? null : null,
+    purchaseWidthMm: enteredDimension(input.enteredWidthMm, dimensions.purchaseWidthMm),
+    purchaseHeightMm: enteredDimension(input.enteredHeightMm, dimensions.purchaseHeightMm),
+    purchaseLengthMm: enteredDimension(input.enteredLengthMm, dimensions.purchaseLengthMm),
     supplierDescription: description,
     supplierSku: input.sku,
     price: input.unitPrice,
     preferred: true,
     notes,
   };
+}
+
+function enteredDimension(entered: number | null | undefined, parsed: number | null) {
+  return entered === undefined ? parsed : entered;
+}
+
+function purchaseDimensions(description: string, purchaseUnit: PurchaseUnit | null) {
+  const sheet = reliableSheetSize(description);
+  const roll = reliableRollSize(description);
+  const blank = { purchaseWidthMm: null, purchaseHeightMm: null, purchaseLengthMm: null };
+
+  if (sheet && roll) {
+    return blank;
+  }
+
+  if (sheet && purchaseUnit !== "roll" && purchaseUnit !== "linear_metre") {
+    return {
+      purchaseWidthMm: sheet.widthMm,
+      purchaseHeightMm: sheet.heightMm,
+      purchaseLengthMm: null,
+    };
+  }
+
+  if (roll && purchaseUnit !== "sheet") {
+    return {
+      purchaseWidthMm: roll.widthMm,
+      purchaseHeightMm: null,
+      purchaseLengthMm: roll.lengthMm,
+    };
+  }
+
+  return blank;
 }
 
 export function invoiceMaterialConflict(input: {
@@ -158,28 +198,11 @@ function britelineWhitebackName(
   return `Briteline Whiteback Permanent ${width}mm x ${metres}m`;
 }
 
-function rollSize(description: string) {
-  const match = description.match(/(\d+(?:\.\d+)?)\s*mm\s*[x×]\s*(\d+(?:\.\d+)?)\s*m\b/i);
-
-  if (!match) {
-    return null;
-  }
-
-  const widthMm = Number(match[1]);
-  const lengthMetres = Number(match[2]);
-
-  if (!Number.isFinite(widthMm) || !Number.isFinite(lengthMetres) || widthMm <= 0 || lengthMetres <= 0) {
-    return null;
-  }
-
-  return { widthMm, lengthMetres, lengthMm: Math.round(lengthMetres * 1000) };
-}
-
 function thicknessOutsideSize(description: string) {
-  const withoutSize = description.replace(
-    /(\d+(?:\.\d+)?)\s*mm\s*[x×]\s*(\d+(?:\.\d+)?)\s*(?:mm|m)\b/gi,
-    " "
-  );
+  const withoutSize = description
+    .replace(/(\d{3,4}(?:\.\d+)?)\s*(?:mm)?\s*[x×]\s*(\d{3,4}(?:\.\d+)?)\s*(?:mm)?/gi, " ")
+    .replace(/(\d+(?:\.\d+)?)\s*mm\s*[x×]\s*(\d+(?:\.\d+)?)\s*m\b/gi, " ")
+    .replace(/(\d+(?:\.\d+)?)\s*m\s*[x×]\s*(\d+(?:\.\d+)?)\s*mm\b/gi, " ");
   const match = withoutSize.match(/\b(\d+(?:\.\d+)?)\s*mm\b/i);
 
   if (!match) {

@@ -250,8 +250,9 @@ function InvoiceLineCard({
       ) : null}
       {line.matchedProductLabel ? (
         <p className="mt-2 text-sm">
-          Suggested product: {line.matchedProductLabel}
+          {matchPresentation(line.matchConfidence, line.matchMethod)}: {line.matchedProductLabel}
           {line.matchConfidence ? ` · ${line.matchConfidence} confidence` : ""}
+          {line.matchMethod ? ` · ${line.matchMethod}` : ""}
         </p>
       ) : null}
       <form
@@ -624,6 +625,21 @@ export function InvoiceReprocessButton({
       {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
     </div>
   );
+}
+
+function matchPresentation(confidence: string | null, method: string | null) {
+  if (method === "manual") {
+    return "Manual match";
+  }
+
+  if (
+    confidence === "high" &&
+    (method === "sku" || method === "description" || method === "mapping")
+  ) {
+    return "Exact match";
+  }
+
+  return "Uncertain suggestion";
 }
 
 function Field({

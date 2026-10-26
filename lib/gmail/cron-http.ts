@@ -6,13 +6,30 @@ type AuthorizedWorker = {
 };
 
 async function loadAuthorizedWorker(): Promise<AuthorizedWorker> {
-  const [{ runGmailDiscoveryCron }, { createAdminClient }] = await Promise.all([
-    import("@/lib/gmail/cron"),
-    import("@/lib/supabase/admin"),
-  ]);
+  const [{ runGmailDiscoveryCron }, { createAdminClient }, { peekInvoiceProcessing }, { shouldAdvanceProcessing }] =
+    await Promise.all([
+      import("@/lib/gmail/cron"),
+      import("@/lib/supabase/admin"),
+      import("@/lib/materials/invoices/processing-store"),
+      import("@/lib/materials/invoices/processing-run"),
+    ]);
 
   return {
-    run: () => runGmailDiscoveryCron({ admin: createAdminClient() }),
+    run: async () => {
+      const admin = createAdminClient();
+      const discovery = await runGmailDiscoveryCron({ admin });
+      const peek = await peekInvoiceProcessing(admin).catch(() => ({ action: "unavailable" as const }));
+
+      if (!shouldAdvanceProcessing(discovery, peek)) {
+        return {
+          ...discovery,
+          processing: peek.action === "process" ? { status: "deferred" as const } : { status: peek.action },
+        };
+      }
+
+      const { advanceStoredInvoiceProcessing } = await import("@/lib/materials/invoices/processing-tick");
+      return { ...discovery, processing: await advanceStoredInvoiceProcessing(admin) };
+    },
   };
 }
 

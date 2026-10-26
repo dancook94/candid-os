@@ -15,7 +15,9 @@ import {
   verifyGmailOAuthState,
 } from "@/lib/gmail/oauth";
 import { planOtherAttachment, planPdfDiscovery } from "@/lib/gmail/plan";
+import { previewGmailDiscovery } from "@/lib/gmail/preview";
 import { buildGmailDiscoveryQuery } from "@/lib/gmail/query";
+import { resolveDiscoveryWindow } from "@/lib/gmail/window";
 
 test("classifies supplier document headings", () => {
   assert.equal(classifyPdfText("SALES INVOICE\nInvoice No. 146237"), "invoice");
@@ -46,6 +48,98 @@ test("searches inbox, archive and sent without spam or trash", () => {
   assert.doesNotMatch(query, /in:inbox/);
   assert.doesNotMatch(query, /in:anywhere/);
   assert.throws(() => buildGmailDiscoveryQuery("2026-10-12", "2026-07-12"));
+  assert.throws(() => buildGmailDiscoveryQuery("2026-02-29", "2026-02-29"));
+
+  const historical = buildGmailDiscoveryQuery("2026-04-26", "2026-10-26");
+  assert.match(historical, /after:2026\/04\/25/);
+  assert.match(historical, /before:2026\/10\/27/);
+
+  const firstDay = buildGmailDiscoveryQuery("2026-04-26", "2026-04-26");
+  assert.match(firstDay, /after:2026\/04\/25/);
+  assert.match(firstDay, /before:2026\/04\/27/);
+
+  const lastDay = buildGmailDiscoveryQuery("2026-10-26", "2026-10-26");
+  assert.match(lastDay, /after:2026\/10\/25/);
+  assert.match(lastDay, /before:2026\/10\/27/);
+});
+
+test("resolves an explicit historical window ahead of environment defaults", () => {
+  const historical = resolveDiscoveryWindow({
+    preset: "historical",
+    env: {},
+  });
+  const overridden = resolveDiscoveryWindow({
+    dateFrom: "2026-05-01",
+    dateTo: "2026-05-31",
+    preset: "historical",
+    env: {
+      GMAIL_HISTORICAL_DISCOVERY_FROM: "2026-01-01",
+      GMAIL_HISTORICAL_DISCOVERY_TO: "2026-01-31",
+      GMAIL_DISCOVERY_FROM: "2026-07-12",
+      GMAIL_DISCOVERY_TO: "2026-10-12",
+    },
+  });
+  const fromEnvironment = resolveDiscoveryWindow({
+    preset: "historical",
+    env: {
+      GMAIL_HISTORICAL_DISCOVERY_FROM: "2026-04-01",
+      GMAIL_HISTORICAL_DISCOVERY_TO: "2026-04-30",
+    },
+  });
+
+  assert.equal(historical.dateFrom, "2026-04-26");
+  assert.equal(historical.dateTo, "2026-10-26");
+  assert.match(historical.query, /after:2026\/04\/25/);
+  assert.match(historical.query, /before:2026\/10\/27/);
+  assert.equal(overridden.dateFrom, "2026-05-01");
+  assert.equal(overridden.dateTo, "2026-05-31");
+  assert.equal(fromEnvironment.dateFrom, "2026-04-01");
+  assert.equal(fromEnvironment.dateTo, "2026-04-30");
+  assert.throws(
+    () =>
+      resolveDiscoveryWindow({
+        env: { GMAIL_DISCOVERY_FROM: "2026-04-26" },
+      }),
+    /both GMAIL_DISCOVERY_FROM and GMAIL_DISCOVERY_TO/
+  );
+  assert.equal(resolveDiscoveryWindow({ env: {} }).dateFrom, "2026-07-12");
+  assert.equal(resolveDiscoveryWindow({ env: {} }).dateTo, "2026-10-12");
+});
+
+test("previews a date range without listing pages or importing attachments", async () => {
+  let calls = 0;
+  const preview = await previewGmailDiscovery({
+    dateFrom: "2026-04-26",
+    dateTo: "2026-10-26",
+    listMessages: async (input) => {
+      calls += 1;
+      assert.equal(input.pageToken, null);
+      assert.equal(input.maxResults, 1);
+      assert.match(input.query, /after:2026\/04\/25/);
+      assert.match(input.query, /before:2026\/10\/27/);
+      return { resultSizeEstimate: 42.8, nextPageToken: "do-not-follow" } as {
+        resultSizeEstimate: number;
+      };
+    },
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(preview.dateFrom, "2026-04-26");
+  assert.equal(preview.dateTo, "2026-10-26");
+  assert.equal(preview.dayCount, 184);
+  assert.equal(preview.estimatedMessages, 42);
+  assert.equal(preview.writes, false);
+  assert.equal(preview.importsAttachments, false);
+  assert.equal(preview.ongoingSyncEnabled, false);
+  assert.deepEqual(preview.completedWindow, {
+    dateFrom: "2026-07-12",
+    dateTo: "2026-10-12",
+  });
+  assert.match(preview.note, /does not import attachments or write records/);
+
+  const uncounted = await previewGmailDiscovery({ preset: "historical", env: {} });
+  assert.equal(uncounted.estimatedMessages, null);
+  assert.equal(uncounted.dateFrom, "2026-04-26");
 });
 
 test("encrypts a refresh token with the configured key", () => {
@@ -190,10 +284,29 @@ test("plans discovery without creating a second copy of a known file", () => {
   assert.equal(duplicate.status, "duplicate");
   assert.equal(duplicate.storeFile, false);
   assert.equal(duplicate.duplicateInvoiceId, "invoice-1");
+  const delivery = planPdfDiscovery({
+    text: "DELIVERY NOTE\nDN1",
+    extractFailed: false,
+    byteSize: 100,
+    manualInvoiceId: null,
+    existingDiscoveryItemId: null,
+  });
+  const order = planPdfDiscovery({
+    text: "SALES ORDER\nOrder confirmation 1",
+    extractFailed: false,
+    byteSize: 100,
+    manualInvoiceId: null,
+    existingDiscoveryItemId: null,
+  });
+
   assert.equal(credit.documentType, "credit_note");
   assert.equal(credit.status, "stored");
   assert.equal(credit.storeFile, true);
   assert.match(credit.detail ?? "", /not created as a supplier invoice/);
+  assert.equal(delivery.documentType, "delivery_note");
+  assert.match(delivery.detail ?? "", /not created as a supplier invoice/);
+  assert.equal(order.documentType, "sales_order");
+  assert.match(order.detail ?? "", /not created as a supplier invoice/);
   assert.equal(unreadable.status, "failed");
   assert.equal(unreadable.storeFile, true);
   assert.equal(image.documentType, "unsupported_image");

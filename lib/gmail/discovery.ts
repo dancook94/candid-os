@@ -12,8 +12,6 @@ import { createGmailApiClient } from "@/lib/gmail/client";
 import { refreshStoredGmailAccessToken } from "@/lib/gmail/connection";
 import {
   GMAIL_DISCOVERY_BATCH_SIZE,
-  GMAIL_DISCOVERY_FROM,
-  GMAIL_DISCOVERY_TO,
   GMAIL_IMPORT_FILES_BUCKET,
   GMAIL_IMPORT_MAILBOX,
   GMAIL_MAX_FILE_BYTES,
@@ -25,7 +23,7 @@ import {
   sanitizeGmailError,
 } from "@/lib/gmail/errors";
 import { planOtherAttachment, planPdfDiscovery } from "@/lib/gmail/plan";
-import { buildGmailDiscoveryQuery } from "@/lib/gmail/query";
+import { resolveDiscoveryWindow } from "@/lib/gmail/window";
 
 type RunRow = {
   id: string;
@@ -162,18 +160,19 @@ export async function startGmailDiscovery(input: {
     return { runId: run.id, status: run.status, alreadyActive: true };
   }
 
-  const dateFrom = input.dateFrom || GMAIL_DISCOVERY_FROM;
-  const dateTo = input.dateTo || GMAIL_DISCOVERY_TO;
-  const query = buildGmailDiscoveryQuery(dateFrom, dateTo);
+  const window = resolveDiscoveryWindow({
+    dateFrom: input.dateFrom,
+    dateTo: input.dateTo,
+  });
   const { data, error } = await input.admin
     .from("gmail_import_runs")
     .insert({
       connection_id: connectionId,
       kind: "discovery",
       status: "running",
-      date_from: dateFrom,
-      date_to: dateTo,
-      query,
+      date_from: window.dateFrom,
+      date_to: window.dateTo,
+      query: window.query,
       started_at: new Date().toISOString(),
       created_by: input.userId,
     })

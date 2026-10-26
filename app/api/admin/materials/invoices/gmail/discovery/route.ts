@@ -9,6 +9,7 @@ import {
   startGmailDiscovery,
   stepGmailDiscovery,
 } from "@/lib/gmail/discovery";
+import { previewGmailDiscovery } from "@/lib/gmail/preview";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -26,10 +27,22 @@ export async function POST(request: Request) {
     action?: string;
     dateFrom?: string;
     dateTo?: string;
+    preset?: string;
   };
-  const admin = createAdminClient();
 
   try {
+    if (body.action === "preview") {
+      return NextResponse.json(
+        await previewGmailDiscovery({
+          dateFrom: body.dateFrom,
+          dateTo: body.dateTo,
+          preset: body.preset === "historical" ? "historical" : undefined,
+        })
+      );
+    }
+
+    const admin = createAdminClient();
+
     switch (body.action) {
       case "health":
         await checkGmailConnection(admin);
