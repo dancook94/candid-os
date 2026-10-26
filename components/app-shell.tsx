@@ -20,6 +20,7 @@ import {
   Package,
   Receipt,
   Settings,
+  ShoppingBag,
   Target,
   UserCog,
   Users,
@@ -42,6 +43,7 @@ type AppShellProps = {
   userRole?: "customer" | "admin" | "staff";
   showStaffNav?: boolean;
   showCrmNav?: boolean;
+  showPurchasingNav?: boolean;
   showGlobalSearch?: boolean;
   updatesUnreadCount?: number;
   userName?: string;
@@ -179,6 +181,12 @@ const staffManagementLink: NavLink = {
   href: "/admin/staff",
   label: "Staff",
   icon: UserCog,
+};
+
+const purchasingLink: NavLink = {
+  href: "/purchasing",
+  label: "Purchasing",
+  icon: ShoppingBag,
 };
 
 const staffLinks: NavLink[] = [
@@ -332,6 +340,7 @@ export function AppShell({
   userRole = "customer",
   showStaffNav = false,
   showCrmNav = false,
+  showPurchasingNav = false,
   showGlobalSearch,
   updatesUnreadCount = 0,
   userName,
@@ -356,11 +365,18 @@ export function AppShell({
       ? [
           ...adminLinks.slice(0, 5),
           ...(showCrmNav ? crmLinks : []),
-          ...adminLinks.slice(5),
+          ...adminLinks.slice(5, 6),
+          ...(showPurchasingNav ? [purchasingLink] : []),
+          ...adminLinks.slice(6),
           ...(showStaffNav ? [staffManagementLink] : []),
         ]
       : userRole === "staff"
-        ? [...staffLinks, ...(showCrmNav ? crmLinks : [])]
+        ? [
+            ...staffLinks.slice(0, 1),
+            ...(showPurchasingNav ? [purchasingLink] : []),
+            ...staffLinks.slice(1),
+            ...(showCrmNav ? crmLinks : []),
+          ]
         : customerLinks;
 
   const linksWithBadges = links.map((link) =>
