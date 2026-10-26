@@ -1,4 +1,9 @@
 import { normalizeSupplierDescription } from "@/lib/materials/identity";
+import {
+  materialFamilies,
+  materialFamiliesConflict,
+  statedAdhesive,
+} from "@/lib/materials/invoices/material-family";
 import { isPurchaseUnit, type PurchaseUnit } from "@/lib/materials/units";
 
 import {
@@ -17,19 +22,6 @@ import type {
   MatchMethod,
   ParsedInvoiceLine,
 } from "@/lib/materials/invoices/model";
-
-const STOP_WORDS = new Set([
-  "the",
-  "and",
-  "for",
-  "with",
-  "mm",
-  "gsm",
-  "sheet",
-  "roll",
-  "pack",
-  "white",
-]);
 
 const UNIT_TO_PURCHASE: Record<string, PurchaseUnit> = {
   sheet: "sheet",
@@ -267,6 +259,8 @@ export function normalizePurchaseUnit(value: string | null): PurchaseUnit | null
 }
 
 const WIDTH_CONFLICT_NOTE = "The invoice width does not match a product from this supplier.";
+const SPECIFICATION_NOTE =
+  "Uncertain suggestion from the material family and size. It is not an exact supplier SKU match.";
 
 function findSupplierMatch(
   identity: LineIdentity,
@@ -332,20 +326,69 @@ export function invoiceWidthConflicts(description: string, product: InvoiceMatch
   return Math.round(stated) !== width;
 }
 
-function statedRollWidthMm(description: string) {
-  const metreThenWidth = description.match(
-    /\b(\d+(?:\.\d+)?)\s*m\s*[x×]\s*(\d{3,4}(?:\.\d+)?)\s*mm\b/i
+const SHEET_DIMENSION_SOURCE =
+  "(\\d{3,4}(?:\\.\\d+)?)\\s*(?:mm)?\\s*[x×]\\s*(\\d{3,4}(?:\\.\\d+)?)\\s*(?:mm)?";
+const ROLL_DIMENSION_SOURCE =
+  "(\\d+(?:\\.\\d+)?)\\s*mm\\s*[x×]\\s*(\\d+(?:\\.\\d+)?)\\s*m\\b|(\\d+(?:\\.\\d+)?)\\s*m\\s*[x×]\\s*(\\d+(?:\\.\\d+)?)\\s*mm\\b";
+
+export function reliableSheetSize(description: string) {
+  const pairs = uniquePairs(
+    [...description.matchAll(new RegExp(SHEET_DIMENSION_SOURCE, "gi"))]
+      .filter((match) => /mm/i.test(match[0]))
+      .map((match) => [Number(match[1]), Number(match[2])] as const)
   );
 
-  if (metreThenWidth) {
-    return Number(metreThenWidth[2]);
+  if (pairs.length !== 1) {
+    return null;
   }
 
-  const widthThenMetre = description.match(
-    /\b(\d{3,4}(?:\.\d+)?)\s*mm\s*[x×]\s*(\d+(?:\.\d+)?)\s*m\b/i
-  );
+  return { widthMm: pairs[0][0], heightMm: pairs[0][1] };
+}
 
-  return widthThenMetre ? Number(widthThenMetre[1]) : null;
+export function reliableRollSize(description: string) {
+  const sizes = rollSizes(description);
+
+  return sizes.length === 1 ? sizes[0] : null;
+}
+
+function rollSizes(description: string) {
+  return uniquePairs(
+    [...description.matchAll(new RegExp(ROLL_DIMENSION_SOURCE, "gi"))].map((match) =>
+      match[1] != null
+        ? ([Number(match[1]), Number(match[2]) * 1000] as const)
+        : ([Number(match[3]), Number(match[4]) * 1000] as const)
+    )
+  ).map(([widthMm, lengthMm]) => ({
+    widthMm,
+    lengthMm,
+    lengthMetres: lengthMm / 1000,
+  }));
+}
+
+function uniquePairs(pairs: readonly (readonly [number, number])[]) {
+  const unique: Array<readonly [number, number]> = [];
+
+  for (const pair of pairs) {
+    if (!pair.every((value) => Number.isFinite(value) && value > 0)) {
+      continue;
+    }
+
+    const key = pair.map((value) => Math.round(value)).join(":");
+
+    if (!unique.some((item) => item.map((value) => Math.round(value)).join(":") === key)) {
+      unique.push(pair);
+    }
+  }
+
+  return unique;
+}
+
+function statedRollWidthMm(description: string) {
+  return rollSizes(description)[0]?.widthMm ?? null;
+}
+
+function statedRollLengthMm(description: string) {
+  return rollSizes(description)[0]?.lengthMm ?? null;
 }
 
 function findMatch(
@@ -384,7 +427,14 @@ function findMatch(
       normalizeSupplierDescription(product.description) === normalizedDescription
   );
 
-  if (descriptionMatch) {
+  if (
+    descriptionMatch &&
+    !skusConflict(identity.sku, descriptionMatch.sku) &&
+    !materialFamiliesConflict(
+      identity.description,
+      `${descriptionMatch.materialName} ${descriptionMatch.description}`
+    )
+  ) {
     return {
       productId: descriptionMatch.id,
       confidence: "high",
@@ -409,14 +459,14 @@ function findMatch(
     };
   }
 
-  const specification = bestSpecification(identity.description, products);
+  const specification = bestSpecification(identity, products);
 
   if (specification.status === "unique") {
     return {
       productId: specification.productId,
       confidence: "medium",
       method: "specification",
-      note: null,
+      note: SPECIFICATION_NOTE,
     };
   }
 
@@ -429,94 +479,99 @@ function findMatch(
     };
   }
 
-  const fuzzy = bestFuzzy(identity.description, products);
-
-  if (fuzzy.status === "unique") {
-    return {
-      productId: fuzzy.productId,
-      confidence: "low",
-      method: "fuzzy",
-      note: null,
-    };
-  }
-
   return { productId: null, confidence: null, method: null, note: null };
 }
 
-function bestSpecification(description: string, products: readonly InvoiceMatchProduct[]) {
-  const scored = products
-    .map((product) => ({ product, score: specificationScore(description, product) }))
-    .filter((item) => item.score >= 4)
-    .sort((left, right) => right.score - left.score);
+function skusConflict(invoiceSku: string | null, productSku: string | null) {
+  if (!invoiceSku?.trim() || !productSku?.trim()) {
+    return false;
+  }
 
-  if (scored.length === 0) {
+  return invoiceSku.trim().toLowerCase() !== productSku.trim().toLowerCase();
+}
+
+function bestSpecification(identity: LineIdentity, products: readonly InvoiceMatchProduct[]) {
+  const matched = products.filter((product) => specificationCompatible(identity, product));
+
+  if (matched.length === 0) {
     return { status: "none" as const, productId: null };
   }
 
-  if (scored.length > 1 && scored[0].score === scored[1].score) {
+  if (matched.length > 1) {
     return { status: "ambiguous" as const, productId: null };
   }
 
-  return { status: "unique" as const, productId: scored[0].product.id };
+  return { status: "unique" as const, productId: matched[0].id };
 }
 
-function specificationScore(description: string, product: InvoiceMatchProduct) {
-  let score = 0;
-  const dimensions = extractDimensions(description);
-  const thickness = extractThickness(description);
-  const colour = extractColour(description);
-  const shared = sharedTokens(description, `${product.materialName} ${product.description}`);
+function specificationCompatible(identity: LineIdentity, product: InvoiceMatchProduct) {
+  const productText = `${product.materialName} ${product.description}`;
+  const invoiceFamilies = materialFamilies(identity.description);
+  const productFamilies = materialFamilies(productText);
 
   if (
-    dimensions &&
-    sameDimensions(dimensions, product.widthMm, product.heightMm)
+    invoiceFamilies.length !== 1 ||
+    productFamilies.length !== 1 ||
+    invoiceFamilies[0] !== productFamilies[0]
   ) {
-    score += 2;
+    return false;
   }
 
-  if (
-    thickness != null &&
-    product.thicknessMm != null &&
-    Math.abs(thickness - product.thicknessMm) < 0.15
-  ) {
-    score += 2;
+  const unit = normalizePurchaseUnit(identity.unit);
+
+  if (unit && unit !== product.purchaseUnit) {
+    return false;
   }
 
-  if (colour && product.colour && colour === product.colour.toLowerCase()) {
-    score += 1;
+  if (statedAdhesive(identity.description) !== statedAdhesive(productText)) {
+    return false;
   }
 
-  if (shared >= 1) {
-    score += 1;
+  const thickness = extractThickness(identity.description);
+
+  if (product.purchaseUnit === "sheet" || thickness != null) {
+    if (
+      thickness == null ||
+      product.thicknessMm == null ||
+      Math.abs(thickness - product.thicknessMm) >= 0.15
+    ) {
+      return false;
+    }
   }
 
-  return score;
-}
+  const dimensions = extractDimensions(identity.description);
 
-function bestFuzzy(description: string, products: readonly InvoiceMatchProduct[]) {
-  const scored = products
-    .map((product) => ({
-      product,
-      shared: sharedTokens(description, `${product.materialName} ${product.description}`),
-    }))
-    .filter((item) => item.shared >= 2)
-    .sort((left, right) => right.shared - left.shared);
+  if (dimensions) {
+    if (!sameDimensions(dimensions, product.widthMm, product.heightMm)) {
+      return false;
+    }
+  } else {
+    const width = statedRollWidthMm(identity.description);
+    const length = statedRollLengthMm(identity.description);
 
-  if (scored.length === 0) {
-    return { status: "none" as const, productId: null };
+    if (
+      width == null ||
+      length == null ||
+      product.widthMm == null ||
+      product.lengthMm == null ||
+      Math.round(width) !== Math.round(product.widthMm) ||
+      Math.abs(length - product.lengthMm) > 1
+    ) {
+      return false;
+    }
   }
 
-  if (scored.length > 1 && scored[0].shared === scored[1].shared) {
-    return { status: "ambiguous" as const, productId: null };
+  const colour = extractColour(identity.description);
+
+  if (!colour || !product.colour || canonicalColour(colour) !== canonicalColour(product.colour)) {
+    return false;
   }
 
-  return { status: "unique" as const, productId: scored[0].product.id };
+  return true;
 }
 
 function extractDimensions(description: string) {
-  const match = description.match(
-    /(\d{3,4}(?:\.\d+)?)\s*(?:mm)?\s*[x×]\s*(\d{3,4}(?:\.\d+)?)\s*(?:mm)?/i
-  );
+  const match = description.match(new RegExp(SHEET_DIMENSION_SOURCE, "i"));
 
   if (!match) {
     return null;
@@ -559,26 +614,9 @@ function extractColour(description: string) {
   return COLOURS.find((colour) => lower.includes(colour)) ?? null;
 }
 
-function sharedTokens(left: string, right: string) {
-  const rightTokens = tokens(right);
-  let count = 0;
-
-  for (const token of tokens(left)) {
-    if (rightTokens.has(token)) {
-      count += 1;
-    }
-  }
-
-  return count;
-}
-
-function tokens(value: string) {
-  return new Set(
-    value
-      .toLowerCase()
-      .split(/[^a-z0-9]+/)
-      .filter((token) => token.length > 2 && !STOP_WORDS.has(token) && !/^\d+$/.test(token))
-  );
+function canonicalColour(value: string) {
+  const colour = value.toLowerCase();
+  return colour === "gray" ? "grey" : colour;
 }
 
 function baseLine(

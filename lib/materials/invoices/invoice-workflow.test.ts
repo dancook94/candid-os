@@ -266,10 +266,13 @@ describe("supplier invoice phase 1", () => {
 
     assert.equal(probable.reviewStatus, "needs_review");
     assert.equal(probable.matchConfidence, "medium");
+    assert.equal(probable.matchMethod, "specification");
     assert.equal(probable.matchedProductId, "foam-10");
-    assert.equal(fuzzy.reviewStatus, "needs_review");
-    assert.equal(fuzzy.matchConfidence, "low");
-    assert.equal(fuzzy.matchMethod, "fuzzy");
+    assert.match(probable.note ?? "", /not an exact supplier SKU match/);
+    assert.equal(fuzzy.reviewStatus, "unmatched");
+    assert.equal(fuzzy.matchConfidence, null);
+    assert.equal(fuzzy.matchMethod, null);
+    assert.equal(fuzzy.matchedProductId, null);
     assert.equal(otherSupplier.reviewStatus, "unmatched");
     assert.equal(otherSupplier.matchedProductId, null);
     assert.equal(carriage.reviewStatus, "ignored");
@@ -472,9 +475,9 @@ describe("supplier invoice phase 1", () => {
           unitPrice: 89.1,
           tax: 20,
           total: 89.1,
-          status: "needs_review",
-          product: "briteline-removable",
-          confidence: "low",
+          status: "unmatched",
+          product: null,
+          confidence: null,
         },
         {
           sku: "ALUED33044",
@@ -820,6 +823,147 @@ describe("supplier invoice phase 1", () => {
       "146237 07/10/2026 CZ500 VBL 170505 06/10/2026",
       "2 SU3-70 SEMI-MATT UV SEAL 50M X 1560MM 127.21 254.42 S",
     ].join("\n"));
+  });
+
+  it("does not suggest Dibond for the Foamalite lines on SI1297356", () => {
+    const dibond: InvoiceMatchProduct = {
+      id: "pyr-dib-3",
+      supplierId: "pyramid",
+      sku: "PYR-DIB-3",
+      description: "TEST 3mm Dibond sheet",
+      materialName: "Test Material — 3mm Dibond",
+      purchaseUnit: "sheet",
+      thicknessMm: 3,
+      colour: "White",
+      widthMm: 3050,
+      heightMm: 1500,
+      lengthMm: null,
+      currentPrice: 64.8,
+      currentPriceUnit: "sheet",
+    };
+    const sameSizeDibond: InvoiceMatchProduct = {
+      ...dibond,
+      id: "dibond-same-size",
+      widthMm: 3050,
+      heightMm: 1560,
+    };
+    const foam5: InvoiceMatchProduct = {
+      id: "pyr-foam-5",
+      supplierId: "pyramid",
+      sku: "PYR-FOAM-5",
+      description: "TEST 5mm Foamalite PVC sheet",
+      materialName: "Test Material — 5mm Foamalite PVC",
+      purchaseUnit: "sheet",
+      thicknessMm: 5,
+      colour: "White",
+      widthMm: 2440,
+      heightMm: 1220,
+      lengthMm: null,
+      currentPrice: 41.2,
+      currentPriceUnit: "sheet",
+    };
+    const compatibleFoam5: InvoiceMatchProduct = {
+      ...foam5,
+      id: "foam-5-3050",
+      description: "5mm 3050x1560mm White P/E Foamalite Xpress Foam PVC",
+      materialName: "Foamalite 5mm PVC 3050mm x 1560mm",
+      widthMm: 3050,
+      heightMm: 1560,
+    };
+    const line1 = {
+      lineNumber: 1,
+      rawDescription: "3mm 3050x1560mm White P/E Foamalite Xpress Foam PVC (PQ120)",
+      rawSupplierSku: "FLXP33015PE",
+      rawQuantity: 7,
+      rawUnit: "SHEET",
+      rawUnitPrice: 25.479,
+      rawLineTotal: 178.35,
+      rawTax: null,
+    };
+    const line2 = {
+      lineNumber: 2,
+      rawDescription: "5mm 3050x1560mm White P/E Foamalite Xpress Foam PVC (PQ80)",
+      rawSupplierSku: "FLXP53015PE",
+      rawQuantity: 7,
+      rawUnit: "SHEET",
+      rawUnitPrice: 41.753,
+      rawLineTotal: 292.27,
+      rawTax: null,
+    };
+    const wrongFamily = classifyInvoiceLine({
+      line: line1,
+      supplierId: "pyramid",
+      products: [dibond, sameSizeDibond, foam5],
+      mappings: [],
+      ignoreRules: [],
+    });
+    const differentSize = classifyInvoiceLine({
+      line: line2,
+      supplierId: "pyramid",
+      products: [dibond, foam5],
+      mappings: [],
+      ignoreRules: [],
+    });
+    const compatible = classifyInvoiceLine({
+      line: line2,
+      supplierId: "pyramid",
+      products: [dibond, sameSizeDibond, foam5, compatibleFoam5],
+      mappings: [],
+      ignoreRules: [],
+    });
+    const exactSku = classifyInvoiceLine({
+      line: line2,
+      supplierId: "pyramid",
+      products: [{ ...compatibleFoam5, id: "exact-sku", sku: "FLXP53015PE" }, dibond],
+      mappings: [],
+      ignoreRules: [],
+    });
+    const families = ["Foamalite", "Dibond", "acrylic", "vinyl", "banner", "paper", "fabric"].map(
+      (family): InvoiceMatchProduct => ({
+        id: family.toLowerCase(),
+        supplierId: "pyramid",
+        sku: `TEST-${family.toUpperCase()}`,
+        description: `3mm 1220x2440mm White ${family} sheet`,
+        materialName: `Test ${family}`,
+        purchaseUnit: "sheet",
+        thicknessMm: 3,
+        colour: "White",
+        widthMm: 1220,
+        heightMm: 2440,
+        lengthMm: null,
+        currentPrice: 10,
+        currentPriceUnit: "sheet",
+      })
+    );
+    const acrylicLine = classifyInvoiceLine({
+      line: {
+        ...line1,
+        rawDescription: "3mm 1220x2440mm White acrylic sheet",
+        rawSupplierSku: "ACR-3",
+      },
+      supplierId: "pyramid",
+      products: families,
+      mappings: [],
+      ignoreRules: [],
+    });
+
+    assert.equal(wrongFamily.matchedProductId, null);
+    assert.equal(wrongFamily.matchConfidence, null);
+    assert.equal(wrongFamily.matchMethod, null);
+    assert.equal(wrongFamily.reviewStatus, "unmatched");
+    assert.equal(differentSize.matchedProductId, null);
+    assert.equal(differentSize.reviewStatus, "unmatched");
+    assert.equal(compatible.matchedProductId, "foam-5-3050");
+    assert.equal(compatible.matchMethod, "specification");
+    assert.equal(compatible.matchConfidence, "medium");
+    assert.equal(compatible.reviewStatus, "needs_review");
+    assert.match(compatible.note ?? "", /not an exact supplier SKU match/);
+    assert.equal(exactSku.matchedProductId, "exact-sku");
+    assert.equal(exactSku.matchMethod, "sku");
+    assert.equal(exactSku.matchConfidence, "high");
+    assert.equal(acrylicLine.matchedProductId, "acrylic");
+    assert.equal(acrylicLine.matchMethod, "specification");
+    assert.notEqual(acrylicLine.matchedProductId, "dibond");
   });
 
   it("has no price write, Gmail client, or material creation in the invoice workflow", async () => {

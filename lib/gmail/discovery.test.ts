@@ -519,3 +519,118 @@ test("cron recovers after a discovery lease expires", async () => {
   assert.equal(recovered.status, "completed");
   assert.equal(reads, 1);
 });
+
+test("starts a historical run without changing a completed run", async () => {
+  const memory = createMemoryAdmin();
+  const completed = await startGmailDiscovery({ admin: memory.admin, userId: "user-1" });
+  const original = memory.tables.gmail_import_runs[0];
+  original.status = "completed";
+  original.page_token = null;
+  original.finished_at = "2026-10-13T10:31:07.000Z";
+
+  const historical = await startGmailDiscovery({
+    admin: memory.admin,
+    userId: "user-1",
+    dateFrom: "2026-04-26",
+    dateTo: "2026-10-26",
+  });
+
+  assert.equal(historical.alreadyActive, false);
+  assert.notEqual(historical.runId, completed.runId);
+  assert.equal(memory.tables.gmail_import_runs.length, 2);
+  assert.equal(original.status, "completed");
+  assert.equal(original.date_from, "2026-07-12");
+  assert.equal(original.date_to, "2026-10-12");
+  assert.match(String(original.query), /after:2026\/07\/11/);
+  const added = memory.tables.gmail_import_runs[1];
+  assert.equal(added.status, "running");
+  assert.equal(added.date_from, "2026-04-26");
+  assert.equal(added.date_to, "2026-10-26");
+  assert.match(String(added.query), /after:2026\/04\/25/);
+  assert.match(String(added.query), /before:2026\/10\/27/);
+});
+
+test("an overlapping run skips an attachment discovered by the completed run", async () => {
+  const memory = createMemoryAdmin();
+  await startGmailDiscovery({ admin: memory.admin, userId: "user-1" });
+  const client: GmailDiscoveryClient = {
+    async listMessages() {
+      return {
+        messages: [{ id: "message-1", threadId: "message-1" }],
+        nextPageToken: null,
+      };
+    },
+    async getMessage(messageId) {
+      return {
+        id: messageId,
+        threadId: messageId,
+        payload: {
+          filename: "invoice.pdf",
+          mimeType: "application/pdf",
+          body: { attachmentId: "attachment-1", size: 5 },
+        },
+      };
+    },
+    async getAttachment() {
+      return new Uint8Array([37, 80, 68, 70, 45]);
+    },
+  };
+
+  await stepGmailDiscovery({ admin: memory.admin, client });
+  const firstRun = memory.tables.gmail_import_runs[0];
+  const firstItems = memory.tables.gmail_import_items.length;
+  const firstFiles = memory.tables.gmail_import_files.length;
+  firstRun.status = "completed";
+
+  await startGmailDiscovery({
+    admin: memory.admin,
+    userId: "user-1",
+    dateFrom: "2026-04-26",
+    dateTo: "2026-10-26",
+  });
+  await stepGmailDiscovery({ admin: memory.admin, client });
+
+  assert.equal(memory.tables.gmail_import_items.length, firstItems);
+  assert.equal(memory.tables.gmail_import_files.length, firstFiles);
+  assert.equal(
+    memory.writes.filter((write) => write === "insert gmail_import_items").length,
+    firstItems
+  );
+  assert.equal(memory.writes.some((write) => FORBIDDEN.has(write.split(" ")[1] ?? "")), false);
+  assert.equal(firstRun.date_from, "2026-07-12");
+  assert.equal(firstRun.status, "completed");
+});
+
+test("a rate limit keeps the saved page token", async () => {
+  const memory = createMemoryAdmin();
+  await startGmailDiscovery({
+    admin: memory.admin,
+    userId: "user-1",
+    dateFrom: "2026-04-26",
+    dateTo: "2026-10-26",
+  });
+  memory.tables.gmail_import_runs[0].page_token = "page-9";
+  const client: GmailDiscoveryClient = {
+    async listMessages() {
+      const error = new Error("Gmail rate limit") as Error & { status?: number; retryAfterSeconds?: number };
+      error.status = 429;
+      error.retryAfterSeconds = 20;
+      throw error;
+    },
+    async getMessage(messageId) {
+      return { id: messageId, threadId: messageId, payload: {} };
+    },
+    async getAttachment() {
+      return new Uint8Array();
+    },
+  };
+
+  const result = await stepGmailDiscovery({ admin: memory.admin, client });
+  assert.equal(result.rateLimited, true);
+  assert.equal(result.retryAfterSeconds, 20);
+  assert.equal(memory.tables.gmail_import_runs[0]?.status, "running");
+  assert.equal(memory.tables.gmail_import_runs[0]?.page_token, "page-9");
+  assert.equal(memory.tables.gmail_import_runs[0]?.date_from, "2026-04-26");
+  assert.equal(memory.tables.gmail_import_runs[0]?.date_to, "2026-10-26");
+  assert.equal(memory.tables.gmail_import_items.length, 0);
+});

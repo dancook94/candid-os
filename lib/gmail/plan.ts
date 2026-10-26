@@ -2,6 +2,19 @@ import type { GmailDocumentType } from "@/lib/gmail/classify";
 import { classifyPdfText } from "@/lib/gmail/classify";
 import { GMAIL_MAX_FILE_BYTES } from "@/lib/gmail/config";
 
+function nonInvoiceLabel(
+  documentType: Exclude<GmailDocumentType, "unsupported_image" | "invoice" | "unknown">
+) {
+  switch (documentType) {
+    case "credit_note":
+      return "Credit note";
+    case "delivery_note":
+      return "Delivery note";
+    case "sales_order":
+      return "Sales order";
+  }
+}
+
 export type PdfDiscoveryPlan = {
   documentType: Exclude<GmailDocumentType, "unsupported_image">;
   status: "stored" | "duplicate" | "failed";
@@ -66,11 +79,11 @@ export function planPdfDiscovery(input: {
 
   const documentType = classifyPdfText(input.text);
   const detail =
-    documentType === "credit_note"
-      ? "Credit note kept for later. It was not created as a supplier invoice."
+    documentType === "invoice"
+      ? null
       : documentType === "unknown"
         ? "The document type was not recognised."
-        : null;
+        : `${nonInvoiceLabel(documentType)} kept for later. It was not created as a supplier invoice.`;
 
   return {
     documentType,

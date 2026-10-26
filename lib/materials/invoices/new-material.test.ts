@@ -148,6 +148,103 @@ describe("create material from an invoice line", () => {
     );
   });
 
+  it("reads both Foamalite sheet sizes from SI1297356 without using thickness as a dimension", () => {
+    const lines = [
+      {
+        description: "3mm 3050x1560mm White P/E Foamalite Xpress Foam PVC (PQ120)",
+        sku: "FLXP33015PE",
+        unit: "SHEET",
+        unitPrice: 25.479,
+        thicknessMm: 3,
+      },
+      {
+        description: "5mm 3050 x 1560 mm White P/E Foamalite Xpress Foam PVC (PQ80)",
+        sku: "FLXP53015PE",
+        unit: "SHEET",
+        unitPrice: 41.753,
+        thicknessMm: 5,
+      },
+    ];
+
+    for (const line of lines) {
+      const proposal = proposeMaterialFromInvoiceLine(line);
+
+      assert.equal(proposal.purchaseUnit, "sheet");
+      assert.equal(proposal.thicknessMm, line.thicknessMm);
+      assert.equal(proposal.purchaseWidthMm, 3050);
+      assert.equal(proposal.purchaseHeightMm, 1560);
+      assert.equal(proposal.purchaseLengthMm, null);
+    }
+
+    const multiplied = proposeMaterialFromInvoiceLine({
+      description: "10mm 2440 × 1220mm White Foamalite",
+      sku: null,
+      unit: "sheet",
+      unitPrice: 16.15,
+    });
+    const millimetresFirst = proposeMaterialFromInvoiceLine({
+      description: "3mm 1220mm x 2440mm White Foamalite",
+      sku: null,
+      unit: "sheet",
+      unitPrice: 16.15,
+    });
+    const ambiguous = proposeMaterialFromInvoiceLine({
+      description: "3mm 3050x1560mm or 2440x1220mm White Foamalite",
+      sku: null,
+      unit: "sheet",
+      unitPrice: 16.15,
+    });
+    const kept = proposeMaterialFromInvoiceLine({
+      description: lines[0].description,
+      sku: lines[0].sku,
+      unit: "SHEET",
+      unitPrice: lines[0].unitPrice,
+      enteredWidthMm: 1000,
+      enteredHeightMm: null,
+    });
+
+    assert.equal(multiplied.purchaseWidthMm, 2440);
+    assert.equal(multiplied.purchaseHeightMm, 1220);
+    assert.equal(multiplied.thicknessMm, 10);
+    assert.equal(millimetresFirst.purchaseWidthMm, 1220);
+    assert.equal(millimetresFirst.purchaseHeightMm, 2440);
+    assert.equal(millimetresFirst.thicknessMm, 3);
+    assert.equal(ambiguous.purchaseWidthMm, null);
+    assert.equal(ambiguous.purchaseHeightMm, null);
+    assert.equal(ambiguous.thicknessMm, 3);
+    assert.equal(kept.purchaseWidthMm, 1000);
+    assert.equal(kept.purchaseHeightMm, null);
+    assert.equal(kept.thicknessMm, 3);
+  });
+
+  it("reads the Briteline roll from SI1311237 as width and length", () => {
+    const proposal = proposeMaterialFromInvoiceLine({
+      description:
+        "Briteline MT WHT GB Removable 1370mm x 50m Monomeric Vinyl - Grey Adhesive (BLMVMWRG1370)",
+      sku: "BLMV137MWRG",
+      unit: "Roll",
+      unitPrice: 89.11,
+    });
+
+    assert.equal(proposal.purchaseUnit, "roll");
+    assert.equal(proposal.category, "Vinyl");
+    assert.equal(proposal.thicknessMm, null);
+    assert.equal(proposal.purchaseWidthMm, 1370);
+    assert.equal(proposal.purchaseHeightMm, null);
+    assert.equal(proposal.purchaseLengthMm, 50000);
+    assert.equal(
+      proposeMaterialFromInvoiceLine({
+        description:
+          "Briteline MT WHT GB Removable 1370mm x 50m Monomeric Vinyl - Grey Adhesive (BLMVMWRG1370)",
+        sku: "BLMV137MWRG",
+        unit: "Roll",
+        unitPrice: 89.11,
+        enteredLengthMm: 25000,
+      }).purchaseLengthMm,
+      25000
+    );
+  });
+
   it("creates one opening price in a single function and does not rewrite existing prices or preferences", async () => {
     const sql = await readFile(
       new URL(

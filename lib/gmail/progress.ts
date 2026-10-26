@@ -5,7 +5,7 @@ export function gmailDiscoveryContinuation(status: string | null) {
     case "paused":
       return "Paused. The background scan waits until you resume it.";
     case "completed":
-      return "Historical backfill is complete. Ongoing discovery is not enabled.";
+      return "This discovery run is complete and is kept. Ongoing discovery is not enabled. Another date range starts a separate run.";
     case "failed":
       return "This discovery needs attention before the background scan can continue.";
     default:
