@@ -136,6 +136,7 @@ export default async function SupplierInvoicePage({
               supplierChosen={Boolean(invoice.supplier_id)}
               supplierName={supplierName || ""}
               invoiceDate={invoice.invoice_date}
+              invoiceIgnored={invoice.processing_status === "ignored"}
               products={result.products.map((product) => ({
                 id: product.id,
                 label: `${product.materialName} — ${product.description}`,

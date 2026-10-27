@@ -383,14 +383,12 @@ export async function updateSupplierProductRecord(
 
   const productUpdate: {
     supplier_id: string;
-    supplier_sku: string | null;
     supplier_description: string;
     normalized_description: string;
     active: boolean;
     is_preferred?: boolean;
   } = {
     supplier_id: parsed.supplierId,
-    supplier_sku: parsed.supplierSku,
     supplier_description: parsed.supplierDescription,
     normalized_description: parsed.supplierDescription.toLowerCase(),
     active: parsed.active,

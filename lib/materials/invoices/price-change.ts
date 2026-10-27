@@ -128,6 +128,10 @@ export function formatPriceDecision(action: string, metadata: unknown) {
   }
 
   if (action === "price_change_rejected" && invoicePrice != null && currentPrice != null) {
+    if (details.rule === "historical_price") {
+      return `Retained the current price of ${formatGbp(currentPrice)} per ${unitLabel(unit)} because the invoice date is before that price. The invoice price of ${formatGbp(invoicePrice)} was not applied.`;
+    }
+
     return `Kept the current price of ${formatGbp(currentPrice)} per ${unitLabel(unit)}. The invoice price of ${formatGbp(invoicePrice)} was not applied. A later invoice with a different price will be shown again.`;
   }
 

@@ -120,7 +120,6 @@ export function SupplierProductCard({
       "PATCH",
       {
         supplierId: form.get("supplierId"),
-        supplierSku: form.get("supplierSku"),
         supplierDescription: form.get("supplierDescription"),
         active,
         isPreferred: preferred,
@@ -177,11 +176,12 @@ export function SupplierProductCard({
         </div>
         <div className="space-y-2">
           <Label htmlFor={`sku-${product.id}`}>Supplier SKU</Label>
-          <Input
-            id={`sku-${product.id}`}
-            name="supplierSku"
-            defaultValue={product.supplierSku ?? ""}
-          />
+          <p id={`sku-${product.id}`} className="mt-2 text-sm">
+            {product.supplierSku ? `Approved supplier SKU: ${product.supplierSku}` : "No supplier SKU yet."}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            A blank SKU is confirmed from a verified invoice line. This editor does not change it.
+          </p>
         </div>
         <div className="space-y-2 md:col-span-2">
           <Label htmlFor={`description-${product.id}`}>Supplier description</Label>
