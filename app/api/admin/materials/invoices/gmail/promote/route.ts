@@ -37,6 +37,7 @@ export async function POST(request: Request) {
   const body = (await request.json()) as {
     action?: string;
     command?: string;
+    mode?: string;
     itemIds?: string[];
     batchSize?: number;
     invoiceLimit?: number | string;
@@ -73,7 +74,10 @@ export async function POST(request: Request) {
           eligibleAtStart = preview.rows.filter((row) => row.selectable).length;
 
           if (eligibleAtStart === 0) {
-            return NextResponse.json({ error: "There are no stored invoices waiting." }, { status: 400 });
+            return NextResponse.json(
+              { error: "There are no invoices eligible for automatic processing." },
+              { status: 400 }
+            );
           }
 
           invoiceLimit = resolveProcessingLimit({ requested: body.invoiceLimit, eligibleCount: eligibleAtStart });
@@ -177,6 +181,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Unknown promotion action." }, { status: 400 });
     }
 
+    const manual = body.mode === "manual";
+    const preview = await loadGmailPromotionPreview(supabase);
+
+    if (!preview.ok) {
+      return NextResponse.json({ error: preview.error }, { status: 400 });
+    }
+
+    const allowed = new Set(
+      preview.rows
+        .filter((row) => (manual ? row.queue === "manual" : row.selectable))
+        .map((row) => row.itemId)
+    );
+    const itemIds = (body.itemIds ?? []).map((itemId) => itemId.trim()).filter((itemId) => allowed.has(itemId));
+
+    if (itemIds.length === 0) {
+      return NextResponse.json(
+        { error: manual ? "Choose a document that needs manual classification." : "Choose an invoice eligible for automatic processing." },
+        { status: 400 }
+      );
+    }
+
     const catalog = await loadInvoiceMatchCatalog(supabase);
 
     if (!catalog.ok) {
@@ -186,8 +211,9 @@ export async function POST(request: Request) {
     const report = await promoteGmailInvoiceBatch({
       supabase,
       userId: access.userId,
-      itemIds: body.itemIds ?? [],
+      itemIds,
       catalog,
+      mode: manual ? "manual" : "automatic",
     });
     revalidatePath("/admin/materials/invoices");
     revalidatePath("/admin/materials/invoices/gmail");

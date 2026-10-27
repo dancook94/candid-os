@@ -16,6 +16,8 @@ export type SupplierRecord = {
   name: string;
   active: boolean;
   productCount: number;
+  gmailAutoProcessing?: boolean;
+  gmailEligibilityAvailable?: boolean;
 };
 
 export type MaterialRecord = {

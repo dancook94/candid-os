@@ -41,40 +41,62 @@ export function SupplierCreateForm() {
 export function SupplierEditForm({ supplier }: { supplier: SupplierRecord }) {
   const { error, pending, save } = useMaterialsSave();
   const [active, setActive] = useState(supplier.active);
+  const [autoProcessing, setAutoProcessing] = useState(supplier.gmailAutoProcessing ?? false);
+  const eligibilityAvailable = supplier.gmailEligibilityAvailable !== false;
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await save(`/api/admin/materials/suppliers/${supplier.id}`, "PATCH", {
       name: new FormData(event.currentTarget).get("name"),
       active,
+      ...(eligibilityAvailable ? { gmailAutoProcessing: autoProcessing } : {}),
     });
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3 lg:flex-row lg:items-center">
-      <Input
-        name="name"
-        aria-label={`Name for ${supplier.name}`}
-        defaultValue={supplier.name}
-        required
-        className="lg:max-w-sm"
-      />
-      <label className="flex items-center gap-2 text-sm">
+    <form onSubmit={handleSubmit} className="flex flex-col gap-3 border-b border-border/60 pb-4 last:border-b-0 last:pb-0">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <Input
+          name="name"
+          aria-label={`Name for ${supplier.name}`}
+          defaultValue={supplier.name}
+          required
+          className="lg:max-w-sm"
+        />
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={active}
+            onChange={(event) => setActive(event.target.checked)}
+          />
+          Active
+        </label>
+        <StatusBadge status={supplier.active ? "approved" : "disabled"} label={supplier.active ? "Active" : "Inactive"} />
+        <span className="text-sm text-muted-foreground">
+          {supplier.productCount} product{supplier.productCount === 1 ? "" : "s"}
+        </span>
+        <Button type="submit" variant="outline" disabled={pending}>
+          {pending ? "Saving…" : "Save"}
+        </Button>
+      </div>
+      <label className="flex items-start gap-2 text-sm">
         <input
           type="checkbox"
-          checked={active}
-          onChange={(event) => setActive(event.target.checked)}
+          className="mt-1"
+          checked={autoProcessing}
+          disabled={!eligibilityAvailable}
+          onChange={(event) => setAutoProcessing(event.target.checked)}
         />
-        Active
+        <span>
+          Approve for automatic Gmail invoice processing
+          <span className="mt-1 block text-muted-foreground">
+            {eligibilityAvailable
+              ? "Leave this off unless this supplier should enter an automatic processing run. Other documents stay available for manual classification."
+              : "Apply the supplier eligibility migration before this can be saved. Automatic processing stays off."}
+          </span>
+        </span>
       </label>
-      <StatusBadge status={supplier.active ? "approved" : "disabled"} label={supplier.active ? "Active" : "Inactive"} />
-      <span className="text-sm text-muted-foreground">
-        {supplier.productCount} product{supplier.productCount === 1 ? "" : "s"}
-      </span>
-      <Button type="submit" variant="outline" disabled={pending}>
-        {pending ? "Saving…" : "Save"}
-      </Button>
-      {error ? <p className="text-sm text-red-700 lg:basis-full">{error}</p> : null}
+      {error ? <p className="text-sm text-red-700">{error}</p> : null}
     </form>
   );
 }

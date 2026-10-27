@@ -9,6 +9,7 @@ import { normalizeSupplierDescription } from "@/lib/materials/identity";
 import { invoiceMaterialConflict } from "@/lib/materials/invoices/new-material";
 import { parseMaterialWrite, isMaterialsFieldError } from "@/lib/materials/validation";
 
+import { applyDocumentExclusion } from "@/lib/materials/invoices/document-exclusion";
 import { findDuplicateInvoice } from "@/lib/materials/invoices/duplicate";
 import { rebuildStoredInvoice } from "@/lib/materials/invoices/reprocess";
 import { permanentInvoiceLineIds } from "@/lib/materials/invoices/reprocess-guard";
@@ -22,6 +23,7 @@ import {
 } from "@/lib/materials/invoices/model";
 import { isBlockedSupplierName } from "@/lib/materials/invoices/supplier";
 import { loadInvoiceMatchCatalog } from "@/lib/materials/invoices/queries";
+import { postgresColumnMissing } from "@/lib/materials/write-error";
 
 const MAX_BYTES = 15 * 1024 * 1024;
 const MIME_BY_EXTENSION: Record<string, string> = {
@@ -261,6 +263,81 @@ export async function reprocessSupplierInvoice(invoiceId: string) {
   }
 
   return result;
+}
+
+export async function excludeSupplierInvoiceDocument(invoiceId: string) {
+  const access = await requireAdmin();
+
+  if (!access.ok) {
+    return access;
+  }
+
+  const result = await applyDocumentExclusion(
+    {
+      async loadInvoice(id) {
+        const loaded = await access.supabase
+          .from("supplier_invoices")
+          .select("id, gmail_import_item_id")
+          .eq("id", id)
+          .maybeSingle();
+
+        if (loaded.error || !loaded.data) {
+          return null;
+        }
+
+        return {
+          id: loaded.data.id as string,
+          gmailImportItemId: (loaded.data.gmail_import_item_id as string | null) ?? null,
+        };
+      },
+      async updateInvoice(update) {
+        const saved = await access.supabase
+          .from("supplier_invoices")
+          .update({ processing_status: update.processing_status })
+          .eq("id", update.id);
+
+        if (saved.error) {
+          throw new Error("The review record could not be ignored.");
+        }
+      },
+      async updateGmailItem(update) {
+        const withRelevance = await access.supabase
+          .from("gmail_import_items")
+          .update({
+            status: update.status,
+            detail: update.detail,
+            promotion_relevance: update.promotion_relevance,
+          })
+          .eq("id", update.id);
+
+        if (withRelevance.error && postgresColumnMissing(withRelevance.error, "promotion_relevance")) {
+          const fallback = await access.supabase
+            .from("gmail_import_items")
+            .update({ status: update.status, detail: update.detail })
+            .eq("id", update.id);
+
+          if (fallback.error) {
+            throw new Error("The Gmail document could not be marked as skipped.");
+          }
+
+          return;
+        }
+
+        if (withRelevance.error) {
+          throw new Error("The Gmail document could not be marked as skipped.");
+        }
+      },
+    },
+    invoiceId
+  );
+
+  if (!result.ok) {
+    return result;
+  }
+
+  refreshInvoicePages(invoiceId);
+  revalidatePath("/admin/materials/invoices/gmail");
+  return { ok: true as const };
 }
 
 export async function resolveInvoicePriceChange(

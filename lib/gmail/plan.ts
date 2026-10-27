@@ -1,6 +1,7 @@
 import type { GmailDocumentType } from "@/lib/gmail/classify";
 import { classifyPdfText } from "@/lib/gmail/classify";
 import { GMAIL_MAX_FILE_BYTES } from "@/lib/gmail/config";
+import { classifyDocumentRelevance, type DocumentRelevanceResult } from "@/lib/gmail/relevance";
 
 function nonInvoiceLabel(
   documentType: Exclude<GmailDocumentType, "unsupported_image" | "invoice" | "unknown">
@@ -78,11 +79,12 @@ export function planPdfDiscovery(input: {
   }
 
   const documentType = classifyPdfText(input.text);
+  const relevance = classifyDocumentRelevance(input.text);
   const detail =
     documentType === "invoice"
       ? null
       : documentType === "unknown"
-        ? "The document type was not recognised."
+        ? unknownDetail(relevance, input.text)
         : `${nonInvoiceLabel(documentType)} kept for later. It was not created as a supplier invoice.`;
 
   return {
@@ -93,6 +95,18 @@ export function planPdfDiscovery(input: {
     duplicateItemId: null,
     detail,
   };
+}
+
+function unknownDetail(relevance: DocumentRelevanceResult, text: string) {
+  if (relevance.relevance === "irrelevant") {
+    return relevance.reason;
+  }
+
+  if (/\binvoice\b/i.test(text) || /\bpro[\s-]?forma\b/i.test(text)) {
+    return relevance.reason;
+  }
+
+  return "The document type was not recognised.";
 }
 
 export function planOtherAttachment(kind: "image" | "other", byteSize: number) {

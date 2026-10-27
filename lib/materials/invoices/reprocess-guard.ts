@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { exclusionReprocessBlock } from "@/lib/materials/invoices/document-exclusion";
 import {
   PERMANENT_LINE_ACTIONS,
   reprocessBlockReason,
@@ -60,10 +61,44 @@ export async function permanentInvoiceLineIds(
   return locked;
 }
 
+async function documentExclusionReprocessBlock(supabase: SupabaseClient, invoiceId: string) {
+  const invoice = await supabase
+    .from("supplier_invoices")
+    .select("processing_status, gmail_import_item_id")
+    .eq("id", invoiceId)
+    .maybeSingle();
+
+  if (invoice.error || !invoice.data?.gmail_import_item_id || invoice.data.processing_status !== "ignored") {
+    return null;
+  }
+
+  const item = await supabase
+    .from("gmail_import_items")
+    .select("status, detail")
+    .eq("id", invoice.data.gmail_import_item_id)
+    .maybeSingle();
+
+  if (item.error || !item.data) {
+    return null;
+  }
+
+  return exclusionReprocessBlock({
+    processingStatus: invoice.data.processing_status,
+    gmailStatus: item.data.status,
+    gmailDetail: item.data.detail,
+  });
+}
+
 export async function findInvoiceReprocessBlock(
   supabase: SupabaseClient,
   invoiceId: string
 ) {
+  const exclusionBlock = await documentExclusionReprocessBlock(supabase, invoiceId);
+
+  if (exclusionBlock) {
+    return exclusionBlock;
+  }
+
   const { data: lines, error: lineError } = await supabase
     .from("supplier_invoice_lines")
     .select("id")

@@ -12,7 +12,7 @@ import {
   type SupplierRecord,
 } from "@/lib/materials/present";
 import type { ApprovedPriceRecord } from "@/lib/materials/pricing";
-import { isMaterialsSchemaMissing } from "@/lib/materials/write-error";
+import { isMaterialsSchemaMissing, postgresColumnMissing } from "@/lib/materials/write-error";
 
 type QueryError = { code?: string; message?: string } | null;
 
@@ -295,13 +295,13 @@ export async function loadMaterialDetail(
 export async function loadSuppliers(
   supabase: SupabaseClient
 ): Promise<MaterialsQueryResult<SupplierRecord[]>> {
-  const [{ data, error }, products] = await Promise.all([
-    supabase.from("suppliers").select("id, name, active").order("name"),
+  const [suppliers, products] = await Promise.all([
+    loadSupplierRows(supabase),
     supabase.from("material_supplier_products").select("supplier_id"),
   ]);
 
-  if (error) {
-    return fail(error);
+  if (suppliers.error) {
+    return fail(suppliers.error);
   }
 
   if (products.error && !isMaterialsSchemaMissing(products.error)) {
@@ -317,11 +317,53 @@ export async function loadSuppliers(
 
   return {
     ok: true,
-    data: (data ?? []).map((supplier) => ({
-      id: supplier.id as string,
-      name: supplier.name as string,
+    data: suppliers.rows.map((supplier) => ({
+      id: supplier.id,
+      name: supplier.name,
       active: Boolean(supplier.active),
-      productCount: counts.get(supplier.id as string) ?? 0,
+      productCount: counts.get(supplier.id) ?? 0,
+      gmailAutoProcessing: supplier.gmailAutoProcessing,
+      gmailEligibilityAvailable: supplier.eligibilityAvailable,
+    })),
+  };
+}
+
+async function loadSupplierRows(supabase: SupabaseClient) {
+  const withFlag = await supabase
+    .from("suppliers")
+    .select("id, name, active, gmail_auto_processing_enabled")
+    .order("name");
+
+  if (withFlag.error && postgresColumnMissing(withFlag.error, "gmail_auto_processing_enabled")) {
+    const fallback = await supabase.from("suppliers").select("id, name, active").order("name");
+
+    return {
+      error: fallback.error,
+      rows: ((fallback.data ?? []) as Array<{ id: string; name: string; active: boolean | null }>).map((supplier) => ({
+        id: supplier.id,
+        name: supplier.name,
+        active: supplier.active,
+        gmailAutoProcessing: false,
+        eligibilityAvailable: false,
+      })),
+    };
+  }
+
+  return {
+    error: withFlag.error,
+    rows: (
+      (withFlag.data ?? []) as Array<{
+        id: string;
+        name: string;
+        active: boolean | null;
+        gmail_auto_processing_enabled: boolean | null;
+      }>
+    ).map((supplier) => ({
+      id: supplier.id,
+      name: supplier.name,
+      active: supplier.active,
+      gmailAutoProcessing: Boolean(supplier.gmail_auto_processing_enabled),
+      eligibilityAvailable: true,
     })),
   };
 }

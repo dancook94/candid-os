@@ -8,6 +8,8 @@ import {
   authoriseProcessingBatch,
   countsFromAttempts,
   decideProcessingTick,
+  nextProcessingBatch,
+  outcomesForBlockedScope,
   remainingInScope,
   resolveProcessingLimit,
   runCompletionReason,
@@ -599,4 +601,46 @@ test("the processing limit is sealed in the database and does not approve prices
   assert.match(store, /invoice_limit: input\.invoiceLimit/);
   assert.doesNotMatch(tick, /material_prices|create_material_from_invoice_line|approve_invoice_price_change/);
   assert.match(tick, /runCompletionReason/);
+});
+
+test("a sealed maximum does not replace an excluded document or reopen a completed run", () => {
+  const reminder = {
+    ...row("reminder", "2026-04-01"),
+    queue: "excluded" as const,
+    queueReason: "Excluded as irrelevant: overdue-payment reminder.",
+    selectable: false,
+    duplicate: null,
+  };
+  const manual = {
+    ...row("unknown", "2026-04-02"),
+    queue: "manual" as const,
+    selectable: false,
+    duplicate: null,
+  };
+  const first = row("pyramid", "2026-05-01");
+  const later = row("all-print", "2026-06-01");
+  assert.deepEqual(selectProcessingScope([reminder, manual, first, later], 1), ["pyramid"]);
+
+  const sealed = run({
+    invoiceLimit: 1,
+    eligibleAtStart: 2,
+    scopeItemIds: ["reminder"],
+    scopeSealed: true,
+    attemptedItemIds: [],
+  });
+  const blocked = outcomesForBlockedScope(sealed, [reminder, first]);
+  assert.equal(blocked.skipped, 1);
+  assert.match(blocked.results[0]?.detail ?? "", /Excluded as irrelevant/);
+  assert.deepEqual(nextProcessingBatch({ ...sealed, attemptedItemIds: ["reminder"] }, [reminder, later]), []);
+  assert.equal(remainingInScope(["reminder"], ["reminder"]), 0);
+
+  const completed = run({
+    status: "completed",
+    completionReason: "limit_reached",
+    invoiceLimit: 1,
+    scopeItemIds: ["reminder"],
+    attemptedItemIds: ["reminder"],
+  });
+  assert.equal(decideProcessingTick(completed, new Date("2026-10-26T12:00:00Z")).action, "idle");
+  assert.deepEqual(selectProcessingScope([reminder, later], 1), ["all-print"]);
 });

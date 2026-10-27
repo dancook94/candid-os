@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { verifyApprovedAdmin } from "@/lib/admin-auth";
 import { GMAIL_IMPORT_FILES_BUCKET } from "@/lib/gmail/config";
+import { promotionQueue, storedDocumentRelevance, classifyDocumentRelevance } from "@/lib/gmail/relevance";
 import { findDuplicateInvoice, type ExistingInvoiceRef } from "@/lib/materials/invoices/duplicate";
 import { buildInvoiceDraft } from "@/lib/materials/invoices/draft";
 import { extractInvoiceDocument } from "@/lib/materials/invoices/extract";
@@ -16,7 +17,7 @@ import {
   type InvoiceSupplierRef,
 } from "@/lib/materials/invoices/model";
 import { recordPriceChangeDetections } from "@/lib/materials/invoices/price-change-events";
-import { isMaterialsSchemaMissing } from "@/lib/materials/write-error";
+import { isMaterialsSchemaMissing, postgresColumnMissing } from "@/lib/materials/write-error";
 import {
   GMAIL_PROMOTION_BATCH_LIMIT,
   PYRAMID_SUPPLIER_NAME,
@@ -53,6 +54,9 @@ export type PromotionCandidate = {
   status: string;
   supplierId: string | null;
   supplierName: string | null;
+  supplierApproved?: boolean;
+  relevance?: "supplier_invoice" | "needs_review" | "irrelevant" | null;
+  detail?: string | null;
   invoiceNumber: string | null;
   invoiceDate: string | null;
   filename: string;
@@ -80,6 +84,10 @@ export type PromotionDatabase = {
   insertFile(row: Record<string, unknown>): Promise<WriteError>;
   insertLines(rows: Record<string, unknown>[]): Promise<WriteError>;
   insertEvents(rows: Record<string, unknown>[]): Promise<void>;
+  markDocument(
+    itemId: string,
+    update: { status: "stored" | "skipped"; detail: string; relevance: "needs_review" | "irrelevant" }
+  ): Promise<void>;
   listLines(
     invoiceId: string
   ): Promise<Array<{ id: string; line_number: number; review_status: string; matched_supplier_product_id: string | null }>>;
@@ -166,19 +174,34 @@ export function assessStoredInvoice(input: {
   };
 }
 
+function previewVisible(candidate: PromotionCandidate) {
+  if (!candidate.storagePath || !candidate.checksumSha256 || candidate.mimeType !== "application/pdf") {
+    return false;
+  }
+
+  if (candidate.relevance === "irrelevant" || candidate.relevance === "needs_review") {
+    return true;
+  }
+
+  const detail = candidate.detail ?? "";
+
+  if (
+    detail.startsWith("Excluded as irrelevant") ||
+    detail.startsWith("Needs manual classification") ||
+    detail.startsWith("Marked as not a supplier invoice")
+  ) {
+    return true;
+  }
+
+  return candidate.documentType === PROMOTABLE_DOCUMENT && candidate.status === PROMOTABLE_STATUS;
+}
+
 export function buildPromotionPreview(input: {
   candidates: readonly PromotionCandidate[];
   existing: readonly PromotionExistingInvoice[];
 }): PromotionPreviewRow[] {
   return input.candidates
-    .filter(
-      (candidate) =>
-        candidate.documentType === PROMOTABLE_DOCUMENT &&
-        candidate.status === PROMOTABLE_STATUS &&
-        candidate.storagePath &&
-        candidate.checksumSha256 &&
-        candidate.mimeType === "application/pdf"
-    )
+    .filter(previewVisible)
     .map((candidate) => {
       const duplicate = assessStoredInvoice({
         itemId: candidate.itemId,
@@ -188,6 +211,19 @@ export function buildPromotionPreview(input: {
         invoiceDate: candidate.invoiceDate,
         existing: input.existing,
       });
+      const assigned = promotionQueue({
+        supplierMatched: Boolean(candidate.supplierId),
+        supplierApproved: Boolean(candidate.supplierApproved),
+        relevance: candidate.relevance ?? storedDocumentRelevance({ detail: candidate.detail }),
+        status: candidate.status,
+        documentType: candidate.documentType,
+      });
+
+      const storedReason = candidate.detail ?? "";
+      const specificReason =
+        storedReason.startsWith("Excluded as irrelevant") ||
+        storedReason.startsWith("Needs manual classification") ||
+        storedReason.startsWith("Marked as not a supplier invoice");
 
       return {
         itemId: candidate.itemId,
@@ -197,7 +233,9 @@ export function buildPromotionPreview(input: {
         filename: candidate.filename,
         pyramid: candidate.supplierName === PYRAMID_SUPPLIER_NAME,
         duplicate,
-        selectable: duplicate == null,
+        selectable: assigned.selectable && duplicate == null,
+        queue: assigned.queue,
+        queueReason: duplicate && assigned.queue !== "excluded" ? duplicate.detail : specificReason ? storedReason : assigned.reason,
       };
     })
     .sort(comparePromotionRows);
@@ -212,6 +250,7 @@ export async function runPromotionBatch(input: {
   files: PromotionFiles;
   db: PromotionDatabase;
   extract?: (bytes: Uint8Array, mimeType: string) => Promise<ExtractedDocument>;
+  mode?: "automatic" | "manual";
 }): Promise<PromotionReport> {
   const itemIds = assertPromotionBatch(input.itemIds);
   const results: PromotionOutcome[] = [];
@@ -227,6 +266,7 @@ export async function runPromotionBatch(input: {
       files: input.files,
       db: input.db,
       extract: input.extract,
+      mode: input.mode ?? "automatic",
     });
     results.push(outcome);
 
@@ -254,6 +294,7 @@ async function promoteOne(input: {
   files: PromotionFiles;
   db: PromotionDatabase;
   extract?: (bytes: Uint8Array, mimeType: string) => Promise<ExtractedDocument>;
+  mode: "automatic" | "manual";
 }): Promise<PromotionOutcome> {
   const candidate = input.candidate;
 
@@ -353,6 +394,33 @@ async function promoteOne(input: {
       invoiceId: extractedDuplicate.invoiceId,
       extractionFailed: false,
       detail: extractedDuplicate.detail,
+    };
+  }
+
+  const relevance = classifyDocumentRelevance(extracted.text ?? "");
+  const hold = promotionHold({
+    mode: input.mode,
+    relevance,
+    supplierMatched: Boolean(candidate.supplierId),
+    supplierApproved: Boolean(candidate.supplierApproved),
+  });
+
+  if (hold) {
+    try {
+      await input.db.markDocument(candidate.itemId, hold.mark);
+    } catch (error) {
+      return failed(base, error instanceof Error ? error.message : "The document classification could not be saved.");
+    }
+
+    return {
+      ...base,
+      supplierName: draft.supplierName ?? candidate.supplierName,
+      invoiceNumber,
+      invoiceDate,
+      outcome: "skipped",
+      invoiceId: null,
+      extractionFailed: false,
+      detail: hold.detail,
     };
   }
 
@@ -529,21 +597,134 @@ async function promoteOne(input: {
   };
 }
 
+const PROMOTION_ITEM_COLUMNS =
+  "id, document_type, status, supplier_id, invoice_number, invoice_date, filename, gmail_message_id, gmail_attachment_id, detail";
+
+type SupplierDirectoryRow = { id: string; name: string; autoProcessing: boolean };
+
+type PromotionItemRow = {
+  id: string;
+  document_type: string;
+  status: string;
+  supplier_id: string | null;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  filename: string;
+  gmail_message_id: string;
+  gmail_attachment_id: string;
+  detail: string | null;
+  promotion_relevance: string | null;
+};
+
+async function loadSupplierDirectory(supabase: SupabaseClient) {
+  const withFlag = await supabase.from("suppliers").select("id, name, gmail_auto_processing_enabled");
+
+  if (withFlag.error && postgresColumnMissing(withFlag.error, "gmail_auto_processing_enabled")) {
+    const fallback = await supabase.from("suppliers").select("id, name");
+
+    return {
+      error: fallback.error,
+      suppliers: ((fallback.data ?? []) as Array<{ id: string; name: string }>).map((row) => ({
+        id: row.id,
+        name: row.name,
+        autoProcessing: false,
+      })),
+    };
+  }
+
+  return {
+    error: withFlag.error,
+    suppliers: (
+      (withFlag.data ?? []) as Array<{ id: string; name: string; gmail_auto_processing_enabled: boolean | null }>
+    ).map((row) => ({
+      id: row.id,
+      name: row.name,
+      autoProcessing: Boolean(row.gmail_auto_processing_enabled),
+    })),
+  };
+}
+
+async function loadPromotionItemRows(supabase: SupabaseClient, itemIds?: readonly string[]) {
+  const filtered = (columns: string) => {
+    const query = supabase.from("gmail_import_items").select(columns);
+
+    if (itemIds) {
+      return query.in("id", [...itemIds]);
+    }
+
+    return query
+      .or(
+        "and(document_type.eq.invoice,status.eq.stored),detail.ilike.Excluded as irrelevant%,detail.ilike.Needs manual classification%,detail.ilike.Marked as not a supplier invoice%"
+      )
+      .limit(1000);
+  };
+  const withRelevance = await filtered(`${PROMOTION_ITEM_COLUMNS}, promotion_relevance`);
+
+  if (withRelevance.error && postgresColumnMissing(withRelevance.error, "promotion_relevance")) {
+    const fallback = await filtered(PROMOTION_ITEM_COLUMNS);
+
+    return {
+      error: fallback.error,
+      items: ((fallback.data ?? []) as unknown as Omit<PromotionItemRow, "promotion_relevance">[]).map((row) => ({
+        ...row,
+        promotion_relevance: null,
+      })),
+    };
+  }
+
+  return {
+    error: withRelevance.error,
+    items: (withRelevance.data ?? []) as unknown as PromotionItemRow[],
+  };
+}
+
+function candidateFromItem(
+  item: PromotionItemRow,
+  file:
+    | {
+        original_filename?: string | null;
+        storage_path?: string | null;
+        checksum_sha256?: string | null;
+        mime_type?: string | null;
+        byte_size?: number | null;
+      }
+    | undefined,
+  suppliers: readonly SupplierDirectoryRow[]
+): PromotionCandidate {
+  const supplier = item.supplier_id ? suppliers.find((row) => row.id === item.supplier_id) : undefined;
+
+  return {
+    itemId: item.id,
+    documentType: item.document_type,
+    status: item.status,
+    supplierId: item.supplier_id,
+    supplierName: supplier?.name ?? null,
+    supplierApproved: Boolean(supplier?.autoProcessing),
+    relevance: storedDocumentRelevance({
+      promotionRelevance: item.promotion_relevance,
+      detail: item.detail,
+    }),
+    detail: item.detail,
+    invoiceNumber: item.invoice_number,
+    invoiceDate: item.invoice_date,
+    filename: file?.original_filename || item.filename,
+    gmailMessageId: item.gmail_message_id,
+    gmailAttachmentId: item.gmail_attachment_id,
+    storagePath: file?.storage_path ?? null,
+    checksumSha256: file?.checksum_sha256 ?? null,
+    mimeType: file?.mime_type ?? null,
+    byteSize: file?.byte_size ?? null,
+  };
+}
+
 export async function loadGmailPromotionPreview(supabase: SupabaseClient) {
   const [items, files, suppliers, invoices, invoiceFiles] = await Promise.all([
-    supabase
-      .from("gmail_import_items")
-      .select(
-        "id, document_type, status, supplier_id, invoice_number, invoice_date, filename, gmail_message_id, gmail_attachment_id"
-      )
-      .eq("document_type", PROMOTABLE_DOCUMENT)
-      .eq("status", PROMOTABLE_STATUS)
-      .limit(1000),
+    loadPromotionItemRows(supabase),
     supabase
       .from("gmail_import_files")
       .select("item_id, storage_path, checksum_sha256, mime_type, byte_size, original_filename")
       .limit(1000),
-    supabase.from("suppliers").select("id, name"),
+    loadSupplierDirectory(supabase),
     supabase
       .from("supplier_invoices")
       .select("id, supplier_id, invoice_number, invoice_date, gmail_import_item_id")
@@ -560,29 +741,10 @@ export async function loadGmailPromotionPreview(supabase: SupabaseClient) {
   }
 
   const filesByItem = new Map((files.data ?? []).map((file) => [file.item_id, file]));
-  const supplierNames = new Map((suppliers.data ?? []).map((supplier) => [supplier.id, supplier.name]));
   const checksumByInvoice = new Map(
     (invoiceFiles.data ?? []).map((file) => [file.invoice_id, file.checksum_sha256])
   );
-  const candidates = (items.data ?? []).map((item): PromotionCandidate => {
-    const file = filesByItem.get(item.id);
-    return {
-      itemId: item.id,
-      documentType: item.document_type,
-      status: item.status,
-      supplierId: item.supplier_id,
-      supplierName: item.supplier_id ? (supplierNames.get(item.supplier_id) ?? null) : null,
-      invoiceNumber: item.invoice_number,
-      invoiceDate: item.invoice_date,
-      filename: file?.original_filename || item.filename,
-      gmailMessageId: item.gmail_message_id,
-      gmailAttachmentId: item.gmail_attachment_id,
-      storagePath: file?.storage_path ?? null,
-      checksumSha256: file?.checksum_sha256 ?? null,
-      mimeType: file?.mime_type ?? null,
-      byteSize: file?.byte_size ?? null,
-    };
-  });
+  const candidates = items.items.map((item) => candidateFromItem(item, filesByItem.get(item.id), suppliers.suppliers));
 
   return {
     ok: true as const,
@@ -605,20 +767,16 @@ export async function promoteGmailInvoiceBatch(input: {
   userId: string;
   itemIds: readonly string[];
   catalog: PromotionCatalog;
+  mode?: "automatic" | "manual";
 }) {
   const itemIds = assertPromotionBatch(input.itemIds);
   const [items, files, suppliers, invoices, invoiceFiles] = await Promise.all([
-    input.supabase
-      .from("gmail_import_items")
-      .select(
-        "id, document_type, status, supplier_id, invoice_number, invoice_date, filename, gmail_message_id, gmail_attachment_id"
-      )
-      .in("id", itemIds),
+    loadPromotionItemRows(input.supabase, itemIds),
     input.supabase
       .from("gmail_import_files")
       .select("item_id, storage_path, checksum_sha256, mime_type, byte_size, original_filename")
       .in("item_id", itemIds),
-    input.supabase.from("suppliers").select("id, name"),
+    loadSupplierDirectory(input.supabase),
     input.supabase
       .from("supplier_invoices")
       .select("id, supplier_id, invoice_number, invoice_date, gmail_import_item_id")
@@ -632,26 +790,7 @@ export async function promoteGmailInvoiceBatch(input: {
   }
 
   const filesByItem = new Map((files.data ?? []).map((file) => [file.item_id, file]));
-  const supplierNames = new Map((suppliers.data ?? []).map((supplier) => [supplier.id, supplier.name]));
-  const candidates = (items.data ?? []).map((item): PromotionCandidate => {
-    const file = filesByItem.get(item.id);
-    return {
-      itemId: item.id,
-      documentType: item.document_type,
-      status: item.status,
-      supplierId: item.supplier_id,
-      supplierName: item.supplier_id ? (supplierNames.get(item.supplier_id) ?? null) : null,
-      invoiceNumber: item.invoice_number,
-      invoiceDate: item.invoice_date,
-      filename: file?.original_filename || item.filename,
-      gmailMessageId: item.gmail_message_id,
-      gmailAttachmentId: item.gmail_attachment_id,
-      storagePath: file?.storage_path ?? null,
-      checksumSha256: file?.checksum_sha256 ?? null,
-      mimeType: file?.mime_type ?? null,
-      byteSize: file?.byte_size ?? null,
-    };
-  });
+  const candidates = items.items.map((item) => candidateFromItem(item, filesByItem.get(item.id), suppliers.suppliers));
   const checksumByInvoice = new Map(
     (invoiceFiles.data ?? []).map((file) => [file.invoice_id, file.checksum_sha256])
   );
@@ -672,6 +811,7 @@ export async function promoteGmailInvoiceBatch(input: {
     userId: input.userId,
     files: supabasePromotionFiles(input.supabase),
     db: supabasePromotionDatabase(input.supabase),
+    mode: input.mode,
   });
 }
 
@@ -730,6 +870,33 @@ function supabasePromotionDatabase(supabase: SupabaseClient): PromotionDatabase 
       }
 
       await supabase.from("supplier_invoice_events").insert(rows);
+    },
+    async markDocument(itemId, update) {
+      const withRelevance = await supabase
+        .from("gmail_import_items")
+        .update({
+          status: update.status,
+          detail: update.detail,
+          promotion_relevance: update.relevance,
+        })
+        .eq("id", itemId);
+
+      if (withRelevance.error && postgresColumnMissing(withRelevance.error, "promotion_relevance")) {
+        const fallback = await supabase
+          .from("gmail_import_items")
+          .update({ status: update.status, detail: update.detail })
+          .eq("id", itemId);
+
+        if (fallback.error) {
+          throw new Error("The document classification could not be saved.");
+        }
+
+        return;
+      }
+
+      if (withRelevance.error) {
+        throw new Error("The document classification could not be saved.");
+      }
     },
     async listLines(invoiceId) {
       const { data, error } = await supabase
@@ -834,6 +1001,47 @@ function comparePromotionRows(left: PromotionPreviewRow, right: PromotionPreview
   }
 
   return left.filename.localeCompare(right.filename);
+}
+
+function promotionHold(input: {
+  mode: "automatic" | "manual";
+  relevance: ReturnType<typeof classifyDocumentRelevance>;
+  supplierMatched: boolean;
+  supplierApproved: boolean;
+}) {
+  if (input.relevance.relevance === "irrelevant") {
+    return {
+      detail: input.relevance.reason,
+      mark: {
+        status: "skipped" as const,
+        detail: input.relevance.reason,
+        relevance: "irrelevant" as const,
+      },
+    };
+  }
+
+  if (input.mode === "manual") {
+    return null;
+  }
+
+  if (!input.supplierMatched || !input.supplierApproved || input.relevance.relevance !== "supplier_invoice") {
+    const detail = !input.supplierMatched
+      ? "Needs manual classification. The supplier is not matched."
+      : !input.supplierApproved
+        ? "Needs manual classification. This supplier is not approved for automatic processing."
+        : input.relevance.reason;
+
+    return {
+      detail,
+      mark: {
+        status: "stored" as const,
+        detail,
+        relevance: "needs_review" as const,
+      },
+    };
+  }
+
+  return null;
 }
 
 function summarise(results: readonly PromotionOutcome[]): PromotionReport {
