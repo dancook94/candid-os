@@ -1227,4 +1227,310 @@ describe("supplier invoice phase 1", () => {
     assert.equal(pricedByWidth.retain, false);
     assert.equal("code" in pricedByWidth ? pricedByWidth.code : "", "sku");
   });
+
+  it("reads Antalis, PPB and Papergraphics layouts without guessing a unit or a product", () => {
+    const catalogueSuppliers = [
+      ...suppliers,
+      { id: "ppb", name: "PPB", normalizedName: "ppb" },
+      { id: "papergraphics", name: "Papergraphics", normalizedName: "papergraphics" },
+    ];
+    const products: InvoiceMatchProduct[] = [
+      {
+        id: "foam-5mm",
+        supplierId: "antalis",
+        sku: null,
+        description: "Foamalite, XPRESS, Filmed, white 5.000mm 1220mm x 2440mm",
+        materialName: "Foamalite 5mm 1220 x 2440",
+        purchaseUnit: "sheet",
+        thicknessMm: 5,
+        colour: "White",
+        widthMm: 1220,
+        heightMm: 2440,
+        lengthMm: null,
+        currentPrice: 23.35,
+        currentPriceUnit: "sheet",
+        currentPriceId: "price-foam",
+        currentEffectiveDate: "2026-10-01",
+      },
+      {
+        id: "correx-4mm",
+        supplierId: "antalis",
+        sku: null,
+        description: "Correx®, White, matt, Long Flute, White 4.000mm 1524mm x 3050mm",
+        materialName: "Correx 4mm 1524 x 3050",
+        purchaseUnit: "sheet",
+        thicknessMm: 4,
+        colour: "White",
+        widthMm: 1524,
+        heightMm: 3050,
+        lengthMm: null,
+        currentPrice: 12,
+        currentPriceUnit: "sheet",
+        currentPriceId: "price-correx",
+        currentEffectiveDate: "2026-10-01",
+      },
+      {
+        id: "bubble",
+        supplierId: "antalis",
+        sku: null,
+        description: "Air Bubble Film, Jiffy Small Bubble Wrap 1500 mm x 100.00 m, 1 ply, Clear, 1 reel",
+        materialName: "Jiffy bubble wrap 1500mm",
+        purchaseUnit: "roll",
+        thicknessMm: null,
+        colour: "Clear",
+        widthMm: 1500,
+        heightMm: null,
+        lengthMm: 100000,
+        currentPrice: 33.29,
+        currentPriceUnit: "roll",
+        currentPriceId: "price-bubble",
+        currentEffectiveDate: "2026-10-01",
+      },
+      {
+        id: "hips-2440",
+        supplierId: "ppb",
+        sku: null,
+        description: "WHITE 7231 GLOSS/MATT HIPS WITH FILM (ON GLOSS SIDE) 1MM BULK PACK 2440mm x 1220mm",
+        materialName: "HIPS 1mm 2440 x 1220",
+        purchaseUnit: "sheet",
+        thicknessMm: 1,
+        colour: "White",
+        widthMm: 2440,
+        heightMm: 1220,
+        lengthMm: null,
+        currentPrice: 26,
+        currentPriceUnit: "sheet",
+        currentPriceId: "price-hips",
+        currentEffectiveDate: "2026-10-01",
+      },
+      {
+        id: "magenta",
+        supplierId: "papergraphics",
+        sku: null,
+        description: "HP/4UV77A No. 832 Latex Magenta Ink 1000ml",
+        materialName: "HP 832 Magenta 1000ml",
+        purchaseUnit: "unit",
+        thicknessMm: null,
+        colour: null,
+        widthMm: null,
+        heightMm: null,
+        lengthMm: null,
+        currentPrice: 95,
+        currentPriceUnit: "unit",
+        currentPriceId: "price-magenta",
+        currentEffectiveDate: "2026-10-01",
+      },
+    ];
+    const draftFor = (text: string) =>
+      buildInvoiceDraft({
+        text,
+        extractionStatus: "extracted",
+        suppliers: catalogueSuppliers,
+        aliases,
+        products,
+        mappings: [],
+        ignoreRules: [],
+      });
+
+    const antalis = draftFor(`Antalis Ltd
+Invoice: 6701404665
+Tax Date: 28.07.2026
+Item Material Customer Reference Weight Quantity Unit Price Amount(GBP)
+Description
+Foamalite, XPRESS, Filmed, white 10.000 KG 2 SH
+10 609745
+5.000mm
+1220mm x 2440mm
+Total Net price 23.35 GBP/1 SH 46.70
+Correx®, White, matt, Long Flute, White 12.000 KG 1 SH
+20 608408
+4.000mm
+1524mm x 3050mm
+Total Net price 11.21 GBP/1 SH 11.21
+Air Bubble Film, Jiffy Small Bubble Wrap 9.000 KG 2 BL
+30 611473
+1500 mm x 100.00 m, 1 ply, Clear, 1 reel
+Total Net price 33.29 GBP/1 BL 66.58
+Xerox, Premium NeverTear 4.000 KG 4 PK
+40 617981
+Total Net price 929.84 GBP/1000 SH 371.94
+Small Order Charge GBP 25.00
+Total Net Amount GBP 521.43
+VAT 20.00% GBP 104.29
+Total Amount GBP 625.72`);
+
+    assert.equal(antalis.supplierId, "antalis");
+    assert.equal(antalis.invoiceNumber, "6701404665");
+    assert.equal(antalis.invoiceDate, "2026-07-28");
+    assert.equal(antalis.warnings.some((warning) => /subtotal|line totals/i.test(warning)), false);
+    assert.deepEqual(
+      antalis.lines.map((line) => ({
+        unit: line.rawUnit,
+        price: line.rawUnitPrice,
+        total: line.rawLineTotal,
+        status: line.reviewStatus,
+        product: line.matchedProductId,
+      })),
+      [
+        { unit: "sheet", price: 23.35, total: 46.7, status: "processed", product: "foam-5mm" },
+        { unit: "sheet", price: 11.21, total: 11.21, status: "price_change", product: "correx-4mm" },
+        { unit: "BL", price: 33.29, total: 66.58, status: "needs_review", product: "bubble" },
+        { unit: "PK", price: null, total: 371.94, status: "needs_review", product: null },
+        { unit: null, price: 25, total: 25, status: "unmatched", product: null },
+      ]
+    );
+    assert.match(antalis.lines[2]?.note ?? "", /not recognised/);
+    assert.equal(antalis.lines[3]?.reviewStatus === "processed", false);
+
+    const priceKept = historicalPriceDecision({
+      extractionStatus: "extracted",
+      invoiceDate: antalis.invoiceDate,
+      supplierId: "antalis",
+      line: antalis.lines[1],
+      product: products[1],
+      productActive: true,
+      supplierProducts: products,
+      mappings: [],
+      prices: [
+        {
+          id: "price-correx",
+          price: 12,
+          priceUnit: "sheet",
+          effectiveDate: "2026-10-01",
+          approvedAt: "2026-10-01T00:00:00.000Z",
+          createdAt: "2026-10-01T00:00:00.000Z",
+        },
+      ],
+    });
+    assert.equal(priceKept.retain, false);
+    assert.equal(products[1]?.currentPrice, 12);
+
+    const duplicate = findDuplicateInvoice({
+      checksumSha256: "new-file",
+      supplierId: antalis.supplierId,
+      invoiceNumber: antalis.invoiceNumber,
+      invoiceDate: antalis.invoiceDate,
+      existing: [
+        {
+          id: "stored-antalis",
+          supplierId: "antalis",
+          invoiceNumber: "6701404665",
+          invoiceDate: "2026-07-28",
+          checksumSha256: "older-file",
+        },
+      ],
+    });
+    assert.equal(duplicate?.invoiceId, "stored-antalis");
+    const differentDate = findDuplicateInvoice({
+      checksumSha256: "new-file",
+      supplierId: antalis.supplierId,
+      invoiceNumber: antalis.invoiceNumber,
+      invoiceDate: antalis.invoiceDate,
+      existing: [
+        {
+          id: "other-date",
+          supplierId: "antalis",
+          invoiceNumber: "6701404665",
+          invoiceDate: "2026-08-01",
+          checksumSha256: "older-file",
+        },
+      ],
+    });
+    assert.equal(differentDate, null);
+
+    const ppb = draftFor(`PPB Sales Invoice
+PPB Ltd
+Invoice Number 861573
+Cray Road Invoice Date 18/09/2026
+Line Item Code / Product Description Quantity Price VAT Code
+1 STYWH-1000-2440-1220 20 520.00 O1
+WHITE 7231 GLOSS/MATT HIPS WITH FILM (ON GLOSS SIDE)
+1MM BULK PACK 2440mm x 1220mm
+Net £ 520.00
+VAT £ 104.00
+Total £ 624.00`);
+    assert.equal(ppb.supplierId, "ppb");
+    assert.equal(ppb.invoiceNumber, "861573");
+    assert.equal(ppb.invoiceDate, "2026-09-18");
+    assert.equal(ppb.lines[0]?.rawUnit, null);
+    assert.equal(ppb.lines[0]?.rawUnitPrice, 26);
+    assert.equal(ppb.lines[0]?.reviewStatus, "processed");
+    assert.equal(ppb.lines[0]?.matchedProductId, "hips-2440");
+    assert.match(ppb.lines[0]?.note ?? "", /catalogue unit/);
+
+    const parcel = draftFor(`PPB Ltd
+Invoice Number 862537
+Invoice Date 08/10/2026
+Line Item Code / Product Description Quantity Price VAT Code
+1 PACKA-0001-0001-0001 1 0.00 O1
+PACKAGE TO SEND AS PER INSTRUCTIONS
+Net £ 0.00
+VAT £ 0.00
+Total £ 0.00`);
+    assert.equal(parcel.invoiceNumber, "862537");
+    assert.equal(parcel.lines[0]?.matchedProductId, null);
+    assert.equal(parcel.lines[0]?.reviewStatus, "unmatched");
+    assert.equal(parcel.lines[0]?.rawLineTotal, 0);
+
+    const paper = draftFor(`Papergraphics Limited
+Invoice Number: 01SI-2368836-20
+Invoice: 01SI-2368836-2026
+Date: 13.08.2026
+Line Product Description Quantity Net Price Tax Rate Net Value
+20 HP/4UV77A No. 832 Latex Magenta Ink 2 Each 95.00 GBP / 1 20 % 190.00 GBP
+1000ml Each
+10 HP/P2V72A Hp 730 Ink Cartridge Grey - 1 Each 130.00 GBP / 1 20 % 130.00 GBP
+300ml Each
+Total Item Net Value 320.00 GBP
+Freight 21.81 GBP
+Total 341.81 GBP`);
+    assert.equal(paper.supplierId, "papergraphics");
+    assert.equal(paper.invoiceNumber, "01SI-2368836-20");
+    assert.equal(paper.invoiceDate, "2026-08-13");
+    assert.equal(paper.subtotal, 341.81);
+    assert.equal(paper.warnings.some((warning) => /line totals/i.test(warning)), false);
+    assert.deepEqual(
+      paper.lines.map((line) => ({
+        description: line.rawDescription,
+        unit: line.rawUnit,
+        status: line.reviewStatus,
+        product: line.matchedProductId,
+      })),
+      [
+        {
+          description: "HP/4UV77A No. 832 Latex Magenta Ink 1000ml",
+          unit: "Each",
+          status: "processed",
+          product: "magenta",
+        },
+        {
+          description: "HP/P2V72A Hp 730 Ink Cartridge Grey - 300ml",
+          unit: "Each",
+          status: "unmatched",
+          product: null,
+        },
+        { description: "Freight", unit: null, status: "unmatched", product: null },
+      ]
+    );
+
+    const flooring = parseInvoiceText(`Papergraphics Limited
+Invoice Number: 01SI-2372386-20
+Date: 17.09.2026
+Line Product Description Quantity Net Price Tax Rate Net Value
+10 DF/ Digiflor Tactile Display Flooring 4 1 Roll 336.27 GBP / 1 20 % 1,345.08 GBP
+DFL1/220020/7 1 Roll
+6/1
+Total Item Net Value 1,345.08 GBP
+Freight 108.00 GBP
+Total 1,743.70 GBP`);
+    assert.equal(flooring.invoiceNumber, "01SI-2372386-20");
+    assert.equal(flooring.subtotal, 1453.08);
+    assert.equal(flooring.warnings.some((warning) => /line totals/i.test(warning)), false);
+    assert.equal(flooring.lines[0]?.rawQuantity, 4);
+    assert.equal(flooring.lines[0]?.rawUnit, "Roll");
+    assert.equal(flooring.lines[0]?.rawUnitPrice, 336.27);
+    assert.equal(flooring.lines[0]?.rawLineTotal, 1345.08);
+    assert.equal(flooring.lines[1]?.rawDescription, "Freight");
+    assert.equal(flooring.lines[1]?.rawLineTotal, 108);
+  });
 });
