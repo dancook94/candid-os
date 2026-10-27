@@ -175,7 +175,7 @@ function parseQuantityLines(sourceLines: string[]): ParsedInvoiceLine[] {
               rawDescription: description,
               rawSupplierSku: splitSku(description).sku,
               rawQuantity: quantity,
-              rawUnit: null,
+              rawUnit: describedPurchaseUnit(description),
               rawUnitPrice: unitPrice,
               rawLineTotal: lineTotal,
               rawTax: null,
@@ -357,21 +357,70 @@ function readInvoiceColumns(sourceLines: string[]) {
 
     const tokens = sourceLines[index + 1].split(/\s+/);
 
-    if (tokens.length !== columns.length) {
-      continue;
+    if (tokens.length === columns.length) {
+      const invoiceNumber = acceptInvoiceNumber(tokens[columns.indexOf("invoiceNumber")] ?? "");
+      const invoiceDate = parseInvoiceDate(tokens[columns.indexOf("invoiceDate")] ?? null);
+
+      if (invoiceNumber && invoiceDate) {
+        return { invoiceNumber, invoiceDate };
+      }
     }
 
-    const invoiceNumber = acceptInvoiceNumber(tokens[columns.indexOf("invoiceNumber")] ?? "");
-    const invoiceDate = parseInvoiceDate(tokens[columns.indexOf("invoiceDate")] ?? null);
+    const anchored = anchorInvoiceNumberAndDate(columns, tokens);
 
-    if (!invoiceNumber || !invoiceDate) {
-      continue;
+    if (anchored) {
+      return anchored;
     }
-
-    return { invoiceNumber, invoiceDate };
   }
 
   return null;
+}
+
+function anchorInvoiceNumberAndDate(
+  columns: Array<"invoiceNumber" | "invoiceDate" | "other">,
+  tokens: string[]
+) {
+  if (columns[0] !== "invoiceNumber" || columns[1] !== "invoiceDate" || tokens.length < 3) {
+    return null;
+  }
+
+  const invoiceNumber = acceptInvoiceNumber(tokens[0] ?? "");
+  const invoiceDate = parseInvoiceDate(tokens[1] ?? null);
+  const closingDate = parseInvoiceDate(tokens[tokens.length - 1] ?? null);
+
+  if (!invoiceNumber || !invoiceDate || !closingDate) {
+    return null;
+  }
+
+  return { invoiceNumber, invoiceDate };
+}
+
+export function describedPurchaseUnit(description: string) {
+  const roll =
+    /\b\d+(?:\.\d+)?\s*m\s*[x×]\s*\d+(?:\.\d+)?\s*mm\b/i.test(description) ||
+    /\b\d+(?:\.\d+)?\s*mm\s*[x×]\s*\d+(?:\.\d+)?\s*m\b/i.test(description) ||
+    /\b\d+(?:\.\d+)?\s*yds?\s*[x×]\s*\d{3,4}(?:\.\d+)?(?:\s*mm)?\b/i.test(description) ||
+    rollLengthAndWidth(description);
+  const widths = [...description.matchAll(/\b\d{3,4}\s*mm\b/gi)];
+  const linear = !roll && widths.length === 1 && !/[x×]/i.test(description);
+
+  if (roll === linear) {
+    return null;
+  }
+
+  return roll ? "roll" : "linear_metre";
+}
+
+function rollLengthAndWidth(description: string) {
+  const match = description.match(/\b(\d{1,3}(?:\.\d+)?)\s*[x×]\s*(\d{3,4})\b/i);
+
+  if (!match || /(?:m|mm|yds?)\s*$/i.test(match[0])) {
+    return false;
+  }
+
+  const length = Number(match[1]);
+  const width = Number(match[2]);
+  return length > 0 && length <= 150 && width >= 500 && width <= 3200;
 }
 
 function columnKeys(line: string) {
