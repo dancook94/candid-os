@@ -388,3 +388,25 @@ function portsFor(
   };
   return ports;
 }
+
+test("Innotech, Quality Print Services and BMG stay in separate sealed scopes and the BMG copy stays out", () => {
+  const innotech = [
+    "03aab3c9-d609-409a-b136-340e604c0111",
+    "4a323176-7396-4c12-a20c-eaf650721806",
+    "e4f339f6-14a5-4be9-91ea-5d9d8eb153d2",
+  ];
+  const qualityPrint = [
+    "6f1abd0b-01ca-4020-a2db-33f657b030d1",
+    "a5007536-4e40-4341-a808-f1fc9ce052b2",
+  ];
+  const bmg = ["59303321-50dd-4631-a1d7-6a0cb74b3fc8"];
+  const bmgDuplicate = "cf9fc4af-717d-442d-ab4f-2acddea3b64d";
+
+  assert.equal(historicalRunRequest(innotech)?.invoiceLimit, 3);
+  assert.equal(historicalRunRequest(innotech)?.eligibleAtStart, 3);
+  assert.equal(historicalRunRequest(qualityPrint)?.invoiceLimit, 2);
+  assert.equal(historicalRunRequest(bmg)?.invoiceLimit, 1);
+  assert.equal(historicalRunRequest(bmg)?.batchSize, HISTORICAL_TICK_BATCH);
+  assert.equal(bmg.includes(bmgDuplicate), false);
+  assert.equal(GMAIL_ONGOING_SYNC_ENABLED, false);
+});
