@@ -14,6 +14,7 @@ import {
   formatSignedPercent,
 } from "@/lib/materials/invoices/money";
 import { priceApprovalConsequence } from "@/lib/materials/invoices/price-change";
+import { supplierSkuReviewState } from "@/lib/materials/invoices/supplier-sku";
 import { PURCHASE_UNIT_LABELS } from "@/lib/materials/units";
 import {
   REVIEW_STATUS_LABELS,
@@ -102,6 +103,7 @@ export function InvoiceLineList({
   supplierChosen,
   supplierName,
   invoiceDate,
+  invoiceIgnored,
 }: {
   invoiceId: string;
   lines: InvoiceDetailLine[];
@@ -109,9 +111,11 @@ export function InvoiceLineList({
   supplierChosen: boolean;
   supplierName: string;
   invoiceDate: string | null;
+  invoiceIgnored: boolean;
 }) {
   const exceptions = lines.filter((line) => EXCEPTION_STATUSES.has(line.reviewStatus));
   const settled = lines.filter((line) => !EXCEPTION_STATUSES.has(line.reviewStatus));
+  const skuSuggestions = settled.filter((line) => line.suggestedSupplierSku).length;
 
   return (
     <div className="space-y-8">
@@ -132,6 +136,7 @@ export function InvoiceLineList({
               supplierChosen={supplierChosen}
               supplierName={supplierName}
               invoiceDate={invoiceDate}
+              invoiceIgnored={invoiceIgnored}
             />
           ))}
         </div>
@@ -142,10 +147,13 @@ export function InvoiceLineList({
           <summary className="cursor-pointer px-5 py-4 text-sm font-medium">
             {settled.filter((line) => line.reviewStatus === "processed").length} matched,{" "}
             {settled.filter((line) => line.reviewStatus === "ignored").length} ignored
+            {skuSuggestions > 0
+              ? ` · ${skuSuggestions} supplier SKU${skuSuggestions === 1 ? "" : "s"} to confirm`
+              : ""}
           </summary>
           <div className="space-y-3 border-t border-border/70 px-5 py-4">
             {settled.map((line) => (
-              <SettledLine key={line.id} line={line} />
+              <SettledLine key={line.id} invoiceId={invoiceId} invoiceIgnored={invoiceIgnored} line={line} />
             ))}
           </div>
         </details>
@@ -163,6 +171,7 @@ function InvoiceLineCard({
   supplierChosen,
   supplierName,
   invoiceDate,
+  invoiceIgnored,
 }: {
   invoiceId: string;
   line: InvoiceDetailLine;
@@ -170,6 +179,7 @@ function InvoiceLineCard({
   supplierChosen: boolean;
   supplierName: string;
   invoiceDate: string | null;
+  invoiceIgnored: boolean;
 }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
@@ -255,6 +265,7 @@ function InvoiceLineCard({
           {line.matchMethod ? ` · ${line.matchMethod}` : ""}
         </p>
       ) : null}
+      <SupplierSkuSuggestion invoiceId={invoiceId} invoiceIgnored={invoiceIgnored} line={line} />
       <form
         className="mt-4 grid gap-3 sm:grid-cols-2"
         onSubmit={(event) => {
@@ -364,7 +375,15 @@ function InvoiceLineCard({
   );
 }
 
-function SettledLine({ line }: { line: InvoiceDetailLine }) {
+function SettledLine({
+  invoiceId,
+  invoiceIgnored,
+  line,
+}: {
+  invoiceId: string;
+  invoiceIgnored: boolean;
+  line: InvoiceDetailLine;
+}) {
   return (
     <div className="text-sm">
       <p>
@@ -377,6 +396,80 @@ function SettledLine({ line }: { line: InvoiceDetailLine }) {
       {line.decisionSummary ? (
         <p className="mt-1 text-muted-foreground">{line.decisionSummary}</p>
       ) : null}
+      <SupplierSkuSuggestion invoiceId={invoiceId} invoiceIgnored={invoiceIgnored} line={line} />
+    </div>
+  );
+}
+
+function SupplierSkuSuggestion({
+  invoiceId,
+  invoiceIgnored,
+  line,
+}: {
+  invoiceId: string;
+  invoiceIgnored: boolean;
+  line: InvoiceDetailLine;
+}) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const review = supplierSkuReviewState({
+    processingStatus: invoiceIgnored ? "ignored" : null,
+    approvedSku: line.approvedSupplierSku,
+    suggestedSku: line.suggestedSupplierSku,
+  });
+
+  if (!review.approvedSku && !review.suggestedSku) {
+    return null;
+  }
+
+  if (review.approvedSku) {
+    return (
+      <p className="mt-3 text-sm">
+        Approved supplier SKU: <span className="font-medium">{review.approvedSku}</span>
+      </p>
+    );
+  }
+
+  async function confirm() {
+    setPending(true);
+    setError(null);
+    const response = await fetch(
+      `/api/admin/materials/invoices/${invoiceId}/lines/${line.id}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "confirm_supplier_sku",
+          productId: line.matchedProductId,
+          sku: review.suggestedSku,
+        }),
+      }
+    );
+    const payload = await response.json().catch(() => null);
+    setPending(false);
+
+    if (!response.ok) {
+      setError(payload?.error ?? "The supplier SKU could not be confirmed.");
+      return;
+    }
+
+    router.refresh();
+  }
+
+  return (
+    <div className="mt-3 rounded-xl border border-border/70 bg-muted/40 p-3">
+      <p>
+        Suggested supplier SKU: <span className="font-medium">{review.suggestedSku}</span>
+      </p>
+      <p className="mt-1 text-muted-foreground">
+        This is the SKU on the invoice line. Confirming saves it on the matched product. The
+        approved price and material specification stay as they are.
+      </p>
+      <Button type="button" className="mt-3" disabled={pending} onClick={() => void confirm()}>
+        {pending ? "Saving…" : "Confirm supplier SKU"}
+      </Button>
+      {error ? <p className="mt-2 text-red-700">{error}</p> : null}
     </div>
   );
 }

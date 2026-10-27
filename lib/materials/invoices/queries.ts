@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { normalizeSupplierDescription } from "@/lib/materials/identity";
 import { isMaterialsSchemaMissing } from "@/lib/materials/write-error";
 import { formatPriceDecision } from "@/lib/materials/invoices/price-change";
+import { catalogueSku, supplierSkuSuggestion } from "@/lib/materials/invoices/supplier-sku";
 import { normalizePurchaseUnit } from "@/lib/materials/invoices/match";
 import { compareApprovedPrice } from "@/lib/materials/invoices/money";
 import { selectCurrentApprovedPrice } from "@/lib/materials/pricing";
@@ -189,6 +190,17 @@ export async function loadInvoiceMatchCatalog(supabase: SupabaseClient) {
         normalizedDescription: row.normalized_description,
       })
     ),
+    prices: [...pricesByProduct.entries()].flatMap(([productId, rows]) =>
+      rows.map((row) => ({
+        productId,
+        id: row.id,
+        price: row.price,
+        priceUnit: row.priceUnit,
+        effectiveDate: row.effectiveDate,
+        approvedAt: row.approvedAt,
+        createdAt: row.createdAt,
+      }))
+    ),
     existingInvoices: (invoices.data ?? []).map(
       (row): ExistingInvoiceRef => ({
         id: row.id,
@@ -311,6 +323,8 @@ export type InvoiceDetailLine = {
     percent: number;
     priceUnit: PurchaseUnit;
   } | null;
+  suggestedSupplierSku: string | null;
+  approvedSupplierSku: string | null;
 };
 
 export async function loadInvoiceDetail(supabase: SupabaseClient, invoiceId: string) {
@@ -379,6 +393,21 @@ export async function loadInvoiceDetail(supabase: SupabaseClient, invoiceId: str
           event.action === "price_change_rejected" ||
           event.action === "price_change_queried")
     );
+    const suggestion = supplierSkuSuggestion({
+      processingStatus: invoice.data.processing_status,
+      supplierId: invoice.data.supplier_id,
+      description: row.raw_description,
+      rawSupplierSku: row.raw_supplier_sku,
+      unit: row.reviewed_unit ?? row.raw_unit,
+      matchConfidence: row.match_confidence as MatchConfidence | null,
+      matchMethod: row.match_method as MatchMethod | null,
+      matchedProductId: row.matched_supplier_product_id,
+      product,
+      supplierProducts: catalog.products.filter(
+        (item) => item.supplierId === invoice.data.supplier_id
+      ),
+      mappings: catalog.mappings,
+    });
 
     return {
       id: row.id,
@@ -408,6 +437,9 @@ export async function loadInvoiceDetail(supabase: SupabaseClient, invoiceId: str
       mathsWarning: row.maths_warning,
       internalNote: row.internal_note,
       comparison,
+      suggestedSupplierSku:
+        invoice.data.processing_status === "ignored" || !suggestion.ok ? null : suggestion.sku,
+      approvedSupplierSku: catalogueSku(product?.sku),
     };
   });
 

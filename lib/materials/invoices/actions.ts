@@ -23,6 +23,7 @@ import {
 } from "@/lib/materials/invoices/model";
 import { isBlockedSupplierName } from "@/lib/materials/invoices/supplier";
 import { loadInvoiceMatchCatalog } from "@/lib/materials/invoices/queries";
+import { supplierSkuSuggestion } from "@/lib/materials/invoices/supplier-sku";
 import { postgresColumnMissing } from "@/lib/materials/write-error";
 
 const MAX_BYTES = 15 * 1024 * 1024;
@@ -620,7 +621,7 @@ export async function reviewInvoiceLine(
 
   const { data: invoice } = await access.supabase
     .from("supplier_invoices")
-    .select("id, supplier_id, extraction_status, extraction_warnings, invoice_date")
+    .select("id, supplier_id, extraction_status, extraction_warnings, invoice_date, processing_status")
     .eq("id", invoiceId)
     .maybeSingle();
   const { data: line } = await access.supabase
@@ -638,6 +639,10 @@ export async function reviewInvoiceLine(
 
   if (action === "confirm_match") {
     return confirmLineMatch(access, invoice, line, catalog, body);
+  }
+
+  if (action === "confirm_supplier_sku") {
+    return confirmSupplierSku(access, invoice, line, catalog, body);
   }
 
   if (action === "ignore") {
@@ -859,6 +864,84 @@ export async function addInvoiceLine(
   });
   await refreshProcessingStatus(access.supabase, invoiceId);
   refreshInvoicePages(invoiceId);
+  return { ok: true as const };
+}
+
+async function confirmSupplierSku(
+  access: { supabase: SupabaseClient; userId: string },
+  invoice: { id: string; supplier_id: string | null; processing_status?: string | null },
+  line: {
+    id: string;
+    raw_description: string;
+    raw_supplier_sku: string | null;
+    raw_unit: string | null;
+    reviewed_unit: string | null;
+    match_confidence: string | null;
+    match_method: string | null;
+    matched_supplier_product_id: string | null;
+  },
+  catalog: Awaited<ReturnType<typeof loadInvoiceMatchCatalog>> & { ok: true },
+  body: Record<string, unknown>
+) {
+  const productId = textValue(body.productId);
+  const requestedSku = textValue(body.sku);
+
+  if (!isUuid(productId) || !requestedSku) {
+    return { ok: false as const, status: 400, error: "Reload this invoice before confirming the SKU." };
+  }
+
+  const product = catalog.products.find((item) => item.id === productId) ?? null;
+  const suggestion = supplierSkuSuggestion({
+    processingStatus: invoice.processing_status ?? null,
+    supplierId: invoice.supplier_id,
+    description: line.raw_description,
+    rawSupplierSku: line.raw_supplier_sku,
+    unit: line.reviewed_unit ?? line.raw_unit,
+    matchConfidence: line.match_confidence as "high" | "medium" | "low" | null,
+    matchMethod: line.match_method as
+      | "sku"
+      | "description"
+      | "mapping"
+      | "specification"
+      | "fuzzy"
+      | "manual"
+      | null,
+    matchedProductId: line.matched_supplier_product_id,
+    product,
+    supplierProducts: catalog.products.filter((item) => item.supplierId === invoice.supplier_id),
+    mappings: catalog.mappings,
+  });
+
+  if (!suggestion.ok || suggestion.sku !== requestedSku || product?.id !== productId) {
+    return {
+      ok: false as const,
+      status: 400,
+      error:
+        suggestion.ok
+          ? "This invoice line cannot confirm a supplier SKU. Reload the invoice and try again."
+          : suggestion.code === "ignored"
+            ? "An ignored invoice cannot confirm a supplier SKU."
+            : "This invoice line cannot confirm a supplier SKU. Reload the invoice and try again.",
+    };
+  }
+
+  const { error } = await access.supabase.rpc("confirm_supplier_sku", {
+    p_invoice_line_id: line.id,
+    p_expected_product_id: productId,
+    p_expected_sku: suggestion.sku,
+    p_actor_id: access.userId,
+  });
+
+  if (error) {
+    const message = (error.message || "The supplier SKU could not be confirmed.")
+      .replace(/^.*ERROR:\s*/i, "")
+      .split("\n")[0];
+    const denied = /not allowed|not an approved administrator|signed-in administrator/i.test(message);
+    return { ok: false as const, status: denied ? 403 : 400, error: message };
+  }
+
+  refreshInvoicePages(invoice.id);
+  revalidatePath("/admin/materials");
   return { ok: true as const };
 }
 

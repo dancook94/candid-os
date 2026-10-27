@@ -8,16 +8,19 @@ import { promotionQueue, storedDocumentRelevance, classifyDocumentRelevance } fr
 import { findDuplicateInvoice, type ExistingInvoiceRef } from "@/lib/materials/invoices/duplicate";
 import { buildInvoiceDraft } from "@/lib/materials/invoices/draft";
 import { extractInvoiceDocument } from "@/lib/materials/invoices/extract";
+import { historicalPriceDecision } from "@/lib/materials/invoices/historical-price";
 import {
   SUPPLIER_INVOICE_FILES_BUCKET,
   type DescriptionMappingRef,
   type IgnoreRuleRef,
   type InvoiceAliasRef,
+  type InvoiceExtractionStatus,
   type InvoiceMatchProduct,
   type InvoiceSupplierRef,
 } from "@/lib/materials/invoices/model";
 import { recordPriceChangeDetections } from "@/lib/materials/invoices/price-change-events";
 import { isMaterialsSchemaMissing, postgresColumnMissing } from "@/lib/materials/write-error";
+import type { PurchaseUnit } from "@/lib/materials/units";
 import {
   GMAIL_PROMOTION_BATCH_LIMIT,
   PYRAMID_SUPPLIER_NAME,
@@ -68,12 +71,31 @@ export type PromotionCandidate = {
   byteSize: number | null;
 };
 
+export type PromotionPriceRef = {
+  productId: string;
+  id: string;
+  price: number;
+  priceUnit: PurchaseUnit;
+  effectiveDate: string;
+  approvedAt: string;
+  createdAt: string;
+};
+
 export type PromotionCatalog = {
   suppliers: readonly InvoiceSupplierRef[];
   aliases: readonly InvoiceAliasRef[];
   products: readonly InvoiceMatchProduct[];
   mappings: readonly DescriptionMappingRef[];
   ignoreRules: readonly IgnoreRuleRef[];
+  prices?: readonly PromotionPriceRef[];
+};
+
+export type HistoricalPriceRetentionRequest = {
+  lineId: string;
+  productId: string;
+  priceId: string;
+  invoicePrice: number;
+  actorId: string;
 };
 
 type WriteError = { code?: string; message?: string } | null;
@@ -91,6 +113,9 @@ export type PromotionDatabase = {
   listLines(
     invoiceId: string
   ): Promise<Array<{ id: string; line_number: number; review_status: string; matched_supplier_product_id: string | null }>>;
+  retainHistoricalPrice?(
+    input: HistoricalPriceRetentionRequest
+  ): Promise<{ ok: true; alreadyResolved: boolean } | { ok: false; error: string }>;
 };
 
 export type PromotionFiles = {
@@ -497,6 +522,8 @@ async function promoteOne(input: {
     return failed(base, joinProblems(fileError.message || "The invoice file record could not be stored.", undo));
   }
 
+  let retainedPrices = 0;
+
   if (draft.lines.length > 0) {
     const lineError = await input.db.insertLines(
       draft.lines.map((line) => ({
@@ -523,8 +550,15 @@ async function promoteOne(input: {
       return failed(base, joinProblems(lineError.message || "The invoice lines could not be stored.", undo));
     }
 
+    let storedLines: Awaited<ReturnType<PromotionDatabase["listLines"]>> = [];
+
     try {
-      const storedLines = await input.db.listLines(invoiceId);
+      storedLines = await input.db.listLines(invoiceId);
+    } catch {
+      storedLines = [];
+    }
+
+    try {
       await recordPriceChangeDetections(eventsClient(input.db), {
         invoiceId,
         actorId: input.userId,
@@ -542,6 +576,21 @@ async function promoteOne(input: {
       });
     } catch {
       // The review lines are already stored. A retry finds the Gmail item link.
+    }
+
+    try {
+      retainedPrices = await retainHistoricalPriceLines({
+        db: input.db,
+        userId: input.userId,
+        supplierId,
+        invoiceDate,
+        extractionStatus: draft.extractionStatus,
+        draftLines: draft.lines,
+        storedLines,
+        catalog: input.catalog,
+      });
+    } catch {
+      retainedPrices = 0;
     }
   }
 
@@ -593,7 +642,9 @@ async function promoteOne(input: {
     extractionFailed,
     detail: extractionFailed
       ? "Promoted for manual review. Line extraction did not produce invoice lines."
-      : "Promoted into supplier invoice review. No catalogue prices were changed.",
+      : retainedPrices > 0
+        ? "Promoted into supplier invoice review. Historical prices were retained. No catalogue prices were changed."
+        : "Promoted into supplier invoice review. No catalogue prices were changed.",
   };
 }
 
@@ -910,7 +961,96 @@ function supabasePromotionDatabase(supabase: SupabaseClient): PromotionDatabase 
 
       return data ?? [];
     },
+    async retainHistoricalPrice(input) {
+      const { data, error } = await supabase.rpc("retain_historical_invoice_price", {
+        p_invoice_line_id: input.lineId,
+        p_expected_product_id: input.productId,
+        p_expected_price_id: input.priceId,
+        p_expected_invoice_price: input.invoicePrice,
+        p_actor_id: input.actorId,
+      });
+
+      if (error) {
+        return { ok: false as const, error: error.message };
+      }
+
+      const body = data as { alreadyResolved?: boolean } | null;
+      return { ok: true as const, alreadyResolved: Boolean(body?.alreadyResolved) };
+    },
   };
+}
+
+export async function retainHistoricalPriceLines(input: {
+  db: PromotionDatabase;
+  userId: string;
+  supplierId: string | null;
+  invoiceDate: string | null;
+  extractionStatus: InvoiceExtractionStatus;
+  draftLines: Parameters<typeof historicalPriceDecision>[0]["line"][];
+  storedLines: Awaited<ReturnType<PromotionDatabase["listLines"]>>;
+  catalog: PromotionCatalog;
+}) {
+  if (!input.db.retainHistoricalPrice || !input.supplierId) {
+    return 0;
+  }
+
+  let retained = 0;
+
+  for (const stored of input.storedLines) {
+    if (stored.review_status !== "price_change" || !stored.matched_supplier_product_id) {
+      continue;
+    }
+
+    const line = input.draftLines.find((item) => item.lineNumber === stored.line_number);
+    const product = input.catalog.products.find((item) => item.id === stored.matched_supplier_product_id) ?? null;
+
+    if (!line || !product) {
+      continue;
+    }
+
+    const decision = historicalPriceDecision({
+      extractionStatus: input.extractionStatus,
+      invoiceDate: input.invoiceDate,
+      supplierId: input.supplierId,
+      line,
+      product,
+      productActive: true,
+      supplierProducts: input.catalog.products.filter((item) => item.supplierId === input.supplierId),
+      mappings: input.catalog.mappings,
+      prices: (input.catalog.prices ?? [])
+        .filter((price) => price.productId === product.id)
+        .map((price) => ({
+          id: price.id,
+          price: price.price,
+          priceUnit: price.priceUnit,
+          effectiveDate: price.effectiveDate,
+          approvedAt: price.approvedAt,
+          createdAt: price.createdAt,
+        })),
+    });
+
+    if (!decision.retain) {
+      continue;
+    }
+
+    try {
+      const result = await input.db.retainHistoricalPrice({
+        lineId: stored.id,
+        productId: decision.productId,
+        priceId: decision.priceId,
+        invoicePrice: decision.invoicePrice,
+        actorId: input.userId,
+      });
+
+      if (result.ok) {
+        retained += 1;
+      }
+    } catch {
+      // A failed audit write leaves the line on manual price review.
+    }
+  }
+
+  return retained;
 }
 
 function eventsClient(db: PromotionDatabase): SupabaseClient {
