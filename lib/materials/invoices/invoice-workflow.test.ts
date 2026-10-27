@@ -336,6 +336,13 @@ describe("supplier invoice phase 1", () => {
     assert.equal(differentDate, null);
   });
 
+  it("reads an Antalis invoice number and tax date from the invoice label", () => {
+    const parsed = parseInvoiceText("Antalis Ltd\ninvoice: 6701468943\ntax date: 14.08.2026\nBoard 1 sheet 10.00 10.00");
+
+    assert.equal(parsed.invoiceNumber, "6701468943");
+    assert.equal(parsed.invoiceDate, "2026-08-14");
+  });
+
   it("reads native PDF text and does not invent image lines", async () => {
     const pdf = await PDFDocument.create();
     const page = pdf.addPage([600, 800]);

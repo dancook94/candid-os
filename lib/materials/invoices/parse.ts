@@ -53,11 +53,13 @@ export function parseInvoiceText(text: string): ParsedInvoice {
   const rawSupplierName = labeledText(text, ["supplier", "vendor"]);
   const invoiceNumber =
     labeledText(text, ["invoice number", "invoice no", "invoice #", "inv no"]) ??
+    colonInvoiceNumber(text) ??
     invoiceNumberOnFollowingLine(text) ??
     columns?.invoiceNumber ??
     null;
   const invoiceDate =
-    parseInvoiceDate(labeledText(text, ["invoice date", "document date", "date"])) ??
+    parseInvoiceDate(labeledText(text, ["invoice date", "tax date", "document date", "date"])) ??
+    parseInvoiceDate(text.match(/\btax\s+date\s*:\s*([^\n]+)/i)?.[1] ?? null) ??
     dateOnFollowingLine(text, "document date") ??
     columns?.invoiceDate ??
     null;
@@ -464,6 +466,11 @@ function acceptInvoiceNumber(value: string) {
   }
 
   return null;
+}
+
+function colonInvoiceNumber(text: string) {
+  const match = text.match(/\binvoice\s*:\s*([A-Za-z0-9][A-Za-z0-9\-/]+)/i);
+  return acceptInvoiceNumber(match?.[1] ?? "");
 }
 
 function invoiceNumberOnFollowingLine(text: string) {
