@@ -142,9 +142,17 @@ export function classifyInvoiceLine(input: {
         compatibleProducts,
         input.mappings
       );
-  const purchaseUnit = normalizePurchaseUnit(identity.unit);
+  const statedUnit = normalizePurchaseUnit(identity.unit);
   const product = supplierProducts.find((item) => item.id === match.productId) ?? null;
-  const comparison =
+  const catalogueUnit =
+    !statedUnit &&
+    match.confidence === "high" &&
+    product?.purchaseUnit &&
+    product.currentPriceUnit === product.purchaseUnit
+      ? product.purchaseUnit
+      : null;
+  const purchaseUnit = statedUnit ?? catalogueUnit;
+  let comparison =
     product &&
     product.currentPrice != null &&
     product.currentPriceUnit &&
@@ -175,6 +183,14 @@ export function classifyInvoiceLine(input: {
     reviewStatus = "unmatched";
   } else if (match.confidence !== "high") {
     reviewStatus = "needs_review";
+  } else if (!statedUnit && catalogueUnit && comparison) {
+    if (moneyMatches(comparison.currentPrice, comparison.invoicePrice)) {
+      reviewStatus = "processed";
+      note = "The invoice did not state a purchase unit. The price matches the catalogue unit.";
+    } else {
+      reviewStatus = "price_change";
+      note = "The invoice did not state a purchase unit. The historical price differs from the current catalogue price.";
+    }
   } else if (!purchaseUnit) {
     reviewStatus = "needs_review";
     note = "The purchase unit was not extracted, so the price was not treated as matched.";
@@ -278,7 +294,7 @@ function findSupplierMatch(
     mappings
   );
 
-  if (match.productId || compatibleProducts.length === supplierProducts.length) {
+  if (match.productId || match.note || compatibleProducts.length === supplierProducts.length) {
     return match;
   }
 
@@ -356,7 +372,7 @@ function rollSizes(description: string) {
     [...description.matchAll(new RegExp(ROLL_DIMENSION_SOURCE, "gi"))].map((match) =>
       match[1] != null
         ? ([Number(match[1]), Number(match[2]) * 1000] as const)
-        : ([Number(match[3]), Number(match[4]) * 1000] as const)
+        : ([Number(match[4]), Number(match[3]) * 1000] as const)
     )
   ).map(([widthMm, lengthMm]) => ({
     widthMm,
@@ -410,11 +426,20 @@ function findMatch(
   const sku = identity.sku?.trim().toLowerCase();
 
   if (sku) {
-    const skuMatch = products.find((product) => product.sku?.trim().toLowerCase() === sku);
+    const skuMatches = products.filter((product) => product.sku?.trim().toLowerCase() === sku);
 
-    if (skuMatch) {
+    if (skuMatches.length > 1) {
       return {
-        productId: skuMatch.id,
+        productId: null,
+        confidence: null,
+        method: null,
+        note: "Several products from this supplier use this SKU.",
+      };
+    }
+
+    if (skuMatches.length === 1) {
+      return {
+        productId: skuMatches[0].id,
         confidence: "high",
         method: "sku",
         note: null,

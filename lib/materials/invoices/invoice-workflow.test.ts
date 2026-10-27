@@ -7,6 +7,7 @@ import { PDFDocument, StandardFonts } from "pdf-lib";
 import { findDuplicateInvoice } from "@/lib/materials/invoices/duplicate";
 import { buildInvoiceDraft } from "@/lib/materials/invoices/draft";
 import { extractPdfText, joinPositionedText } from "@/lib/materials/invoices/extract";
+import { historicalPriceDecision } from "@/lib/materials/invoices/historical-price";
 import { classifyInvoiceLine } from "@/lib/materials/invoices/match";
 import type { InvoiceMatchProduct } from "@/lib/materials/invoices/model";
 import { parseInvoiceText } from "@/lib/materials/invoices/parse";
@@ -759,7 +760,7 @@ describe("supplier invoice phase 1", () => {
           sku: "WW300",
           description: "WW300 MATT WHITE 50M X 1524MM",
           quantity: 1,
-          unit: null,
+          unit: "roll",
           unitPrice: 332.25,
           total: 332.25,
           status: "needs_review",
@@ -770,7 +771,7 @@ describe("supplier invoice phase 1", () => {
           sku: "SU3-70",
           description: "SU3-70 SEMI-MATT UV SEAL 50M X 1560MM SLIT TO 1510MM",
           quantity: 1,
-          unit: null,
+          unit: "roll",
           unitPrice: 141.39,
           total: 141.39,
           status: "needs_review",
@@ -782,7 +783,7 @@ describe("supplier invoice phase 1", () => {
           description:
             "SU3-70 SEMI-MATT UV SEAL 50M X 1560MM BOTH SLIT TO 1350MM PRICE DUE TO STOCK",
           quantity: 2,
-          unit: null,
+          unit: "roll",
           unitPrice: 127.21,
           total: 254.42,
           status: "needs_review",
@@ -998,5 +999,225 @@ describe("supplier invoice phase 1", () => {
     assert.match(sources[2], /\.select\(/);
     assert.match(sources[sources.length - 1], /\.from\("material_prices"\)/);
     assert.doesNotMatch(sources[sources.length - 1], /\.(insert|update|delete|upsert)\(/);
+  });
+
+  it("reads All Print invoice numbers when the order reference is blank or has several words", () => {
+    const header =
+      "INVOICE No. INVOICE DATE ACCOUNT No. CUST. ORDER No. SALES ORDER No. DESPATCH DATE";
+    const severalWords = parseInvoiceText(
+      `${header}\n144944 28/09/2026 CZ500 VBL DAN 169278 25/09/2026\n`
+    );
+    const blankOrder = parseInvoiceText(
+      `${header}\n144599 24/09/2026 CZ500 168959 23/09/2026\n`
+    );
+
+    assert.equal(severalWords.invoiceNumber, "144944");
+    assert.equal(severalWords.invoiceDate, "2026-09-28");
+    assert.equal(blankOrder.invoiceNumber, "144599");
+    assert.equal(blankOrder.invoiceDate, "2026-09-24");
+  });
+
+  it("checks the five All Print pilot invoices without assigning an ambiguous width or hiding a price difference", () => {
+    const su31350: InvoiceMatchProduct = {
+      id: "su3-1350",
+      supplierId: "all-print",
+      sku: "SU3-70",
+      description: "SU3-70 SEMI-MATT UV SEAL 50M X 1350MM",
+      materialName: "SU3-70 Semi-matt UV Laminate 1350mm x 50m",
+      purchaseUnit: "roll",
+      thicknessMm: null,
+      colour: null,
+      widthMm: 1350,
+      heightMm: null,
+      lengthMm: 50000,
+      currentPrice: 127.21,
+      currentPriceUnit: "roll",
+      currentPriceId: "price-su3-1350",
+      currentEffectiveDate: "2026-10-01",
+    };
+    const su31560: InvoiceMatchProduct = {
+      ...su31350,
+      id: "su3-1560",
+      description: "SU3-70 SEMI-MATT UV SEAL 50M X 1560MM",
+      materialName: "SU3-70 Semi-matt UV Laminate 1560mm x 50m",
+      widthMm: 1560,
+      currentPrice: 127.21,
+      currentPriceId: "price-su3-1560",
+    };
+    const products: InvoiceMatchProduct[] = [
+      su31350,
+      su31560,
+      {
+        id: "easydot",
+        supplierId: "all-print",
+        sku: null,
+        description: "SOLVOPRINT DOT MATT WHITE 50 X 1372",
+        materialName: "Easydot Matt White 1372mm x 50m",
+        purchaseUnit: "roll",
+        thicknessMm: null,
+        colour: "White",
+        widthMm: 1372,
+        heightMm: null,
+        lengthMm: 50000,
+        currentPrice: 194.16,
+        currentPriceUnit: "roll",
+        currentPriceId: "price-easydot",
+        currentEffectiveDate: "2026-10-01",
+      },
+      {
+        id: "m16-permanent",
+        supplierId: "all-print",
+        sku: null,
+        description: "M16-P-P MT WH HOP PERM PE 50 X 1370",
+        materialName: "Nucoat M16 Permanent White 1370mm x 50m",
+        purchaseUnit: "roll",
+        thicknessMm: null,
+        colour: "White",
+        widthMm: 1370,
+        heightMm: null,
+        lengthMm: 50000,
+        currentPrice: 129.85,
+        currentPriceUnit: "roll",
+        currentPriceId: "price-m16p",
+        currentEffectiveDate: "2026-10-01",
+      },
+      {
+        id: "m16-high",
+        supplierId: "all-print",
+        sku: null,
+        description: "M16-H-P MT WH HIGH PE 50 X 1370",
+        materialName: "Nucoat M16 High Tack White 1370mm x 50m",
+        purchaseUnit: "roll",
+        thicknessMm: null,
+        colour: "White",
+        widthMm: 1370,
+        heightMm: null,
+        lengthMm: 50000,
+        currentPrice: 266.18,
+        currentPriceUnit: "roll",
+        currentPriceId: "price-m16h",
+        currentEffectiveDate: "2026-10-01",
+      },
+      {
+        id: "p65w",
+        supplierId: "all-print",
+        sku: null,
+        description: "P65W SILVER CRYSTAL 1600MM",
+        materialName: "P65W Silver Crystal 1600mm",
+        purchaseUnit: "linear_metre",
+        thicknessMm: null,
+        colour: null,
+        widthMm: 1600,
+        heightMm: null,
+        lengthMm: null,
+        currentPrice: 11.19,
+        currentPriceUnit: "linear_metre",
+        currentPriceId: "price-p65",
+        currentEffectiveDate: "2026-10-01",
+      },
+      {
+        id: "conform",
+        supplierId: "all-print",
+        sku: null,
+        description: "4075 CONFORM 100YDS X 1220MM",
+        materialName: "Conform 4075 Application Tape 1220mm",
+        purchaseUnit: "roll",
+        thicknessMm: null,
+        colour: null,
+        widthMm: 1220,
+        heightMm: null,
+        lengthMm: 91440,
+        currentPrice: 111.5,
+        currentPriceUnit: "roll",
+        currentPriceId: "price-conform",
+        currentEffectiveDate: "2026-10-01",
+      },
+    ];
+    const invoice = (numberLine: string, lines: string[]) =>
+      [
+        "All Print Supplies Ltd",
+        "INVOICE No. INVOICE DATE ACCOUNT No. CUST. ORDER No. SALES ORDER No. DESPATCH DATE",
+        numberLine,
+        "QUANTITY DESCRIPTION UNIT PRICE LINE VALUE VAT",
+        ...lines,
+      ].join("\n");
+    const draftFor = (numberLine: string, lines: string[]) =>
+      buildInvoiceDraft({
+        text: invoice(numberLine, lines),
+        extractionStatus: "extracted",
+        suppliers,
+        aliases,
+        products,
+        mappings: [],
+        ignoreRules: [],
+      });
+    const summary = (numberLine: string, lines: string[]) =>
+      draftFor(numberLine, lines).lines.map((line) => ({
+        unit: line.rawUnit,
+        price: line.rawUnitPrice,
+        status: line.reviewStatus,
+        product: line.matchedProductId,
+      }));
+
+    const easydot = draftFor("135602 13/07/2026 CZ500 Dan 159753 10/07/2026", [
+      "1 SOLVOPRINT DOT MATT WHITE 50 X 1372 194.16 194.16 S",
+    ]);
+    assert.equal(easydot.invoiceNumber, "135602");
+    assert.deepEqual(summary("135602 13/07/2026 CZ500 Dan 159753 10/07/2026", [
+      "1 SOLVOPRINT DOT MATT WHITE 50 X 1372 194.16 194.16 S",
+    ]), [{ unit: "roll", price: 194.16, status: "processed", product: "easydot" }]);
+    assert.deepEqual(summary("137616 29/07/2026 CZ500 Dan 161914 28/07/2026", [
+      "4 SU3-70 SEMI-MATT UV SEAL 50M X 1350MM 127.21 508.84 S",
+      "2 M16-P-P MT WH HOP PERM PE 50 X 1370 126.07 252.14 S",
+    ]), [
+      { unit: "roll", price: 127.21, status: "processed", product: "su3-1350" },
+      { unit: "roll", price: 126.07, status: "price_change", product: "m16-permanent" },
+    ]);
+    const highTack = draftFor("138266 04/08/2026 CZ500 Dan 161915 28/07/2026", [
+      "1 M16-H-P MT WH HIGH PE 50 X 1370 258.43 258.43 S",
+    ]);
+    assert.deepEqual(summary("138266 04/08/2026 CZ500 Dan 161915 28/07/2026", [
+      "1 M16-H-P MT WH HIGH PE 50 X 1370 258.43 258.43 S",
+    ]), [{ unit: "roll", price: 258.43, status: "price_change", product: "m16-high" }]);
+    assert.deepEqual(summary("142960 11/09/2026 CZ500 VBL 167189 10/09/2026", [
+      "50 P65W SILVER CRYSTAL 1600MM 11.19 559.50 S",
+      "1 4075 CONFORM 100YDS X 1220MM 111.50 111.50 S",
+    ]), [
+      { unit: "linear_metre", price: 11.19, status: "processed", product: "p65w" },
+      { unit: "roll", price: 111.5, status: "processed", product: "conform" },
+    ]);
+    assert.deepEqual(summary("145275 30/09/2026 CZ500 VBL 169687 29/09/2026", [
+      "2 M16-P-P MT WH HOP PERM PE 50 X 1370 129.85 259.70 S",
+    ]), [{ unit: "roll", price: 129.85, status: "processed", product: "m16-permanent" }]);
+
+    const ambiguous = draftFor("139000 01/08/2026 CZ500 Dan 100 02/08/2026", [
+      "1 SU3-70 SEMI-MATT UV SEAL 127.21 127.21 S",
+    ]);
+    assert.equal(ambiguous.lines[0]?.matchedProductId, null);
+    assert.equal(ambiguous.lines[0]?.reviewStatus === "processed", false);
+    assert.equal(ambiguous.lines[0]?.reviewStatus === "price_change", false);
+
+    const pricedByWidth = historicalPriceDecision({
+      extractionStatus: "extracted",
+      invoiceDate: highTack.invoiceDate,
+      supplierId: "all-print",
+      line: highTack.lines[0],
+      product: products.find((item) => item.id === "m16-high") ?? null,
+      productActive: true,
+      supplierProducts: products,
+      mappings: [],
+      prices: [
+        {
+          id: "price-m16h",
+          price: 266.18,
+          priceUnit: "roll",
+          effectiveDate: "2026-10-01",
+          approvedAt: "2026-10-01T00:00:00.000Z",
+          createdAt: "2026-10-01T00:00:00.000Z",
+        },
+      ],
+    });
+    assert.equal(pricedByWidth.retain, false);
+    assert.equal("code" in pricedByWidth ? pricedByWidth.code : "", "sku");
   });
 });
