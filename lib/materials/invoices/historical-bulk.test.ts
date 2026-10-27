@@ -294,6 +294,49 @@ test("supplier enablement updates only the requested supplier and failure cleanu
   ]);
 });
 
+test("Antalis, PPB and Papergraphics stay in separate sealed scopes and a failed tick disables only the enabled supplier", async () => {
+  const rows = [
+    candidate({ itemId: "antalis-1", supplierId: "antalis", invoiceDate: "2026-07-20", invoiceNumber: "6701397556" }),
+    candidate({ itemId: "ppb-1", supplierId: "ppb", invoiceDate: "2026-09-18", invoiceNumber: "861573" }),
+    candidate({ itemId: "paper-1", supplierId: "papergraphics", invoiceDate: "2026-08-13", invoiceNumber: "01SI-2368836-20" }),
+  ];
+
+  assert.deepEqual(selectHistoricalSupplierScope(rows, "antalis"), ["antalis-1"]);
+  assert.deepEqual(selectHistoricalSupplierScope(rows, "ppb"), ["ppb-1"]);
+  assert.deepEqual(selectHistoricalSupplierScope(rows, "papergraphics"), ["paper-1"]);
+  assert.equal(historicalRunRequest(selectHistoricalSupplierScope(rows, "antalis"))?.invoiceLimit, 1);
+
+  const failedCalls: string[] = [];
+  const failed = portsFor(["antalis-1"], failedCalls, []);
+  failed.advance = async () => {
+    failedCalls.push("advance");
+    throw new Error("The tick failed.");
+  };
+  await assert.rejects(
+    runHistoricalSupplierScope({ scopeItemIds: ["antalis-1"], discoveryEnabled: false, ports: failed }),
+    /tick failed/
+  );
+  assert.deepEqual(
+    failedCalls.filter((call) => call === "enable" || call === "pause" || call === "disable"),
+    ["enable", "pause", "disable"]
+  );
+
+  const nextCalls: string[] = [];
+  const next = portsFor(["ppb-1"], nextCalls, [
+    { status: "completed", pending: 0, report: report([outcome("ppb-1", "promoted")]) },
+  ]);
+  const resumed = await runHistoricalSupplierScope({
+    scopeItemIds: ["ppb-1"],
+    discoveryEnabled: false,
+    ports: next,
+  });
+
+  assert.equal(resumed.ok, true);
+  assert.equal(resumed.promoted, 1);
+  assert.deepEqual(nextCalls, ["start", "enable", "advance", "disable"]);
+  assert.equal(nextCalls.includes("antalis"), false);
+});
+
 test("the stored workflow keeps discovery off and does not write catalogue prices", async () => {
   const source = await readFile(new URL("./historical-bulk.ts", import.meta.url), "utf8");
   assert.equal(GMAIL_ONGOING_SYNC_ENABLED, false);

@@ -1,6 +1,6 @@
 import { normalizeMaterialLabel } from "@/lib/materials/identity";
 
-import { headerMathsWarning, lineMathsWarning } from "@/lib/materials/invoices/money";
+import { headerMathsWarning, lineMathsWarning, moneyMatches, roundMoney } from "@/lib/materials/invoices/money";
 import type { ParsedInvoice, ParsedInvoiceLine } from "@/lib/materials/invoices/model";
 
 const UNIT_TOKEN =
@@ -54,18 +54,27 @@ export function parseInvoiceText(text: string): ParsedInvoice {
   const invoiceNumber =
     labeledText(text, ["invoice number", "invoice no", "invoice #", "inv no"]) ??
     colonInvoiceNumber(text) ??
+    spacedInvoiceNumber(text) ??
     invoiceNumberOnFollowingLine(text) ??
     columns?.invoiceNumber ??
     null;
   const invoiceDate =
     parseInvoiceDate(labeledText(text, ["invoice date", "tax date", "document date", "date"])) ??
     parseInvoiceDate(text.match(/\btax\s+date\s*:\s*([^\n]+)/i)?.[1] ?? null) ??
+    parseInvoiceDate(text.match(/\binvoice\s+date\s*[:\-]?\s*([^\n]+)/i)?.[1] ?? null) ??
     dateOnFollowingLine(text, "document date") ??
     columns?.invoiceDate ??
     null;
-  const subtotal = labeledMoney(text, ["subtotal", "total goods", "net", "goods total"]);
-  const vat = percentVatAmount(text) ?? labeledMoney(text, ["vat", "tax"]);
+  const subtotal =
+    labeledMoney(text, ["subtotal", "total goods", "net", "goods total"]) ??
+    totalNetAmount(text) ??
+    papergraphicsCommercialNet(text);
+  const vat =
+    labeledAmount(text, /\bvat\s+\d+(?:\.\d+)?%\s+gbp\s+([\d,]+\.\d{2})\b/i) ??
+    percentVatAmount(text) ??
+    labeledMoney(text, ["vat", "tax"]);
   const total =
+    labeledAmount(text, /\btotal\s+amount\s+gbp\s+([\d,]+\.\d{2})\b/i) ??
     labeledMoney(text, ["invoice total", "amount due", "total due"]) ??
     labeledMoney(text, ["total"]) ??
     totalWithTrailingWords(text);
@@ -139,7 +148,341 @@ function parseLines(sourceLines: string[]): ParsedInvoiceLine[] {
     return parseQuantityLines(sourceLines.slice(quantityHeader + 1));
   }
 
+  const antalisHeader = sourceLines.findIndex((line) =>
+    /item\s+material\s+customer\s+reference\s+weight\s+quantity\s+unit\s+price/i.test(line)
+  );
+
+  if (antalisHeader >= 0) {
+    return parseAntalisLines(sourceLines.slice(antalisHeader + 1));
+  }
+
+  const ppbHeader = sourceLines.findIndex((line) =>
+    /^line\s+item\s+code\s*\/\s*product\s+description\s+quantity\s+price\b/i.test(line)
+  );
+
+  if (ppbHeader >= 0) {
+    return parsePpbLines(sourceLines.slice(ppbHeader + 1));
+  }
+
+  const papergraphicsHeader = sourceLines.findIndex((line) =>
+    /^line\s+product\s+description\s+quantity\s+net\s+price\b/i.test(line)
+  );
+
+  if (papergraphicsHeader >= 0) {
+    return parsePapergraphicsLines(sourceLines.slice(papergraphicsHeader + 1));
+  }
+
   return parseSimpleLines(sourceLines);
+}
+
+const ANTALIS_PRODUCT =
+  /^(.+?)\s+([\d,]+(?:\.\d+)?)\s+KG\s+([\d,]+(?:\.\d+)?)\s+([A-Za-z]{1,3})$/i;
+const ANTALIS_PRICE =
+  /^total\s+net\s+price\s+([\d,]+\.\d{2})\s+GBP\/(\d+(?:\.\d+)?)\s+([A-Za-z]{1,3})\s+([\d,]+\.\d{2})$/i;
+const ANTALIS_CHARGE = /^(?!total\b)(.+?\bcharge)\s+GBP\s+([\d,]+\.\d{2})$/i;
+const ANTALIS_CODE = /^\d+\s+(\d{5,})$/;
+const ANTALIS_UNITS: Record<string, string> = {
+  SH: "sheet",
+  RL: "roll",
+  UN: "unit",
+  PK: "pack",
+};
+
+function parseAntalisLines(sourceLines: string[]) {
+  const lines: ParsedInvoiceLine[] = [];
+  let name: string | null = null;
+  let quantity: number | null = null;
+  let quantityUnit = "";
+  let specs: string[] = [];
+  let sku: string | null = null;
+
+  const reset = () => {
+    name = null;
+    quantity = null;
+    quantityUnit = "";
+    specs = [];
+    sku = null;
+  };
+
+  const pushProduct = (price: { per: number; priceUnit: string; amount: number; total: number } | null) => {
+    if (!name || quantity == null) {
+      reset();
+      return;
+    }
+
+    const sameUnit = price != null && price.priceUnit === quantityUnit;
+    const unitPrice = price && sameUnit ? price.amount / price.per : null;
+    const description = [name, ...specs].join(" ");
+
+    lines.push({
+      lineNumber: lines.length + 1,
+      rawDescription: normalizeMaterialLabel(description) ?? description,
+      rawSupplierSku: sku,
+      rawQuantity: quantity,
+      rawUnit: sameUnit ? (ANTALIS_UNITS[quantityUnit] ?? quantityUnit) : quantityUnit,
+      rawUnitPrice: unitPrice != null && price && moneyMatches(quantity * unitPrice, price.total) ? unitPrice : null,
+      rawLineTotal: price?.total ?? null,
+      rawTax: null,
+    });
+    reset();
+  };
+
+  for (const sourceLine of sourceLines) {
+    if (/^total\s+net\s+amount\b/i.test(sourceLine)) {
+      break;
+    }
+
+    if (isAntalisNoise(sourceLine)) {
+      continue;
+    }
+
+    const charge = sourceLine.match(ANTALIS_CHARGE);
+
+    if (charge && !name) {
+      const total = parseMoney(charge[2]);
+
+      if (total != null) {
+        lines.push(chargeLine(lines.length + 1, charge[1], total));
+      }
+
+      continue;
+    }
+
+    const product = sourceLine.match(ANTALIS_PRODUCT);
+
+    if (product) {
+      if (name) {
+        pushProduct(null);
+      }
+
+      name = product[1];
+      quantity = Number(product[3].replace(/,/g, ""));
+      quantityUnit = product[4].toUpperCase();
+      specs = [];
+      sku = null;
+      continue;
+    }
+
+    const price = sourceLine.match(ANTALIS_PRICE);
+
+    if (price && name) {
+      const amount = parseMoney(price[1]);
+      const total = parseMoney(price[4]);
+      const per = Number(price[2]);
+
+      if (amount == null || total == null || !(per > 0)) {
+        pushProduct(null);
+        continue;
+      }
+
+      pushProduct({ per, priceUnit: price[3].toUpperCase(), amount, total });
+      continue;
+    }
+
+    const code = sourceLine.match(ANTALIS_CODE);
+
+    if (code && name && !sku) {
+      sku = code[1];
+      continue;
+    }
+
+    if (name) {
+      specs.push(sourceLine);
+    }
+  }
+
+  if (name) {
+    pushProduct(null);
+  }
+
+  return lines;
+}
+
+function parsePpbLines(sourceLines: string[]) {
+  const lines: ParsedInvoiceLine[] = [];
+  let current: { sku: string; quantity: number; total: number; description: string[] } | null = null;
+  const row = /^(\d+)\s+([A-Z0-9]+(?:-[A-Z0-9]+)+)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+\.\d{2})\s+\S+$/i;
+
+  const push = () => {
+    if (!current) {
+      return;
+    }
+
+    const description = normalizeMaterialLabel(current.description.join(" ")) ?? current.sku;
+    const unitPrice = perUnitPrice(current.quantity, current.total);
+
+    lines.push({
+      lineNumber: lines.length + 1,
+      rawDescription: description,
+      rawSupplierSku: current.sku,
+      rawQuantity: current.quantity,
+      rawUnit: null,
+      rawUnitPrice: unitPrice,
+      rawLineTotal: current.total,
+      rawTax: null,
+    });
+    current = null;
+  };
+
+  for (const sourceLine of sourceLines) {
+    if (/^net\s+£/i.test(sourceLine)) {
+      push();
+      break;
+    }
+
+    if (/^based on sales\b|^conditions of sale\b/i.test(sourceLine)) {
+      push();
+      continue;
+    }
+
+    const match = sourceLine.match(row);
+
+    if (match) {
+      push();
+      const total = parseMoney(match[4]);
+      const quantity = Number(match[3].replace(/,/g, ""));
+
+      if (total == null || !Number.isFinite(quantity)) {
+        continue;
+      }
+
+      current = { sku: match[2], quantity, total, description: [] };
+      continue;
+    }
+
+    if (current) {
+      current.description.push(sourceLine);
+    }
+  }
+
+  push();
+  return lines;
+}
+
+const PAPERGRAPHICS_ROW =
+  /^(\d+)\s+(.+?)\s+(\d+(?:\.\d+)?)\s+(?:(\d+)\s+)?(each|roll|sheet|sheets|pack|packs|box|boxes|unit|units|metre|metres)\s+([\d,]+\.\d{2})\s+GBP\s*\/\s*(\d+)\s+(\d+(?:\.\d+)?)\s*%\s+([\d,]+\.\d{2})\s+GBP$/i;
+
+function parsePapergraphicsLines(sourceLines: string[]) {
+  const lines: ParsedInvoiceLine[] = [];
+  let current: { description: string; quantity: number; unit: string; unitPrice: number | null; total: number; tax: number | null } | null = null;
+
+  const push = () => {
+    if (!current) {
+      return;
+    }
+
+    const description = papergraphicsDescription(current.description, current.unit);
+    const sku = splitSku(description);
+
+    lines.push({
+      lineNumber: lines.length + 1,
+      rawDescription: description,
+      rawSupplierSku: sku.sku,
+      rawQuantity: current.quantity,
+      rawUnit: current.unit,
+      rawUnitPrice: current.unitPrice,
+      rawLineTotal: current.total,
+      rawTax: current.tax,
+    });
+    current = null;
+  };
+
+  for (const sourceLine of sourceLines) {
+    if (/^total\s+[\d,]+\.\d{2}\b/i.test(sourceLine)) {
+      break;
+    }
+
+    const freight = sourceLine.match(/^freight\s+([\d,]+\.\d{2})\s+GBP$/i);
+
+    if (freight) {
+      push();
+      const total = parseMoney(freight[1]);
+
+      if (total != null) {
+        lines.push(chargeLine(lines.length + 1, "Freight", total));
+      }
+
+      continue;
+    }
+
+    if (
+      /^(?:list\s+price|vat\s*\(|no\s+cash\s+discount|total\s+item\s+net\s+value)/i.test(sourceLine) ||
+      isPapergraphicsNoise(sourceLine)
+    ) {
+      continue;
+    }
+
+    const match = sourceLine.match(PAPERGRAPHICS_ROW);
+
+    if (match) {
+      push();
+      const quantity = Number(match[3]);
+      const amount = parseMoney(match[6]);
+      const per = Number(match[7]);
+      const total = parseMoney(match[9]);
+      const unitPrice = amount != null && total != null && per > 0 && moneyMatches((quantity * amount) / per, total)
+        ? amount / per
+        : null;
+
+      current = {
+        description: match[2],
+        quantity,
+        unit: match[5],
+        unitPrice,
+        total: total ?? 0,
+        tax: parseTaxRate(match[8]),
+      };
+      continue;
+    }
+
+    if (current) {
+      current.description = `${current.description} ${sourceLine}`;
+    }
+  }
+
+  push();
+  return lines;
+}
+
+function isPapergraphicsNoise(line: string) {
+  return /^(?:papergraphics limited|diva innovation|crawley|tel:|fsc coc|bic:|invoice:|page:)/i.test(line);
+}
+
+function papergraphicsDescription(description: string, unit: string) {
+  const cleaned = description.replace(new RegExp(`\\s+${unit}\\s*$`, "i"), "");
+  return normalizeMaterialLabel(cleaned) ?? cleaned;
+}
+
+function perUnitPrice(quantity: number, total: number) {
+  if (!Number.isFinite(quantity) || quantity === 0) {
+    return null;
+  }
+
+  const unitPrice = total / quantity;
+  return moneyMatches(quantity * unitPrice, total) ? unitPrice : null;
+}
+
+function chargeLine(lineNumber: number, description: string, total: number): ParsedInvoiceLine {
+  return {
+    lineNumber,
+    rawDescription: normalizeMaterialLabel(description) ?? description,
+    rawSupplierSku: null,
+    rawQuantity: 1,
+    rawUnit: null,
+    rawUnitPrice: total,
+    rawLineTotal: total,
+    rawTax: null,
+  };
+}
+
+function isAntalisNoise(line: string) {
+  return (
+    /^(?:headquarters|antalis ltd|gateway house|leicestershire|vat reg|commercial office|viscom|tel:|invoice\b|bill-to|page \d|item material|description$|all orders|fsc\d|pefc\d|bank name|sort code|iban:|please send|customer:|inside sales|fsc certification)/i.test(line) ||
+    /^with reference to your order\b/i.test(line) ||
+    /^delivered to\b/i.test(line) ||
+    /^\*\*\s*carry from prior pages/i.test(line) ||
+    /^www\./i.test(line)
+  );
 }
 
 function parseQuantityLines(sourceLines: string[]): ParsedInvoiceLine[] {
@@ -468,6 +811,40 @@ function acceptInvoiceNumber(value: string) {
   return null;
 }
 
+function spacedInvoiceNumber(text: string) {
+  const match = text.match(/\binvoice\s+number\s+(\d{4,12})\b/i);
+  return acceptInvoiceNumber(match?.[1] ?? "");
+}
+
+function totalNetAmount(text: string) {
+  return labeledAmount(text, /\btotal\s+net\s+amount\s+gbp\s+([\d,]+\.\d{2})\b/i);
+}
+
+function papergraphicsCommercialNet(text: string) {
+  if (!/^line\s+product\s+description\s+quantity\s+net\s+price\b/im.test(text)) {
+    return null;
+  }
+
+  const itemNet = labeledAmount(text, /\btotal\s+item\s+net\s+value\s+([\d,]+\.\d{2})\b/i);
+
+  if (itemNet == null) {
+    return null;
+  }
+
+  let freight = 0;
+
+  for (const match of text.matchAll(/^freight\s+([\d,]+\.\d{2})\s+gbp$/gim)) {
+    freight += parseMoney(match[1]) ?? 0;
+  }
+
+  return roundMoney(itemNet + freight);
+}
+
+function labeledAmount(text: string, pattern: RegExp) {
+  const match = text.match(pattern);
+  return match ? parseMoney(match[1]) : null;
+}
+
 function colonInvoiceNumber(text: string) {
   const match = text.match(/\binvoice\s*:\s*([A-Za-z0-9][A-Za-z0-9\-/]+)/i);
   return acceptInvoiceNumber(match?.[1] ?? "");
@@ -500,7 +877,7 @@ function percentVatAmount(text: string) {
 
 function totalWithTrailingWords(text: string) {
   const match = text.match(
-    /(?:^|\n)\s*total\b(?:(?![\d,]+\.\d{2})[^\n]){0,40}£?\s*([\d,]+\.\d{2})\b/i
+    /(?:^|\n)\s*total\b(?!\s+net\s+price)(?:(?![\d,]+\.\d{2})[^\n]){0,40}£?\s*([\d,]+\.\d{2})\b/i
   );
   return match ? parseMoney(match[1]) : null;
 }

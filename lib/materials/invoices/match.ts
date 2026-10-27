@@ -143,9 +143,10 @@ export function classifyInvoiceLine(input: {
         input.mappings
       );
   const statedUnit = normalizePurchaseUnit(identity.unit);
+  const statedUnitText = identity.unit?.trim() ?? "";
   const product = supplierProducts.find((item) => item.id === match.productId) ?? null;
   const catalogueUnit =
-    !statedUnit &&
+    !statedUnitText &&
     match.confidence === "high" &&
     product?.purchaseUnit &&
     product.currentPriceUnit === product.purchaseUnit
@@ -179,6 +180,9 @@ export function classifyInvoiceLine(input: {
     reviewStatus = "extraction_error";
   } else if (match.note === WIDTH_CONFLICT_NOTE) {
     reviewStatus = "needs_review";
+  } else if (statedUnitText && !statedUnit) {
+    reviewStatus = "needs_review";
+    note = "The purchase unit was not recognised, so the price was not treated as matched.";
   } else if (!match.productId || !match.confidence) {
     reviewStatus = "unmatched";
   } else if (match.confidence !== "high") {
