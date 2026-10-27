@@ -1533,4 +1533,241 @@ Total 1,743.70 GBP`);
     assert.equal(flooring.lines[1]?.rawDescription, "Freight");
     assert.equal(flooring.lines[1]?.rawLineTotal, 108);
   });
+
+  it("reads Innotech, Quality Print Services and BMG without creating catalogue records", () => {
+    const mesh =
+      "Vistaflex ML400 - PVC Mesh Banner With Liner 400 FR EN13501 - 2200mm x 50m";
+    const poster =
+      "KODAK Production Satin Poster Paper, 200gsm - 1524mm x 80m (SCS-COC-004532 FSC Mix Credit)";
+    const catalogueSuppliers = [
+      ...suppliers,
+      { id: "innotech", name: "Innotech Digital & Display", normalizedName: "innotech digital & display" },
+      { id: "qps", name: "Quality Print Services Ltd", normalizedName: "quality print services ltd" },
+      { id: "bmg", name: "BMG Media Source UK Limited", normalizedName: "bmg media source uk limited" },
+    ];
+    const products: InvoiceMatchProduct[] = [
+      {
+        id: "mesh",
+        supplierId: "innotech",
+        sku: "ISB275567",
+        description: mesh,
+        materialName: "Vistaflex ML400",
+        purchaseUnit: "roll",
+        thicknessMm: null,
+        colour: null,
+        widthMm: 2200,
+        heightMm: null,
+        lengthMm: 50000,
+        currentPrice: 198.66,
+        currentPriceUnit: "roll",
+        currentPriceId: "price-mesh",
+        currentEffectiveDate: "2026-09-01",
+      },
+      {
+        id: "poster",
+        supplierId: "bmg",
+        sku: null,
+        description: poster,
+        materialName: "Kodak satin poster",
+        purchaseUnit: "roll",
+        thicknessMm: null,
+        colour: null,
+        widthMm: 1524,
+        heightMm: null,
+        lengthMm: 80000,
+        currentPrice: 90,
+        currentPriceUnit: "roll",
+        currentPriceId: "price-poster",
+        currentEffectiveDate: "2026-03-01",
+      },
+    ];
+    const draftFor = (text: string) =>
+      buildInvoiceDraft({
+        text,
+        extractionStatus: "extracted",
+        suppliers: catalogueSuppliers,
+        aliases,
+        products,
+        mappings: [],
+        ignoreRules: [],
+      });
+    const unknown = buildInvoiceDraft({
+      text: `Innotech Digital & Display
+(a trading division of Vink UK Ltd)
+Invoice No: 598646
+Invoice Date: 09/09/2026
+Qty Code Description Price Each Line Total Line VAT
+1 ISB275567 Vistaflex ML400 - PVC Mesh Banner With Liner 400 198.66 198.66 39.73
+FR EN13501 - 2200mm x 50m
+Delivery Net VAT % VAT
+DX Overnight - Carton 35.00 20.00 7.00
+End of Invoice
+Total Net: 233.66
+VAT Amount: 46.73
+Total: 280.39`,
+      extractionStatus: "extracted",
+      suppliers,
+      aliases,
+      products: [],
+      mappings: [],
+      ignoreRules: [],
+    });
+
+    assert.equal(unknown.supplierId, null);
+    assert.equal(unknown.rawSupplierName, "Innotech Digital & Display");
+    assert.equal(unknown.lines.every((line) => line.reviewStatus !== "processed"), true);
+    assert.equal(unknown.lines.every((line) => line.matchedProductId == null), true);
+
+    const innotech = draftFor(`Innotech Digital & Display
+(a trading division of Vink UK Ltd)
+Invoice No: 598646
+Invoice Date: 09/09/2026
+Qty Code Description Price Each Line Total Line VAT
+1 ISB275567 Vistaflex ML400 - PVC Mesh Banner With Liner 400 198.66 198.66 39.73
+FR EN13501 - 2200mm x 50m
+4 INE185586 Conquest Roller Banner - 2000mm Snap Rail 45.31 181.24 36.25
+Delivery Net VAT % VAT
+DX Overnight - Carton 35.00 20.00 7.00
+End of Invoice
+Goods Net: 380.00
+Total Net: 414.90
+VAT Amount: 82.98
+Total: 497.88`);
+    assert.equal(innotech.supplierId, "innotech");
+    assert.equal(innotech.invoiceNumber, "598646");
+    assert.equal(innotech.invoiceDate, "2026-09-09");
+    assert.equal(innotech.subtotal, 414.9);
+    assert.equal(innotech.vat, 82.98);
+    assert.equal(innotech.total, 497.88);
+    assert.equal(innotech.warnings.some((warning) => /line totals|subtotal \+/i.test(warning)), false);
+    assert.equal(innotech.lines[0]?.rawUnit, "roll");
+    assert.equal(innotech.lines[0]?.reviewStatus, "processed");
+    assert.equal(innotech.lines[0]?.matchedProductId, "mesh");
+    assert.equal(innotech.lines[1]?.rawUnit, null);
+    assert.equal(innotech.lines[1]?.reviewStatus, "unmatched");
+    assert.equal(innotech.lines[2]?.rawDescription, "DX Overnight - Carton");
+    assert.equal(innotech.lines[2]?.rawLineTotal, 35);
+    const sheetOnly = buildInvoiceDraft({
+      text: `Innotech Digital & Display
+Invoice No: 598646
+Invoice Date: 09/09/2026
+Qty Code Description Price Each Line Total Line VAT
+1 ISB275567 Vistaflex ML400 - PVC Mesh Banner With Liner 400 198.66 198.66 39.73
+FR EN13501 - 2200mm x 50m
+End of Invoice
+Total Net: 198.66
+VAT Amount: 39.73
+Total: 238.39`,
+      extractionStatus: "extracted",
+      suppliers: catalogueSuppliers,
+      aliases,
+      products: [{ ...products[0], id: "mesh-sheet", purchaseUnit: "sheet", currentPriceUnit: "sheet" }],
+      mappings: [],
+      ignoreRules: [],
+    });
+    assert.equal(sheetOnly.lines[0]?.reviewStatus, "needs_review");
+    assert.match(sheetOnly.lines[0]?.note ?? "", /unit does not match/);
+
+    const frontlit = draftFor(`Innotech Digital & Display
+Invoice No: 592260
+Invoice Date: 03/06/2026
+Qty Code Description Price Each Line Total Line VAT
+1 ISB274903 Vistaflex SC450 - Premium Frontlit PVC Banner 450 316.68 316.68 63.34
+FR EN13501 - 3200mm x 65m
+1 MISC337081 INNO Delivery Box 0.00 0.00 0.00
+Delivery Net VAT % VAT
+NEXT DAY STD 95.00 20.00 19.00
+End of Invoice
+Total Net: 411.68
+VAT Amount: 82.34
+Total: 494.02`);
+    assert.equal(frontlit.invoiceNumber, "592260");
+    assert.equal(frontlit.lines[0]?.rawUnit, "roll");
+    assert.equal(frontlit.lines[0]?.rawLineTotal, 316.68);
+    assert.equal(frontlit.lines[1]?.rawLineTotal, 0);
+    assert.equal(frontlit.lines[2]?.rawLineTotal, 95);
+    assert.equal(frontlit.warnings.some((warning) => /line totals/i.test(warning)), false);
+
+    const ink = draftFor(`Quality Print Services Ltd
+Invoice No.: 77366
+Invoice Date: 06/07/2026
+Quantity Details Unit Price Net Amount VAT Rate VAT
+3.00 770 UV Yellow - 1 litre 84.45 253.35 20.00 50.67
+2.00 770 UV Black - 1 litre 84.45 168.90 20.00 33.78
+1.00 CARRIAGE STANDARD DELIVERY 10.00 10.00 20.00 2.00
+Total VAT Amount 86.45
+Invoice Total 518.70`);
+    assert.equal(ink.supplierId, "qps");
+    assert.equal(ink.invoiceNumber, "77366");
+    assert.equal(ink.invoiceDate, "2026-07-06");
+    assert.equal(ink.subtotal, 432.25);
+    assert.equal(ink.lines[0]?.rawUnit, null);
+    assert.equal(ink.lines[0]?.rawQuantity, 3);
+    assert.equal(ink.lines[0]?.rawUnitPrice, 84.45);
+    assert.equal(ink.lines[0]?.reviewStatus, "unmatched");
+    assert.equal(ink.lines[2]?.rawDescription, "CARRIAGE STANDARD DELIVERY");
+    assert.equal(ink.warnings.some((warning) => /line totals|subtotal \+/i.test(warning)), false);
+    assert.equal(products.length, 2);
+
+    const bmg = draftFor(`BMG Media Source UK Limited Date 6/3/2026
+Tax Invoice # INVUK0007493
+SKU Description Ordered Shipped Tax Rate Rate Amount
+KPRDSPOS15248 KODAK Production Satin Poster 3 3 20% 100,64 301,92
+0 Paper, 200gsm - 1524mm x 80m (SCS-
+COC-004532 FSC Mix Credit)
+Subtotal 301,92
+Shipping Cost (BMG GB UPS Best Way) 60,00
+Total £434,30`);
+    assert.equal(bmg.supplierId, "bmg");
+    assert.equal(bmg.invoiceNumber, "INVUK0007493");
+    assert.equal(bmg.invoiceDate, "2026-03-06");
+    assert.equal(bmg.subtotal, 361.92);
+    assert.equal(bmg.vat, 72.38);
+    assert.equal(bmg.total, 434.3);
+    assert.equal(bmg.lines[0]?.rawDescription, poster);
+    assert.equal(bmg.lines[0]?.rawQuantity, 3);
+    assert.equal(bmg.lines[0]?.rawUnit, "roll");
+    assert.equal(bmg.lines[0]?.rawUnitPrice, 100.64);
+    assert.equal(bmg.lines[0]?.reviewStatus, "price_change");
+    assert.equal(bmg.lines[1]?.rawLineTotal, 60);
+    assert.equal(bmg.warnings.some((warning) => /line totals|subtotal \+/i.test(warning)), false);
+    const kept = historicalPriceDecision({
+      extractionStatus: "extracted",
+      invoiceDate: bmg.invoiceDate,
+      supplierId: "bmg",
+      line: bmg.lines[0],
+      product: products[1],
+      productActive: true,
+      supplierProducts: products,
+      mappings: [],
+      prices: [
+        {
+          id: "price-poster",
+          price: 90,
+          priceUnit: "roll",
+          effectiveDate: "2026-03-01",
+          approvedAt: "2026-03-01T00:00:00.000Z",
+          createdAt: "2026-03-01T00:00:00.000Z",
+        },
+      ],
+    });
+    assert.equal(kept.retain, false);
+    assert.equal(products[1]?.currentPrice, 90);
+    const duplicate = findDuplicateInvoice({
+      checksumSha256: "second-copy",
+      supplierId: "bmg",
+      invoiceNumber: bmg.invoiceNumber,
+      invoiceDate: bmg.invoiceDate,
+      existing: [
+        {
+          id: "first-copy",
+          supplierId: "bmg",
+          invoiceNumber: "INVUK0007493",
+          invoiceDate: "2026-03-06",
+          checksumSha256: "first-copy",
+        },
+      ],
+    });
+    assert.equal(duplicate?.invoiceId, "first-copy");
+  });
 });

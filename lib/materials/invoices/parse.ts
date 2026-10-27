@@ -50,9 +50,10 @@ export function parseInvoiceText(text: string): ParsedInvoice {
   const warnings: string[] = [];
   const sourceLines = invoiceSourceLines(text);
   const columns = readInvoiceColumns(sourceLines);
-  const rawSupplierName = labeledText(text, ["supplier", "vendor"]);
+  const rawSupplierName = letterheadSupplier(text) ?? labeledText(text, ["supplier", "vendor"]);
   const invoiceNumber =
     labeledText(text, ["invoice number", "invoice no", "invoice #", "inv no"]) ??
+    labelledInvoiceReference(text) ??
     colonInvoiceNumber(text) ??
     spacedInvoiceNumber(text) ??
     invoiceNumberOnFollowingLine(text) ??
@@ -62,23 +63,41 @@ export function parseInvoiceText(text: string): ParsedInvoice {
     parseInvoiceDate(labeledText(text, ["invoice date", "tax date", "document date", "date"])) ??
     parseInvoiceDate(text.match(/\btax\s+date\s*:\s*([^\n]+)/i)?.[1] ?? null) ??
     parseInvoiceDate(text.match(/\binvoice\s+date\s*[:\-]?\s*([^\n]+)/i)?.[1] ?? null) ??
+    parseInvoiceDate(text.match(/bmg media source uk limited\s+date\s+(\d{1,2}\/\d{1,2}\/\d{4})/i)?.[1] ?? null) ??
     dateOnFollowingLine(text, "document date") ??
     columns?.invoiceDate ??
     null;
-  const subtotal =
+  let subtotal =
     labeledMoney(text, ["subtotal", "total goods", "net", "goods total"]) ??
     totalNetAmount(text) ??
-    papergraphicsCommercialNet(text);
-  const vat =
+    papergraphicsCommercialNet(text) ??
+    innotechTotalNet(text) ??
+    bmgCommercialNet(text);
+  let vat =
     labeledAmount(text, /\bvat\s+\d+(?:\.\d+)?%\s+gbp\s+([\d,]+\.\d{2})\b/i) ??
+    labeledAmount(text, /\bvat\s+amount\s*:\s*([\d,]+\.\d{2})\b/i) ??
+    labeledAmount(text, /\btotal\s+vat\s+amount\s+([\d,]+\.\d{2})\b/i) ??
     percentVatAmount(text) ??
     labeledMoney(text, ["vat", "tax"]);
   const total =
     labeledAmount(text, /\btotal\s+amount\s+gbp\s+([\d,]+\.\d{2})\b/i) ??
     labeledMoney(text, ["invoice total", "amount due", "total due"]) ??
     labeledMoney(text, ["total"]) ??
-    totalWithTrailingWords(text);
+    totalWithTrailingWords(text) ??
+    bmgTotal(text);
   const lines = parseLines(sourceLines);
+
+  if (vat == null && subtotal != null && total != null && bmgCommercialNet(text) != null && moneyMatches(subtotal * 1.2, total)) {
+    vat = roundMoney(total - subtotal);
+  }
+
+  if (subtotal == null && vat != null && total != null && letterheadSupplier(text) === "Quality Print Services Ltd") {
+    const lineSum = roundMoney(lines.reduce((sum, line) => sum + (line.rawLineTotal ?? 0), 0));
+
+    if (lines.length > 0 && moneyMatches(lineSum + vat, total)) {
+      subtotal = lineSum;
+    }
+  }
 
   if (!rawSupplierName) {
     warnings.push("Supplier was not labelled on the invoice.");
@@ -170,6 +189,30 @@ function parseLines(sourceLines: string[]): ParsedInvoiceLine[] {
 
   if (papergraphicsHeader >= 0) {
     return parsePapergraphicsLines(sourceLines.slice(papergraphicsHeader + 1));
+  }
+
+  const qualityHeader = sourceLines.findIndex((line) =>
+    /^quantity\s+details\s+unit\s+price\s+net\s+amount\s+vat\s+rate\s+vat$/i.test(line)
+  );
+
+  if (qualityHeader >= 0) {
+    return parseQualityPrintLines(sourceLines.slice(qualityHeader + 1));
+  }
+
+  const innotechHeader = sourceLines.findIndex((line) =>
+    /^qty\s+code\s+description\s+price\s+each\s+line\s+total\s+line\s+vat$/i.test(line)
+  );
+
+  if (innotechHeader >= 0 && sourceLines.some((line) => /innotech digital/i.test(line))) {
+    return parseInnotechLines(sourceLines.slice(innotechHeader + 1));
+  }
+
+  const bmgHeader = sourceLines.findIndex((line) =>
+    /^sku\s+description\s+ordered\s+shipped\s+tax\s+rate\s+rate\s+amount$/i.test(line)
+  );
+
+  if (bmgHeader >= 0 && sourceLines.some((line) => /bmg media source uk/i.test(line))) {
+    return parseBmgLines(sourceLines.slice(bmgHeader + 1));
   }
 
   return parseSimpleLines(sourceLines);
@@ -446,6 +489,223 @@ function parsePapergraphicsLines(sourceLines: string[]) {
 
 function isPapergraphicsNoise(line: string) {
   return /^(?:papergraphics limited|diva innovation|crawley|tel:|fsc coc|bic:|invoice:|page:)/i.test(line);
+}
+
+const INNOTECH_PRODUCT =
+  /^(\d+)\s+([A-Z]{2,}[A-Z0-9]*)\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})$/;
+const QUALITY_PRINT_ROW =
+  /^(\d+\.\d{2})\s+(.+?)\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+\d+\.\d{2}\s+[\d,]+\.\d{2}$/;
+const BMG_ROW =
+  /^([A-Z0-9]{6,})\s+(.+?)\s+(\d+)\s+(\d+)\s+\d+%\s+(\d+,\d{2})\s+(\d+,\d{2})$/i;
+
+function statedRollUnit(description: string) {
+  return /\b\d+(?:\.\d+)?\s*mm\s*[x×]\s*\d+(?:\.\d+)?\s*m\b/i.test(description) ||
+    /\b\d+(?:\.\d+)?\s*m\s*[x×]\s*\d+(?:\.\d+)?\s*mm\b/i.test(description)
+    ? "roll"
+    : null;
+}
+
+function parseInnotechLines(sourceLines: string[]) {
+  const lines: ParsedInvoiceLine[] = [];
+  let specs: string[] = [];
+  let open: { quantity: number; sku: string; description: string; unitPrice: number; total: number } | null = null;
+  let inDelivery = false;
+
+  const pushOpen = () => {
+    if (!open) {
+      return;
+    }
+
+    const description = [open.description, ...specs].join(" ");
+    const unitPrice = moneyMatches(open.quantity * open.unitPrice, open.total) ? open.unitPrice : null;
+
+    lines.push({
+      lineNumber: lines.length + 1,
+      rawDescription: normalizeMaterialLabel(description) ?? description,
+      rawSupplierSku: open.sku,
+      rawQuantity: open.quantity,
+      rawUnit: statedRollUnit(description),
+      rawUnitPrice: unitPrice,
+      rawLineTotal: open.total,
+      rawTax: null,
+    });
+    open = null;
+    specs = [];
+  };
+
+  for (const sourceLine of sourceLines) {
+    if (/^end of invoice\b/i.test(sourceLine)) {
+      break;
+    }
+
+    if (/^delivery net\b/i.test(sourceLine)) {
+      pushOpen();
+      inDelivery = true;
+      continue;
+    }
+
+    const product = !inDelivery ? sourceLine.match(INNOTECH_PRODUCT) : null;
+
+    if (product) {
+      pushOpen();
+      const unitPrice = parseMoney(product[4]);
+      const total = parseMoney(product[5]);
+      const quantity = Number(product[1]);
+
+      if (unitPrice == null || total == null || !Number.isFinite(quantity)) {
+        continue;
+      }
+
+      open = { quantity, sku: product[2], description: product[3], unitPrice, total };
+      continue;
+    }
+
+    if (inDelivery) {
+      const delivery = sourceLine.match(/^(.+?)\s+([\d,]+\.\d{2})\s+\d+\.\d{2}\s+[\d,]+\.\d{2}$/);
+      const total = delivery ? parseMoney(delivery[2]) : null;
+
+      if (delivery && total != null && total !== 0) {
+        lines.push(chargeLine(lines.length + 1, delivery[1], total));
+      }
+
+      continue;
+    }
+
+    if (open && /\bmm\b|\bfr\b|\ben\d/i.test(sourceLine)) {
+      specs.push(sourceLine);
+    }
+  }
+
+  pushOpen();
+  return lines;
+}
+
+function parseQualityPrintLines(sourceLines: string[]) {
+  const lines: ParsedInvoiceLine[] = [];
+
+  for (const sourceLine of sourceLines) {
+    if (/^(?:bank details|delivery address|total vat amount|invoice total)\b/i.test(sourceLine)) {
+      break;
+    }
+
+    const match = sourceLine.match(QUALITY_PRINT_ROW);
+
+    if (!match) {
+      continue;
+    }
+
+    const quantity = Number(match[1]);
+    const unitPrice = parseMoney(match[3]);
+    const total = parseMoney(match[4]);
+
+    if (unitPrice == null || total == null || !Number.isFinite(quantity)) {
+      continue;
+    }
+
+    if (/^carriage\b/i.test(match[2])) {
+      lines.push(chargeLine(lines.length + 1, match[2], total));
+      continue;
+    }
+
+    lines.push({
+      lineNumber: lines.length + 1,
+      rawDescription: normalizeMaterialLabel(match[2]) ?? match[2],
+      rawSupplierSku: null,
+      rawQuantity: quantity,
+      rawUnit: null,
+      rawUnitPrice: moneyMatches(quantity * unitPrice, total) ? unitPrice : null,
+      rawLineTotal: total,
+      rawTax: null,
+    });
+  }
+
+  return lines;
+}
+
+function parseBmgLines(sourceLines: string[]) {
+  const lines: ParsedInvoiceLine[] = [];
+  let description: string[] = [];
+  let open: { sku: string; quantity: number; unitPrice: number; total: number } | null = null;
+
+  const pushOpen = () => {
+    if (!open) {
+      return;
+    }
+
+    const rawDescription = description.reduce((text, part, index) => {
+      if (index === 0) {
+        return part;
+      }
+
+      return text.endsWith("-") ? `${text}${part}` : `${text} ${part}`;
+    }, "");
+    const cleaned = normalizeMaterialLabel(rawDescription) ?? rawDescription;
+
+    lines.push({
+      lineNumber: lines.length + 1,
+      rawDescription: cleaned,
+      rawSupplierSku: open.sku,
+      rawQuantity: open.quantity,
+      rawUnit: statedRollUnit(cleaned),
+      rawUnitPrice: moneyMatches(open.quantity * open.unitPrice, open.total) ? open.unitPrice : null,
+      rawLineTotal: open.total,
+      rawTax: null,
+    });
+    open = null;
+    description = [];
+  };
+
+  for (const sourceLine of sourceLines) {
+    if (/^shipping cost\b/i.test(sourceLine)) {
+      pushOpen();
+      const shipping = sourceLine.match(/^shipping cost\s+(\([^)\n]+\))\s+(\d+,\d{2})$/i);
+      const total = shipping ? europeanAmount(shipping[2]) : null;
+
+      if (shipping && total != null && total !== 0) {
+        lines.push(chargeLine(lines.length + 1, `Shipping Cost ${shipping[1]}`, total));
+      }
+
+      continue;
+    }
+
+    if (/^subtotal\b|^if payment is due\b|^handling cost\b|^tax code\b|^total\b|^amount paid\b/i.test(sourceLine)) {
+      pushOpen();
+
+      if (/^total\b|^tax code\b|^amount paid\b/i.test(sourceLine)) {
+        break;
+      }
+
+      continue;
+    }
+
+    if (/^- /.test(sourceLine)) {
+      continue;
+    }
+
+    const row = sourceLine.match(BMG_ROW);
+
+    if (row) {
+      pushOpen();
+      const unitPrice = europeanAmount(row[5]);
+      const total = europeanAmount(row[6]);
+      const shipped = Number(row[4]);
+
+      if (unitPrice == null || total == null || !Number.isFinite(shipped)) {
+        continue;
+      }
+
+      open = { sku: row[1], quantity: shipped, unitPrice, total };
+      description = [row[2]];
+      continue;
+    }
+
+    if (open) {
+      description.push(sourceLine.replace(/^0\s+(?=Paper\b)/, ""));
+    }
+  }
+
+  pushOpen();
+  return lines;
 }
 
 function papergraphicsDescription(description: string, unit: string) {
@@ -818,6 +1078,67 @@ function spacedInvoiceNumber(text: string) {
 
 function totalNetAmount(text: string) {
   return labeledAmount(text, /\btotal\s+net\s+amount\s+gbp\s+([\d,]+\.\d{2})\b/i);
+}
+
+function letterheadSupplier(text: string) {
+  if (/innotech digital\s*&\s*display/i.test(text) && /qty\s+code\s+description\s+price\s+each/i.test(text)) {
+    return "Innotech Digital & Display";
+  }
+
+  if (/quality print services ltd/i.test(text) && /quantity\s+details\s+unit\s+price\s+net\s+amount/i.test(text)) {
+    return "Quality Print Services Ltd";
+  }
+
+  if (/bmg media source uk limited/i.test(text) && /sku\s+description\s+ordered\s+shipped/i.test(text)) {
+    return "BMG Media Source UK Limited";
+  }
+
+  return null;
+}
+
+function labelledInvoiceReference(text: string) {
+  const match =
+    text.match(/\binvoice\s+no\.?\s*:\s*([A-Za-z0-9][A-Za-z0-9\-/]+)/i) ??
+    text.match(/\btax\s+invoice\s*#\s*([A-Za-z0-9][A-Za-z0-9\-/]+)/i);
+
+  return acceptInvoiceNumber(match?.[1] ?? "");
+}
+
+function innotechTotalNet(text: string) {
+  if (!/innotech digital\s*&\s*display/i.test(text)) {
+    return null;
+  }
+
+  return labeledAmount(text, /\btotal\s+net\s*:\s*([\d,]+\.\d{2})\b/i);
+}
+
+function europeanAmount(value: string) {
+  return /^\d+,\d{2}$/.test(value) ? Number(value.replace(",", ".")) : parseMoney(value);
+}
+
+function bmgCommercialNet(text: string) {
+  if (!/bmg media source uk limited/i.test(text)) {
+    return null;
+  }
+
+  const goods = text.match(/\bsubtotal\s+(\d+,\d{2})\b/i);
+  const shipping = text.match(/\bshipping cost\s+\([^)\n]+\)\s+(\d+,\d{2})\b/i);
+  const goodsAmount = goods ? europeanAmount(goods[1]) : null;
+
+  if (goodsAmount == null) {
+    return null;
+  }
+
+  return roundMoney(goodsAmount + (shipping ? europeanAmount(shipping[1]) ?? 0 : 0));
+}
+
+function bmgTotal(text: string) {
+  if (!/bmg media source uk limited/i.test(text)) {
+    return null;
+  }
+
+  const match = text.match(/\btotal\s+£\s*(\d+,\d{2})\b/i);
+  return match ? europeanAmount(match[1]) : null;
 }
 
 function papergraphicsCommercialNet(text: string) {
