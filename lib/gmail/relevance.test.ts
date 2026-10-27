@@ -55,6 +55,13 @@ test("a supplier statement is excluded even though it lists invoice numbers", ()
   assert.equal(classifyPdfText(statement), "unknown");
 });
 
+test("a dunning letter is excluded even though it lists invoice numbers", () => {
+  assert.match(
+    classifyDocumentRelevance("Dunning letter\nInvoice number 01SI-2368836-20\nTotal 100.00 GBP").reason,
+    /credit-control letter/
+  );
+});
+
 test("a credit-control letter is excluded", () => {
   const text = "Credit control\nInvoice number 88 is overdue.\nLetter before action.";
   assert.equal(classifyDocumentRelevance(text).relevance, "irrelevant");
@@ -69,6 +76,24 @@ test("a genuine Pyramid invoice stays an invoice when it mentions overdue charge
 test("a genuine All Print Supplies invoice stays an invoice when it includes payment terms", () => {
   assert.equal(classifyDocumentRelevance(allPrint).relevance, "supplier_invoice");
   assert.equal(classifyPdfText(allPrint), "invoice");
+});
+
+test("a sales invoice stays an invoice when the footer mentions remittance advice", () => {
+  const text = `${allPrint}\nRemittance advice is shown on the following page.`;
+  assert.equal(classifyDocumentRelevance(text).relevance, "supplier_invoice");
+});
+
+test("a remittance advice and a payment receipt are excluded", () => {
+  assert.match(classifyDocumentRelevance("Remittance advice\nCandid Creative Limited").reason, /remittance advice/);
+  assert.match(classifyDocumentRelevance("Official receipt\nPayment receipt 100").reason, /receipt/);
+});
+
+test("an Antalis invoice heading and a statement page are distinguished", () => {
+  const antalis = "Antalis Ltd\ninvoice: 6701468943\ntax date: 14.08.2026\nGoods";
+  assert.equal(classifyDocumentRelevance(antalis).relevance, "supplier_invoice");
+  assert.equal(classifyPdfText(antalis), "invoice");
+  assert.match(classifyDocumentRelevance("statement page 1 of 1\nPPB Ltd\ninvoice 123456").reason, /supplier statement/);
+  assert.equal(classifyDocumentRelevance("Please settle invoice: tomorrow.").relevance, "needs_review");
 });
 
 test("the word invoice alone needs manual classification", () => {

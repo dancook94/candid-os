@@ -31,11 +31,23 @@ function irrelevantReason(top: string) {
     return `${EXCLUDED_DETAIL_PREFIX}: overdue-payment reminder.`;
   }
 
-  if (/\b(?:statement\s+of\s+account|account\s+statement|supplier\s+statement)\b/.test(top)) {
+  if (
+    /\b(?:statement\s+of\s+account|account\s+statement|supplier\s+statement|statement\s+page|statement\s+date)\b/.test(
+      top
+    )
+  ) {
     return `${EXCLUDED_DETAIL_PREFIX}: supplier statement.`;
   }
 
-  if (/\bcredit[\s-]control\b|\b(?:final\s+demand|letter\s+before\s+action)\b/.test(top)) {
+  if (/\bremittance advice\b/.test(top)) {
+    return `${EXCLUDED_DETAIL_PREFIX}: remittance advice.`;
+  }
+
+  if (/\b(?:payment receipt|official receipt)\b/.test(top)) {
+    return `${EXCLUDED_DETAIL_PREFIX}: receipt.`;
+  }
+
+  if (/\bcredit[\s-]control\b|\b(?:final\s+demand|letter\s+before\s+action|dunning(?:\s+letter)?)\b/.test(top)) {
     return `${EXCLUDED_DETAIL_PREFIX}: credit-control letter.`;
   }
 
@@ -45,7 +57,7 @@ function irrelevantReason(top: string) {
 export function classifyDocumentRelevance(text: string): DocumentRelevanceResult {
   const top = normalised(text);
   const strongInvoice = /\b(?:sales|tax)\s+invoice\b/.test(top);
-  const numberedInvoice = /\binvoice\s*(?:no\b|number\b|#)/.test(top);
+  const numberedInvoice = /\binvoice\s*(?:no\b|number\b|#)|\binvoice\s*:\s*\d/.test(top);
   const irrelevant = irrelevantReason(top);
 
   if (strongInvoice) {

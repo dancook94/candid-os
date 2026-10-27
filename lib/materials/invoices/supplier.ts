@@ -108,6 +108,52 @@ export function resolveInvoiceSupplier(
   };
 }
 
+export function resolveHistoricalSupplier(input: {
+  text: string;
+  filename?: string | null;
+  sender?: string | null;
+  rawSupplierName?: string | null;
+  suppliers: readonly InvoiceSupplierRef[];
+  aliases: readonly InvoiceAliasRef[];
+}) {
+  const fromText = resolveInvoiceSupplier(
+    input.rawSupplierName ?? null,
+    input.text,
+    input.suppliers,
+    input.aliases
+  );
+  const context = [input.filename, input.sender].filter((value) => value?.trim()).join("\n");
+  const fromContext = context
+    ? resolveInvoiceSupplier(null, context, input.suppliers, input.aliases)
+    : null;
+  const blocked = Boolean(
+    input.rawSupplierName && isBlockedSupplierName(input.rawSupplierName)
+  );
+
+  if (
+    fromText.supplierId &&
+    fromContext?.supplierId &&
+    fromText.supplierId !== fromContext.supplierId
+  ) {
+    return {
+      supplierId: null,
+      supplierName: null,
+      documentLabel: null,
+      warning: "The file and the invoice name different suppliers.",
+    };
+  }
+
+  if (fromText.supplierId || blocked || fromText.warning?.includes("More than one")) {
+    return fromText;
+  }
+
+  if (input.rawSupplierName?.trim()) {
+    return fromText;
+  }
+
+  return fromContext?.supplierId ? fromContext : fromText;
+}
+
 function longestDocumentPhrase(
   text: string,
   suppliers: readonly InvoiceSupplierRef[],
