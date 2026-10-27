@@ -627,6 +627,69 @@ export function InvoiceReprocessButton({
   );
 }
 
+export function NotSupplierInvoiceButton({
+  invoiceId,
+  gmailLinked,
+  alreadyIgnored,
+}: {
+  invoiceId: string;
+  gmailLinked: boolean;
+  alreadyIgnored: boolean;
+}) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+
+  async function exclude() {
+    const confirmed = window.confirm(
+      gmailLinked
+        ? "Mark this as not a supplier invoice? The review record stays, with status ignored. The Gmail PDF and checksum stay stored, and the Gmail item is skipped. Materials and approved prices are not changed."
+        : "Mark this as not a supplier invoice? The review record stays, with status ignored. Materials and approved prices are not changed."
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setPending(true);
+    setError(null);
+    const response = await fetch(`/api/admin/materials/invoices/${invoiceId}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "not_supplier_invoice" }),
+    });
+    const payload = await response.json().catch(() => null);
+    setPending(false);
+
+    if (!response.ok) {
+      setError(payload?.error ?? "The document could not be excluded.");
+      return;
+    }
+
+    router.refresh();
+  }
+
+  if (alreadyIgnored) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        This document is ignored. The original file stays stored.
+      </p>
+    );
+  }
+
+  return (
+    <div>
+      <Button type="button" variant="outline" disabled={pending} onClick={() => void exclude()}>
+        {pending ? "Saving…" : "Not a supplier invoice"}
+      </Button>
+      <p className="mt-2 text-xs text-muted-foreground">
+        Keeps the review record and the original file. It does not delete the invoice or change approved prices.
+      </p>
+      {error ? <p className="mt-2 text-sm text-red-700">{error}</p> : null}
+    </div>
+  );
+}
+
 function matchPresentation(confidence: string | null, method: string | null) {
   if (method === "manual") {
     return "Manual match";

@@ -31,7 +31,7 @@ export default async function MaterialSuppliersPage() {
         <PageHeader
           eyebrow="Materials"
           title="Suppliers"
-          description="The companies Candid buys material from. Invoice inboxes and contacts come later."
+          description="The companies Candid buys material from. Automatic Gmail invoice processing stays off until you approve a supplier."
           actions={
             <Link href="/admin/materials">
               <Button variant="outline">Materials</Button>

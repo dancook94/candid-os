@@ -1,3 +1,5 @@
+import { classifyDocumentRelevance } from "@/lib/gmail/relevance";
+
 export const GMAIL_DOCUMENT_TYPES = [
   "invoice",
   "credit_note",
@@ -40,6 +42,12 @@ export function classifyPdfText(text: string): Exclude<GmailDocumentType, "unsup
     return "unknown";
   }
 
+  const relevance = classifyDocumentRelevance(text);
+
+  if (relevance.relevance === "irrelevant") {
+    return "unknown";
+  }
+
   const invoiceAt = earliest(top, [
     /\bsales\s+invoice\b/,
     /\btax\s+invoice\b/,
@@ -53,16 +61,16 @@ export function classifyPdfText(text: string): Exclude<GmailDocumentType, "unsup
     /\border\s+acknowledgment\b/,
   ]);
 
-  if (invoiceAt != null && (orderAt == null || invoiceAt <= orderAt)) {
+  if (
+    invoiceAt != null &&
+    (orderAt == null || invoiceAt <= orderAt) &&
+    relevance.relevance === "supplier_invoice"
+  ) {
     return "invoice";
   }
 
   if (orderAt != null) {
     return "sales_order";
-  }
-
-  if (/\binvoice\b/.test(top)) {
-    return "invoice";
   }
 
   return "unknown";

@@ -246,7 +246,7 @@ export function outcomesForBlockedScope(run: PersistedProcessingRun, rows: reado
         outcome: "skipped" as const,
         invoiceId: null,
         extractionFailed: false,
-        detail: "This invoice is no longer eligible for this run.",
+        detail: row?.queueReason || "This invoice is no longer eligible for this run.",
       };
     });
 

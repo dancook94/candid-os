@@ -7,6 +7,8 @@ export type PromotionBlock = {
   detail: string;
 };
 
+export type DocumentQueue = "automatic" | "manual" | "excluded";
+
 export type PromotionPreviewRow = {
   itemId: string;
   supplierName: string | null;
@@ -16,6 +18,8 @@ export type PromotionPreviewRow = {
   pyramid: boolean;
   duplicate: PromotionBlock | null;
   selectable: boolean;
+  queue?: DocumentQueue;
+  queueReason?: string;
 };
 
 export type PromotionOutcome = {

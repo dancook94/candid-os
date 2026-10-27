@@ -44,7 +44,7 @@ export function GmailPromotionPanel(props: {
       const response = await fetch("/api/admin/materials/invoices/gmail/promote", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "promote", itemIds: selected }),
+        body: JSON.stringify({ action: "promote", mode: "automatic", itemIds: selected }),
       });
       const payload = (await response.json()) as PromotionReport & { error?: string };
 
@@ -57,6 +57,39 @@ export function GmailPromotionPanel(props: {
       router.refresh();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The invoices could not be promoted.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function classifyManually(itemId: string) {
+    const confirmed = window.confirm(
+      "Check this stored PDF? A clear supplier invoice is added to review. A statement, reminder, or credit-control letter is excluded. The original PDF and checksum stay stored."
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setBusy(true);
+    setError(null);
+
+    try {
+      const response = await fetch("/api/admin/materials/invoices/gmail/promote", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "promote", mode: "manual", itemIds: [itemId] }),
+      });
+      const payload = (await response.json()) as PromotionReport & { error?: string };
+
+      if (!response.ok) {
+        throw new Error(payload.error || "The document could not be classified.");
+      }
+
+      setReport(payload);
+      router.refresh();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The document could not be classified.");
     } finally {
       setBusy(false);
     }
@@ -96,8 +129,19 @@ export function GmailPromotionPanel(props: {
                   {row.filename}
                 </p>
                 <p className="text-muted-foreground">
-                  {row.duplicate ? row.duplicate.detail : "Ready for review"}
+                  {row.queueReason ?? (row.duplicate ? row.duplicate.detail : "Ready for review")}
                 </p>
+                {row.queue === "manual" ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="mt-2"
+                    disabled={busy}
+                    onClick={() => void classifyManually(row.itemId)}
+                  >
+                    Check this document
+                  </Button>
+                ) : null}
               </div>
             </li>
           ))}

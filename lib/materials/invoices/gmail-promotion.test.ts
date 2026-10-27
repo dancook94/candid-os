@@ -54,6 +54,9 @@ function candidate(overrides: Partial<PromotionCandidate> = {}): PromotionCandid
     status: "stored",
     supplierId: "pyramid",
     supplierName: "Pyramid Display Materials",
+    supplierApproved: true,
+    relevance: null,
+    detail: null,
     invoiceNumber: "SI100",
     invoiceDate: "2026-09-29",
     filename: "SI100.pdf",
@@ -77,6 +80,7 @@ function harness(options?: {
   const files: Record<string, unknown>[] = [];
   const lines: Record<string, unknown>[] = [];
   const events: Record<string, unknown>[] = [];
+  const marks: Array<{ itemId: string; status: string; detail: string; relevance: string }> = [];
   const removed: string[] = [];
   let downloads = 0;
   let ids = 0;
@@ -113,6 +117,9 @@ function harness(options?: {
     async insertEvents(rows) {
       events.push(...rows);
     },
+    async markDocument(itemId, update) {
+      marks.push({ itemId, ...update });
+    },
     async listLines(invoiceId) {
       return lines
         .filter((line) => line.invoice_id === invoiceId)
@@ -137,7 +144,7 @@ function harness(options?: {
     },
   };
 
-  return { db, storage, invoices, files, lines, events, removed, downloads: () => downloads };
+  return { db, storage, invoices, files, lines, events, marks, removed, downloads: () => downloads };
 }
 
 function authClient(input: { user?: { id: string } | null; role?: string; status?: string }) {
@@ -174,6 +181,7 @@ test("preview lists Pyramid invoices first and marks duplicates", () => {
         itemId: "antalis",
         supplierId: "antalis",
         supplierName: "Antalis",
+        supplierApproved: false,
         invoiceNumber: "A1",
         invoiceDate: "2026-08-01",
         filename: "antalis.pdf",
@@ -333,27 +341,44 @@ test("checksum and supplier invoice number duplicates are not inserted", async (
   assert.equal(numbered.downloads(), 0);
 });
 
-test("a missing invoice date on the PDF keeps the discovered invoice date", async () => {
-  const state = harness();
-  const report = await runPromotionBatch({
+test("a packing list stays for manual classification and a genuine invoice keeps a discovered date", async () => {
+  const packing = harness();
+  const packingReport = await runPromotionBatch({
     itemIds: ["item-1"],
     candidates: [candidate({ invoiceNumber: null, invoiceDate: "2026-09-29" })],
     catalog,
     existing: [],
     userId: "admin-1",
-    files: state.storage,
-    db: state.db,
+    files: packing.storage,
+    db: packing.db,
     extract: async () => ({ text: "Packing list only", extractionStatus: "extracted", warnings: [] }),
   });
 
+  assert.equal(packingReport.skipped, 1);
+  assert.match(packingReport.results[0]?.detail ?? "", /Needs manual classification/);
+  assert.equal(packing.invoices.length, 0);
+  assert.equal(packing.marks[0]?.status, "stored");
+  assert.equal(packing.marks[0]?.relevance, "needs_review");
+
+  const state = harness();
+  const report = await runPromotionBatch({
+    itemIds: ["item-1"],
+    candidates: [candidate({ invoiceDate: "2026-09-29" })],
+    catalog,
+    existing: [],
+    userId: "admin-1",
+    files: state.storage,
+    db: state.db,
+    extract: async () => ({
+      text: invoiceText.replace("Invoice date: 29 September 2026\n", ""),
+      extractionStatus: "extracted",
+      warnings: [],
+    }),
+  });
+
   assert.equal(report.promoted, 1);
-  assert.equal(report.results[0]?.extractionFailed, true);
   assert.equal(state.invoices[0]?.invoice_date, "2026-09-29");
-  assert.equal(state.lines.length, 0);
-  assert.equal(
-    state.events.some((event) => event.action === "extraction_failed"),
-    true
-  );
+  assert.equal(state.files[0]?.checksum_sha256, CHECKSUM);
 });
 
 test("a file-copy failure removes the review record and a line failure removes the copy", async () => {
@@ -530,4 +555,194 @@ test("promotion code does not create materials or approved prices", async () => 
   assert.doesNotMatch(source, /from\("material_prices"\)|from\("materials"\)|from\("material_supplier_products"\)/);
   assert.doesNotMatch(source, /create_material_from_invoice_line|approve_invoice_price_change/);
   assert.equal(promoteGmailInvoiceBatch.name, "promoteGmailInvoiceBatch");
+});
+
+const creditsafeReminder = `Creditsafe
+Overdue payment reminder
+Invoice number 445566
+The overdue balance is still unpaid.`;
+
+const supplierStatement = `Statement of account
+Invoice number SI100
+Invoice number SI101`;
+
+const allPrintInvoice = `All Print Supplies
+TAX INVOICE
+Invoice No. APS-2044
+Payment terms 30 days from invoice date.
+Overdue balances may attract interest.
+No. Description Quantity Unit
+Vinyl 1 Roll 12.00 1 12.00
+Subtotal 12.00
+20% VAT 2.40
+Total 14.40`;
+
+test("irrelevant reminders and statements are skipped without a review record", async () => {
+  for (const text of [creditsafeReminder, supplierStatement, "Credit control\nLetter before action\nInvoice number 9"]) {
+    const state = harness();
+    const report = await runPromotionBatch({
+      itemIds: ["item-1"],
+      candidates: [candidate()],
+      catalog,
+      existing: [],
+      userId: "admin-1",
+      files: state.storage,
+      db: state.db,
+      extract: async () => ({ text, extractionStatus: "extracted", warnings: [] }),
+    });
+
+    assert.equal(report.skipped, 1, text);
+    assert.match(report.results[0]?.detail ?? "", /Excluded as irrelevant/);
+    assert.equal(state.invoices.length, 0);
+    assert.equal(state.files.length, 0);
+    assert.equal(state.removed.length, 0);
+    assert.equal(state.marks[0]?.status, "skipped");
+    assert.equal(state.marks[0]?.relevance, "irrelevant");
+  }
+});
+
+test("an approved Pyramid or All Print invoice is promoted and an unapproved or unknown supplier is held", async () => {
+  const allPrintCatalog: PromotionCatalog = {
+    ...catalog,
+    suppliers: [
+      ...catalog.suppliers,
+      { id: "all-print", name: "All Print Supplies", normalizedName: "all print supplies" },
+    ],
+  };
+  const approved = harness();
+  const approvedReport = await runPromotionBatch({
+    itemIds: ["all-print"],
+    candidates: [
+      candidate({
+        itemId: "all-print",
+        supplierId: "all-print",
+        supplierName: "All Print Supplies",
+        supplierApproved: true,
+        invoiceNumber: "APS-2044",
+      }),
+    ],
+    catalog: allPrintCatalog,
+    existing: [],
+    userId: "admin-1",
+    files: approved.storage,
+    db: approved.db,
+    extract: async () => ({ text: allPrintInvoice, extractionStatus: "extracted", warnings: [] }),
+  });
+  assert.equal(approvedReport.promoted, 1);
+  assert.equal(approved.invoices.length, 1);
+
+  const unapproved = harness();
+  const unapprovedReport = await runPromotionBatch({
+    itemIds: ["item-1"],
+    candidates: [candidate({ supplierApproved: false })],
+    catalog,
+    existing: [],
+    userId: "admin-1",
+    files: unapproved.storage,
+    db: unapproved.db,
+    extract: async () => ({ text: invoiceText, extractionStatus: "extracted", warnings: [] }),
+  });
+  assert.equal(unapprovedReport.skipped, 1);
+  assert.match(unapprovedReport.results[0]?.detail ?? "", /not approved/);
+  assert.equal(unapproved.invoices.length, 0);
+  assert.equal(unapproved.marks[0]?.status, "stored");
+
+  const unknown = harness();
+  const unknownReport = await runPromotionBatch({
+    itemIds: ["item-1"],
+    candidates: [candidate({ supplierId: null, supplierName: null, supplierApproved: false })],
+    catalog,
+    existing: [],
+    userId: "admin-1",
+    files: unknown.storage,
+    db: unknown.db,
+    extract: async () => ({ text: invoiceText, extractionStatus: "extracted", warnings: [] }),
+  });
+  assert.equal(unknownReport.skipped, 1);
+  assert.match(unknownReport.results[0]?.detail ?? "", /not matched/);
+  assert.equal(unknown.invoices.length, 0);
+
+  const manual = await runPromotionBatch({
+    itemIds: ["item-1"],
+    candidates: [candidate({ supplierId: null, supplierName: null, supplierApproved: false })],
+    catalog,
+    existing: [],
+    userId: "admin-1",
+    files: unknown.storage,
+    db: unknown.db,
+    mode: "manual",
+    extract: async () => ({ text: invoiceText, extractionStatus: "extracted", warnings: [] }),
+  });
+  assert.equal(manual.promoted, 1);
+  assert.equal(unknown.invoices.length, 1);
+});
+
+test("an ambiguous document is held and a manual check still excludes a reminder", async () => {
+  const ambiguous = harness();
+  const report = await runPromotionBatch({
+    itemIds: ["item-1"],
+    candidates: [candidate()],
+    catalog,
+    existing: [],
+    userId: "admin-1",
+    files: ambiguous.storage,
+    db: ambiguous.db,
+    extract: async () => ({
+      text: "Please find your invoice attached.",
+      extractionStatus: "extracted",
+      warnings: [],
+    }),
+  });
+  assert.equal(report.skipped, 1);
+  assert.match(report.results[0]?.detail ?? "", /Needs manual classification/);
+  assert.equal(ambiguous.marks[0]?.status, "stored");
+  assert.equal(ambiguous.invoices.length, 0);
+
+  const reminder = harness();
+  const excluded = await runPromotionBatch({
+    itemIds: ["item-1"],
+    candidates: [candidate()],
+    catalog,
+    existing: [],
+    userId: "admin-1",
+    files: reminder.storage,
+    db: reminder.db,
+    mode: "manual",
+    extract: async () => ({ text: creditsafeReminder, extractionStatus: "extracted", warnings: [] }),
+  });
+  assert.equal(excluded.skipped, 1);
+  assert.equal(excluded.promoted, 0);
+  assert.equal(reminder.invoices.length, 0);
+  assert.equal(reminder.marks[0]?.status, "skipped");
+});
+
+test("preview keeps an approved invoice automatic and holds an unknown supplier", () => {
+  const rows = buildPromotionPreview({
+    candidates: [
+      candidate({ itemId: "approved" }),
+      candidate({
+        itemId: "unknown",
+        supplierId: null,
+        supplierName: null,
+        supplierApproved: false,
+        invoiceNumber: "U1",
+        filename: "unknown.pdf",
+      }),
+      candidate({
+        itemId: "reminder",
+        relevance: "irrelevant",
+        detail: "Excluded as irrelevant: overdue-payment reminder.",
+        status: "skipped",
+        filename: "reminder.pdf",
+      }),
+    ],
+    existing: [],
+  });
+
+  assert.equal(rows.find((row) => row.itemId === "approved")?.queue, "automatic");
+  assert.equal(rows.find((row) => row.itemId === "approved")?.selectable, true);
+  assert.equal(rows.find((row) => row.itemId === "unknown")?.queue, "manual");
+  assert.equal(rows.find((row) => row.itemId === "unknown")?.selectable, false);
+  assert.equal(rows.find((row) => row.itemId === "reminder")?.queue, "excluded");
+  assert.match(rows.find((row) => row.itemId === "reminder")?.queueReason ?? "", /Excluded as irrelevant/);
 });

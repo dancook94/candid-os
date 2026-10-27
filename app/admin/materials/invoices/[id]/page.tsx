@@ -5,6 +5,7 @@ import {
   InvoiceLineList,
   InvoiceReprocessButton,
   InvoiceSupplierForm,
+  NotSupplierInvoiceButton,
 } from "@/components/materials/invoice-review-panel";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
@@ -175,6 +176,11 @@ export default async function SupplierInvoicePage({
             <InvoiceReprocessButton
               invoiceId={invoice.id}
               blockedReason={await findInvoiceReprocessBlock(supabase, invoice.id)}
+            />
+            <NotSupplierInvoiceButton
+              invoiceId={invoice.id}
+              gmailLinked={Boolean(invoice.gmail_import_item_id)}
+              alreadyIgnored={invoice.processing_status === "ignored"}
             />
           </aside>
         </div>

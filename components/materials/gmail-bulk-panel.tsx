@@ -146,7 +146,10 @@ function PersistentBulkPanel(props: {
         <h2 className="text-lg font-semibold">Process stored invoices</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           This works through invoice PDFs already saved from Gmail. It does not look in the mailbox.
+          Only a clear supplier invoice matched to a supplier you have approved is included.
+          Statements, reminders, and unmatched suppliers stay out of the automatic list.
           Choose a maximum before starting. That list is fixed for the run, including later scheduled ticks.
+          A skipped, duplicate, or failed document still uses its place and is not replaced.
           You can close this page. Processing continues about every 15 minutes until the maximum or the queue is finished.
           Recognised products are matched for review. New materials and price changes stay waiting for a person to approve them.
         </p>
@@ -171,6 +174,7 @@ function PersistentBulkPanel(props: {
         <Stat label="Processed invoices" value={progress?.processed ?? 0} />
         <Stat label="Remaining allowance" value={progress?.remaining ?? null} />
       </dl>
+      <DocumentQueues rows={props.rows} />
       <div className="flex flex-wrap items-end gap-3">
         <label className="text-sm">
           Invoices per batch
@@ -481,6 +485,47 @@ function Stat(props: { label: string; value: number | null }) {
     <div className="rounded-2xl border border-border/70 px-3 py-2">
       <dt className="text-xs text-muted-foreground">{props.label}</dt>
       <dd className="text-lg font-semibold">{props.value ?? "—"}</dd>
+    </div>
+  );
+}
+
+function DocumentQueues(props: { rows: PromotionPreviewRow[] }) {
+  const groups = [
+    {
+      title: "Eligible for automatic processing",
+      rows: props.rows.filter((row) => (row.queue ?? (row.selectable ? "automatic" : "manual")) === "automatic" && row.selectable),
+    },
+    {
+      title: "Needs manual classification",
+      rows: props.rows.filter((row) => (row.queue ?? (row.selectable ? "automatic" : "manual")) === "manual"),
+    },
+    {
+      title: "Excluded as irrelevant",
+      rows: props.rows.filter((row) => row.queue === "excluded"),
+    },
+  ];
+
+  return (
+    <div className="grid gap-3 lg:grid-cols-3">
+      {groups.map((group) => (
+        <div key={group.title} className="rounded-2xl border border-border/70 px-3 py-3">
+          <p className="text-sm font-medium">
+            {group.title} <span className="text-muted-foreground">({group.rows.length})</span>
+          </p>
+          {group.rows.length === 0 ? (
+            <p className="mt-2 text-sm text-muted-foreground">None in this view.</p>
+          ) : (
+            <ul className="mt-2 max-h-40 space-y-2 overflow-auto text-sm text-muted-foreground">
+              {group.rows.slice(0, 8).map((row) => (
+                <li key={row.itemId}>
+                  <span className="text-foreground">{row.invoiceNumber ?? row.filename}</span>
+                  {row.queueReason ? ` — ${row.queueReason}` : ""}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ))}
     </div>
   );
 }

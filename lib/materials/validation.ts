@@ -201,6 +201,7 @@ export type SupplierWriteInput = {
   name: string;
   normalizedName: string;
   active: boolean;
+  gmailAutoProcessing: boolean | null;
 };
 
 export function parseSupplierWrite(
@@ -217,6 +218,7 @@ export function parseSupplierWrite(
     normalizedName: normalizeSupplierName(name),
     active:
       options.active ?? (typeof body.active === "boolean" ? body.active : true),
+    gmailAutoProcessing: typeof body.gmailAutoProcessing === "boolean" ? body.gmailAutoProcessing : null,
   };
 }
 

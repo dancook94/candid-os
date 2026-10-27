@@ -987,7 +987,7 @@ describe("supplier invoice phase 1", () => {
       (_, index) => files[index] !== "app/admin/materials/invoices/page.tsx"
     );
 
-    assert.doesNotMatch(pipeline.join("\n"), /gmail|googleapis/i);
+    assert.doesNotMatch(pipeline.join("\n"), /googleapis|gmail\.users|gmail\.readonly|@\/lib\/gmail/i);
     assert.match(sources[6], /\/admin\/materials\/invoices\/gmail/);
     assert.doesNotMatch(combined, /from\("material_prices"\)[\s\S]{0,120}\.(insert|update|delete|upsert)/);
     assert.doesNotMatch(sources[0], /material_prices/);

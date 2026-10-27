@@ -43,6 +43,14 @@ export function mapMaterialsWriteError(error: PostgrestLikeError) {
   return "Unable to save. Check the details and try again.";
 }
 
+export function postgresColumnMissing(error: PostgrestLikeError | null, column: string) {
+  if (!error) {
+    return false;
+  }
+
+  return error.code === "42703" || (error.message ?? "").includes(column);
+}
+
 export function isMaterialsSchemaMissing(error: PostgrestLikeError | null) {
   if (!error) {
     return false;

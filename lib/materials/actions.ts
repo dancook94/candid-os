@@ -10,7 +10,7 @@ import {
   parseSupplierWrite,
   parseUuid,
 } from "@/lib/materials/validation";
-import { mapMaterialsWriteError } from "@/lib/materials/write-error";
+import { mapMaterialsWriteError, postgresColumnMissing } from "@/lib/materials/write-error";
 
 type ActionResult =
   | { ok: true; id?: string }
@@ -228,18 +228,32 @@ export async function updateSupplierRecord(
     return { ok: false, status: auth.status, error: auth.message };
   }
 
-  const { data, error } = await supabase
-    .from("suppliers")
-    .update({
-      name: parsed.name,
-      normalized_name: parsed.normalizedName,
-      active: parsed.active,
-    })
-    .eq("id", id)
-    .select("id")
-    .maybeSingle();
+  const update: {
+    name: string;
+    normalized_name: string;
+    active: boolean;
+    gmail_auto_processing_enabled?: boolean;
+  } = {
+    name: parsed.name,
+    normalized_name: parsed.normalizedName,
+    active: parsed.active,
+  };
+
+  if (parsed.gmailAutoProcessing !== null) {
+    update.gmail_auto_processing_enabled = parsed.gmailAutoProcessing;
+  }
+
+  const { data, error } = await supabase.from("suppliers").update(update).eq("id", id).select("id").maybeSingle();
 
   if (error) {
+    if (postgresColumnMissing(error, "gmail_auto_processing_enabled")) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Apply the supplier eligibility migration before changing automatic processing.",
+      };
+    }
+
     return { ok: false, status: 400, error: mapMaterialsWriteError(error) };
   }
 
