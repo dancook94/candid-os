@@ -7,7 +7,7 @@ import {
   reliableSheetSize,
 } from "@/lib/materials/invoices/match";
 import type { InvoiceMatchProduct, InvoiceReviewStatus } from "@/lib/materials/invoices/model";
-import { formatGbp, moneyMatches, roundMoney } from "@/lib/materials/invoices/money";
+import { formatGbp, hasUnresolvedInvoiceTotalWarning, moneyMatches, roundMoney } from "@/lib/materials/invoices/money";
 import { calculateCostPerSquareMetre } from "@/lib/materials/pricing";
 import {
   isPurchaseUnit,
@@ -38,6 +38,9 @@ export type BulkReviewSourceInvoice = {
   extractionStatus: string;
   extractionWarnings: string[];
   processingStatus: string;
+  subtotal: number | null;
+  vat: number | null;
+  total: number | null;
 };
 
 export type BulkReviewSourceLine = {
@@ -136,6 +139,9 @@ export type BulkReviewGroup = {
   lengthMm: number | null;
   similarMaterials: Array<{ id: string; name: string }>;
   blockedReason: string | null;
+  subtotal: number | null;
+  vat: number | null;
+  total: number | null;
 };
 
 export type BulkReviewSummary = {
@@ -336,14 +342,21 @@ export function buildBulkReview(input: {
       invoice.processingStatus !== "ignored"
     ) {
       groups.push(
-        repairGroup(
-          invoice,
-          [],
+        visibleRepair(invoice, [
           invoice.extractionWarnings.some((warning) => /no invoice lines/i.test(warning))
             ? "No invoice lines could be read from this invoice."
-            : "This invoice has no lines to review."
-        )
+            : "This invoice has no lines to review.",
+        ])
       );
+      continue;
+    }
+
+    const totalWarnings = invoice.extractionWarnings.filter((warning) =>
+      hasUnresolvedInvoiceTotalWarning([warning])
+    );
+
+    if (invoiceLines.length > 0 && invoiceLines.every((line) => !OPEN_STATUSES.has(line.reviewStatus)) && totalWarnings.length > 0) {
+      groups.push(visibleRepair(invoice, totalWarnings));
     }
   }
 
@@ -1100,6 +1113,23 @@ function repairGroup(invoice: BulkReviewSourceInvoice, _lines: BulkReviewSourceL
   });
 }
 
+function visibleRepair(invoice: BulkReviewSourceInvoice, reasons: string[]): BulkReviewGroup {
+  const totalWarning = hasUnresolvedInvoiceTotalWarning(reasons);
+
+  return {
+    ...repairGroup(invoice, [], reasons[0] ?? "This invoice needs repair."),
+    warnings: reasons.filter(Boolean),
+    invoiceCount: 1,
+    invoices: [{ id: invoice.id, number: invoice.number, date: invoice.date }],
+    subtotal: invoice.subtotal,
+    vat: invoice.vat,
+    total: invoice.total,
+    proposedAction: totalWarning
+      ? "Repair the invoice total on the invoice page. This warning stays until the totals are repaired."
+      : "Repair this invoice individually. Bulk approval is not available.",
+  };
+}
+
 function chargeSeed(invoice: BulkReviewSourceInvoice, title: string): BulkReviewGroup {
   return baseGroup({
     id: `charge:${invoice.supplierId}:${comparable(title)}`,
@@ -1332,6 +1362,9 @@ function baseGroup(input: {
     lengthMm: input.lengthMm ?? null,
     similarMaterials: input.similarMaterials ?? [],
     blockedReason: input.blockedReason ?? null,
+    subtotal: null,
+    vat: null,
+    total: null,
   };
 }
 
@@ -1624,7 +1657,5 @@ function sharedNumber(values: Array<number | null>) {
 }
 
 function invoiceHasTotalWarning(invoice: BulkReviewSourceInvoice | undefined) {
-  return Boolean(
-    invoice?.extractionWarnings.some((warning) => warning.includes("Subtotal") || warning.includes("line totals"))
-  );
+  return hasUnresolvedInvoiceTotalWarning(invoice?.extractionWarnings ?? []);
 }

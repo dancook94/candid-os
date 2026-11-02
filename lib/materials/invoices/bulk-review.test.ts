@@ -24,6 +24,9 @@ function invoice(
     extractionStatus: "extracted",
     extractionWarnings: [],
     processingStatus: "unmatched",
+    subtotal: null,
+    vat: null,
+    total: null,
     ...overrides,
   };
 }
@@ -854,6 +857,91 @@ describe("bulk invoice review decisions", () => {
 });
 
 describe("bulk invoice review safety source", () => {
+  it("keeps an ignored invoice with a subtotal warning visible without reopening its lines", () => {
+    const warning = "The line totals do not add up to the subtotal.";
+    const built = review({
+      invoices: [
+        invoice({
+          id: "142049",
+          supplierId: "all-print",
+          supplierName: "All Print Supplies",
+          number: "142049",
+          extractionWarnings: [warning],
+          processingStatus: "extraction_error",
+          subtotal: 336.3,
+          vat: 67.26,
+          total: 403.56,
+        }),
+        invoice({
+          id: "144944",
+          supplierId: "all-print",
+          supplierName: "All Print Supplies",
+          number: "144944",
+          extractionWarnings: [warning],
+          processingStatus: "extraction_error",
+          subtotal: 2317.23,
+          vat: 463.45,
+          total: 2780.68,
+        }),
+        invoice({
+          id: "146020",
+          supplierId: "all-print",
+          supplierName: "All Print Supplies",
+          number: "146020",
+          extractionWarnings: [warning],
+          processingStatus: "extraction_error",
+          subtotal: 2300.88,
+          vat: 460.18,
+          total: 2761.06,
+        }),
+        invoice({
+          id: "processed",
+          supplierId: "pyramid",
+          supplierName: "Pyramid Display Materials",
+          number: "SI1311911",
+          processingStatus: "processed",
+        }),
+        invoice({
+          id: "139351",
+          supplierId: "all-print",
+          supplierName: "All Print Supplies",
+          number: "139351",
+          extractionWarnings: ["No invoice lines could be read from the text."],
+          processingStatus: "extraction_error",
+        }),
+        invoice({
+          id: "146019",
+          supplierId: "all-print",
+          supplierName: "All Print Supplies",
+          number: "146019",
+          extractionWarnings: ["No invoice lines could be read from the text."],
+          processingStatus: "extraction_error",
+        }),
+      ],
+      lines: [
+        line({ id: "courier-a", invoiceId: "142049", description: "APS DELIVERY", reviewStatus: "ignored" }),
+        line({ id: "courier-b", invoiceId: "144944", description: "SAME DAY COURIERS", reviewStatus: "ignored" }),
+        line({ id: "courier-c", invoiceId: "146020", description: "SAME DAY COURIERS", reviewStatus: "ignored" }),
+        line({ id: "done", invoiceId: "processed", reviewStatus: "processed" }),
+      ],
+    });
+    const repairs = built.groups.filter((group) => group.kind === "repair");
+    const warned = repairs.filter((group) => group.warnings.includes(warning));
+
+    assert.deepEqual(
+      warned.map((group) => group.invoices[0]?.number),
+      ["142049", "144944", "146020"]
+    );
+    assert.equal(warned.every((group) => group.canApply === false && group.lines.length === 0), true);
+    assert.equal(warned[0]?.total, 403.56);
+    assert.equal(warned[0]?.supplierName, "All Print Supplies");
+    assert.equal(built.groups.some((group) => group.lines.some((item) => item.id.startsWith("courier"))), false);
+    assert.equal(built.groups.some((group) => group.invoices.some((item) => item.number === "SI1311911")), false);
+    assert.equal(repairs.some((group) => group.invoices[0]?.number === "139351"), true);
+    assert.equal(repairs.some((group) => group.invoices[0]?.number === "146019"), true);
+    assert.equal(built.summary.openLineCount, 0);
+  });
+
   it("keeps the page and the write path admin-only and free of future rules", async () => {
     const page = await readFile(
       new URL("../../../app/admin/materials/invoices/bulk-review/page.tsx", import.meta.url),

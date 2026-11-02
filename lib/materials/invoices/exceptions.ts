@@ -1,3 +1,4 @@
+import { hasUnresolvedInvoiceTotalWarning } from "@/lib/materials/invoices/money";
 import type { InvoiceListItem } from "@/lib/materials/invoices/queries";
 
 export const EXCEPTION_KINDS = [
@@ -34,8 +35,9 @@ export function invoiceExceptionKinds(invoice: InvoiceListItem): ExceptionKind[]
   const counts = invoice.lineCounts;
   const lineTotal = Object.values(counts).reduce((sum, count) => sum + count, 0);
   const kinds: ExceptionKind[] = [];
+  const totalWarning = hasUnresolvedInvoiceTotalWarning(invoice.extractionWarnings);
   const extractionProblem =
-    invoice.extractionStatus !== "extracted" || lineTotal === 0 || counts.extraction_error > 0;
+    invoice.extractionStatus !== "extracted" || lineTotal === 0 || counts.extraction_error > 0 || totalWarning;
 
   if (extractionProblem) {
     kinds.push("extraction");
@@ -71,6 +73,27 @@ export function invoiceExceptionKinds(invoice: InvoiceListItem): ExceptionKind[]
   }
 
   return PRIORITY.filter((kind) => kinds.includes(kind));
+}
+
+export function invoiceExceptionReasons(invoice: InvoiceListItem) {
+  const totalWarnings = invoice.extractionWarnings.filter((warning) => hasUnresolvedInvoiceTotalWarning([warning]));
+  const onlyTotalWarning =
+    totalWarnings.length > 0 &&
+    invoice.extractionStatus === "extracted" &&
+    invoice.lineCounts.extraction_error === 0 &&
+    Object.values(invoice.lineCounts).reduce((sum, count) => sum + count, 0) > 0;
+
+  return invoiceExceptionKinds(invoice).flatMap((kind) =>
+    kind === "extraction" && onlyTotalWarning ? totalWarnings : [EXCEPTION_LABELS[kind]]
+  );
+}
+
+export function invoiceListedAsExtractionError(invoice: InvoiceListItem) {
+  return (
+    invoice.extractionStatus !== "extracted" ||
+    invoice.lineCounts.extraction_error > 0 ||
+    hasUnresolvedInvoiceTotalWarning(invoice.extractionWarnings)
+  );
 }
 
 export function filterInvoiceExceptions(

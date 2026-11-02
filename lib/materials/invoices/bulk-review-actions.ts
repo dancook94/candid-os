@@ -222,7 +222,7 @@ async function loadReviewTables(supabase: SupabaseClient) {
     fetchAll(() =>
       supabase
         .from("supplier_invoices")
-        .select("id, invoice_number, invoice_date, supplier_id, extraction_status, extraction_warnings, processing_status")
+        .select("id, invoice_number, invoice_date, supplier_id, extraction_status, extraction_warnings, processing_status, subtotal, vat, total")
         .order("id")
     ),
     fetchAll(() =>
@@ -356,6 +356,9 @@ async function loadReviewTables(supabase: SupabaseClient) {
     extractionStatus: text(row.extraction_status) ?? "failed",
     extractionWarnings: warnings(row.extraction_warnings),
     processingStatus: text(row.processing_status) ?? "extraction_error",
+    subtotal: number(row.subtotal),
+    vat: number(row.vat),
+    total: number(row.total),
   }));
   const lines: BulkReviewSourceLine[] = lineRows.rows.flatMap((row) => {
     const reviewStatus = text(row.review_status);
