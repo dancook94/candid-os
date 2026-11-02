@@ -57,6 +57,9 @@ export default async function SupplierInvoicesPage({ searchParams }: InvoicesPag
           description="Upload a supplier invoice, check the lines against current approved prices, and resolve the exceptions. Nothing on this page changes an approved price."
           actions={
             <div className="flex flex-wrap gap-2">
+              <Link href="/admin/materials/invoices/bulk-review">
+                <Button variant="outline">Bulk review</Button>
+              </Link>
               <Link href="/admin/materials/invoices/exceptions">
                 <Button variant="outline">Review queue</Button>
               </Link>

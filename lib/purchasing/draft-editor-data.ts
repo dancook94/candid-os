@@ -28,6 +28,7 @@ const PURCHASE_UNITS = new Set<PurchaseUnit>([
   "square_metre",
   "unit",
   "pack",
+  "litre",
 ]);
 
 export type CatalogueChoice = {

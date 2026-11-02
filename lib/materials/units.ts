@@ -5,6 +5,7 @@ export const PURCHASE_UNITS = [
   "square_metre",
   "unit",
   "pack",
+  "litre",
 ] as const;
 
 export type PurchaseUnit = (typeof PURCHASE_UNITS)[number];
@@ -16,6 +17,7 @@ export const PURCHASE_UNIT_LABELS: Record<PurchaseUnit, string> = {
   square_metre: "Square metre",
   unit: "Unit",
   pack: "Pack",
+  litre: "Litre",
 };
 
 export function isPurchaseUnit(value: string): value is PurchaseUnit {
