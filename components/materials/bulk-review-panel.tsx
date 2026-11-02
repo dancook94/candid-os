@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
@@ -174,6 +175,40 @@ function GroupCard(props: {
   onSubmit: (decision: BulkSubmission) => void;
 }) {
   const { group } = props;
+
+  if (group.kind === "repair" && group.lines.length === 0) {
+    const invoice = group.invoices[0];
+
+    return (
+      <Card className="rounded-2xl shadow-sm ring-0">
+        <CardContent className="space-y-4 p-6">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">{group.supplierName}</p>
+            <h3 className="text-base font-semibold">{group.title}</h3>
+          </div>
+          <dl className="grid gap-3 text-sm sm:grid-cols-3">
+            <Fact label="Subtotal" value={group.subtotal == null ? "Not extracted" : formatGbp(group.subtotal)} />
+            <Fact label="VAT" value={group.vat == null ? "Not extracted" : formatGbp(group.vat)} />
+            <Fact label="Invoice total" value={group.total == null ? "Not extracted" : formatGbp(group.total)} />
+          </dl>
+          {group.warnings.length > 0 ? (
+            <ul className="space-y-1 text-sm text-amber-950">
+              {group.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          ) : null}
+          <p className="text-sm text-muted-foreground">{group.proposedAction}</p>
+          {invoice ? (
+            <Link href={`/admin/materials/invoices/${invoice.id}`} className="text-sm font-medium underline-offset-4 hover:underline">
+              Open invoice {invoice.number ?? ""}
+            </Link>
+          ) : null}
+        </CardContent>
+      </Card>
+    );
+  }
+
   const guidance = purchaseUnitGuidance({
     statedUnit: group.statedUnit,
     unit: props.unit || group.purchaseUnit,

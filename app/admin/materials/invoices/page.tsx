@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
-import { formatGbp } from "@/lib/materials/invoices/money";
+import { invoiceListedAsExtractionError } from "@/lib/materials/invoices/exceptions";
+import { formatGbp, hasUnresolvedInvoiceTotalWarning } from "@/lib/materials/invoices/money";
 import { PROCESSING_STATUS_LABELS } from "@/lib/materials/invoices/model";
 import {
   emptyLineCounts,
@@ -117,7 +118,13 @@ export default async function SupplierInvoicesPage({ searchParams }: InvoicesPag
                 label="Extraction errors"
                 count={
                   totals.extraction_error +
-                  invoices.filter((invoice) => invoice.extractionStatus !== "extracted").length
+                  invoices.filter((invoice) => invoice.extractionStatus !== "extracted").length +
+                  invoices.filter(
+                    (invoice) =>
+                      hasUnresolvedInvoiceTotalWarning(invoice.extractionWarnings) &&
+                      invoice.extractionStatus === "extracted" &&
+                      invoice.lineCounts.extraction_error === 0
+                  ).length
                 }
               />
               <FilterLink
@@ -224,9 +231,7 @@ function matchesView(invoice: InvoiceListItem, view: string) {
   }
 
   if (view === "extraction_error") {
-    return (
-      invoice.extractionStatus !== "extracted" || invoice.lineCounts.extraction_error > 0
-    );
+    return invoiceListedAsExtractionError(invoice);
   }
 
   if (view === "processed") {
@@ -249,5 +254,7 @@ function exceptionSummary(invoice: InvoiceListItem) {
     invoice.lineCounts.query ? `${invoice.lineCounts.query} queries` : "",
   ].filter(Boolean);
 
-  return parts.length > 0 ? parts.join(" · ") : `${invoice.lineCounts.processed} matched`;
+  const totalWarnings = invoice.extractionWarnings.filter((warning) => hasUnresolvedInvoiceTotalWarning([warning]));
+
+  return [...parts, ...totalWarnings].join(" · ") || `${invoice.lineCounts.processed} matched`;
 }

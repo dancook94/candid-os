@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { describe, it } from "node:test";
 
-import { filterInvoiceExceptions, invoiceExceptionKinds } from "@/lib/materials/invoices/exceptions";
+import {
+  filterInvoiceExceptions,
+  invoiceExceptionKinds,
+  invoiceExceptionReasons,
+  invoiceListedAsExtractionError,
+} from "@/lib/materials/invoices/exceptions";
 import {
   bulkCounts,
   failedItemIds,
@@ -66,6 +71,7 @@ function invoice(input: Partial<InvoiceListItem> & { lines?: Partial<InvoiceList
     processingStatus: input.processingStatus ?? "needs_review",
     createdAt: "2026-10-26T00:00:00Z",
     lineCounts: { ...emptyLineCounts(), ...input.lines },
+    extractionWarnings: input.extractionWarnings ?? [],
   };
 }
 
@@ -279,6 +285,56 @@ describe("gmail bulk processing", () => {
     assert.equal(priceChange.matchMethod, "sku");
     assert.equal(foamAgainstDibond.matchedProductId, null);
     assert.equal(foamAgainstDibond.reviewStatus, "unmatched");
+  });
+
+  it("keeps ignored invoices with unresolved total warnings visible and leaves complete invoices ready", () => {
+    const warning = "The line totals do not add up to the subtotal.";
+    const hidden = ["142049", "144944", "146020"].map((number) =>
+      invoice({
+        id: number,
+        invoiceNumber: number,
+        supplierName: "All Print Supplies",
+        extractionWarnings: [warning],
+        processingStatus: "extraction_error",
+        lines: { ignored: 1 },
+      })
+    );
+    const processed = invoice({
+      id: "processed",
+      invoiceNumber: "SI1311911",
+      lines: { processed: 2 },
+      processingStatus: "processed",
+    });
+    const ignoredWithoutWarning = invoice({
+      id: "ignored-clear",
+      lines: { ignored: 1 },
+      processingStatus: "ignored",
+    });
+    const unread = ["139351", "146019"].map((number) =>
+      invoice({
+        id: number,
+        invoiceNumber: number,
+        supplierName: "All Print Supplies",
+        extractionWarnings: ["No invoice lines could be read from the text."],
+        processingStatus: "extraction_error",
+      })
+    );
+    const queue = [...hidden, processed, ignoredWithoutWarning, ...unread];
+
+    assert.deepEqual(invoiceExceptionKinds(hidden[0]), ["extraction"]);
+    assert.deepEqual(invoiceExceptionReasons(hidden[0]), [warning]);
+    assert.deepEqual(invoiceExceptionKinds(processed), ["ready"]);
+    assert.equal(invoiceListedAsExtractionError(hidden[0]), true);
+    assert.equal(invoiceListedAsExtractionError(processed), false);
+    assert.equal(invoiceListedAsExtractionError(ignoredWithoutWarning), false);
+    assert.deepEqual(
+      filterInvoiceExceptions(queue, {}).map((item) => item.id),
+      ["142049", "144944", "146020", "139351", "146019"]
+    );
+    assert.deepEqual(
+      queue.filter((item) => invoiceListedAsExtractionError(item)).map((item) => item.id),
+      ["142049", "144944", "146020"]
+    );
   });
 
   it("does not create materials or approve prices from the bulk workflow", async () => {

@@ -82,6 +82,10 @@ export function lineMathsWarning(
   return null;
 }
 
+export function hasUnresolvedInvoiceTotalWarning(warnings: readonly string[]) {
+  return warnings.some((warning) => warning.includes("Subtotal") || warning.includes("line totals"));
+}
+
 export function headerMathsWarning(
   subtotal: number | null,
   vat: number | null,

@@ -223,6 +223,7 @@ export type InvoiceListItem = {
   processingStatus: InvoiceProcessingStatus;
   createdAt: string;
   lineCounts: Record<InvoiceReviewStatus, number>;
+  extractionWarnings: string[];
 };
 
 export async function loadInvoiceList(supabase: SupabaseClient) {
@@ -230,7 +231,7 @@ export async function loadInvoiceList(supabase: SupabaseClient) {
     supabase
       .from("supplier_invoices")
       .select(
-        "id, supplier_id, invoice_number, invoice_date, total, extraction_status, processing_status, created_at"
+        "id, supplier_id, invoice_number, invoice_date, total, extraction_status, processing_status, extraction_warnings, created_at"
       )
       .order("created_at", { ascending: false }),
     supabase.from("supplier_invoice_lines").select("invoice_id, review_status"),
@@ -272,6 +273,9 @@ export async function loadInvoiceList(supabase: SupabaseClient) {
         processingStatus: row.processing_status as InvoiceProcessingStatus,
         createdAt: row.created_at,
         lineCounts: counts.get(row.id) ?? emptyLineCounts(),
+        extractionWarnings: Array.isArray(row.extraction_warnings)
+          ? row.extraction_warnings.filter((warning): warning is string => typeof warning === "string")
+          : [],
       })
     ),
   };

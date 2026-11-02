@@ -11,7 +11,7 @@ import {
   EXCEPTION_KINDS,
   EXCEPTION_LABELS,
   filterInvoiceExceptions,
-  invoiceExceptionKinds,
+  invoiceExceptionReasons,
 } from "@/lib/materials/invoices/exceptions";
 import { loadInvoiceList } from "@/lib/materials/invoices/queries";
 import { createClient } from "@/lib/supabase/server";
@@ -103,7 +103,7 @@ export default async function InvoiceExceptionsPage({ searchParams }: Exceptions
                   </thead>
                   <tbody>
                     {visible.map((invoice) => {
-                      const reasons = invoiceExceptionKinds(invoice).map((kind) => EXCEPTION_LABELS[kind]);
+                      const reasons = invoiceExceptionReasons(invoice);
 
                       return (
                         <tr key={invoice.id} className="border-t border-border/70">
