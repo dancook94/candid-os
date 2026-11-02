@@ -160,6 +160,7 @@ function unitLabel(unit: string) {
     square_metre: "square metre",
     unit: "unit",
     pack: "pack",
+    litre: "litre",
   };
   return unit in labels ? labels[unit as PurchaseUnit] : unit;
 }

@@ -48,6 +48,9 @@ export default async function InvoiceExceptionsPage({ searchParams }: Exceptions
           description="These invoices need a person. Opening one uses the existing review screen. Nothing here approves a price or creates a material."
           actions={
             <div className="flex flex-wrap gap-2">
+              <Link href="/admin/materials/invoices/bulk-review">
+                <Button variant="outline">Bulk review</Button>
+              </Link>
               <Link href="/admin/materials/invoices/gmail">
                 <Button variant="outline">Stored invoices</Button>
               </Link>

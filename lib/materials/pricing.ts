@@ -133,5 +133,6 @@ export function calculateCostPerSquareMetre(
     return input.price / (input.widthMm / 1000);
   }
 
+  // Litre prices, including UV ink, stay as a price per litre.
   return null;
 }

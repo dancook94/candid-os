@@ -42,6 +42,10 @@ const UNIT_TO_PURCHASE: Record<string, PurchaseUnit> = {
   packs: "pack",
   box: "pack",
   boxes: "pack",
+  litre: "litre",
+  litres: "litre",
+  liter: "litre",
+  liters: "litre",
 };
 
 const COLOURS = [
