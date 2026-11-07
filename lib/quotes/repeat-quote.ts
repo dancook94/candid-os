@@ -1,6 +1,9 @@
 export const REPEAT_QUOTE_MIGRATION_FILE =
   "supabase/migrations/20261109140000_quote_repeat.sql";
 
+export const REPEAT_QUOTE_GRANTS_MIGRATION_FILE =
+  "supabase/migrations/20261109150000_quote_repeat_requests_grants.sql";
+
 export const REPEAT_QUOTE_RPC = "repeat_quote";
 
 export type RepeatMaterialPricingMode = "refresh_catalogue" | "keep_saved";
@@ -25,6 +28,47 @@ export type RepeatQuoteMigrationContract = {
   includesDuplicateVersionRepair: boolean;
   grantsAuthenticatedOnly: boolean;
 };
+
+export type RepeatQuotePermissionsContract = {
+  repeatQuoteIsSecurityInvoker: boolean;
+  repeatQuoteEnforcesAdminCheck: boolean;
+  idempotencyTableHasAdminRls: boolean;
+  idempotencyTableHasAuthenticatedGrants: boolean;
+  doesNotDisableRls: boolean;
+  doesNotGrantUnrestrictedAccess: boolean;
+};
+
+export function readRepeatQuotePermissionsContract(
+  repeatSql: string,
+  grantsSql: string
+): RepeatQuotePermissionsContract {
+  const repeatFn = /CREATE OR REPLACE FUNCTION public\.repeat_quote\([\s\S]*?\$\$;/m.exec(
+    repeatSql
+  )?.[0];
+
+  return {
+    repeatQuoteIsSecurityInvoker: repeatFn
+      ? !repeatFn.includes("SECURITY DEFINER")
+      : false,
+    repeatQuoteEnforcesAdminCheck: /IF NOT public\.is_approved_candid_admin\(\)/m.test(
+      repeatSql
+    ),
+    idempotencyTableHasAdminRls:
+      repeatSql.includes("ENABLE ROW LEVEL SECURITY") &&
+      repeatSql.includes("quote_repeat_requests_admin") &&
+      repeatSql.includes("USING (public.is_approved_candid_admin())") &&
+      repeatSql.includes("WITH CHECK (public.is_approved_candid_admin())"),
+    idempotencyTableHasAuthenticatedGrants:
+      /GRANT SELECT, INSERT, UPDATE ON TABLE public\.quote_repeat_requests TO authenticated/.test(
+        grantsSql
+      ),
+    doesNotDisableRls: !/DISABLE ROW LEVEL SECURITY/i.test(grantsSql),
+    doesNotGrantUnrestrictedAccess:
+      !/USING \(true\)|WITH CHECK \(true\)/i.test(grantsSql) &&
+      !/GRANT ALL ON TABLE public\.quote_repeat_requests/i.test(grantsSql) &&
+      !/TO anon|TO PUBLIC/i.test(grantsSql),
+  };
+}
 
 export function readRepeatQuoteMigrationContract(source: string): RepeatQuoteMigrationContract {
   return {

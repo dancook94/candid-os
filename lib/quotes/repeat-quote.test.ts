@@ -7,8 +7,10 @@ import {
   QUOTE_NUMBER_ADVISORY_LOCK_KEY,
 } from "@/lib/quotes/quote-number-allocation";
 import {
+  REPEAT_QUOTE_GRANTS_MIGRATION_FILE,
   REPEAT_QUOTE_MIGRATION_FILE,
   readRepeatQuoteMigrationContract,
+  readRepeatQuotePermissionsContract,
   repeatQuoteRefreshFlag,
 } from "@/lib/quotes/repeat-quote";
 
@@ -53,6 +55,34 @@ test("customer and PDF paths do not load internal quote costs", () => {
     assert.equal(source.includes("quote_item_costs"), false, file);
     assert.equal(source.includes("quote_item_material_components"), false, file);
   }
+});
+
+test("repeat quote idempotency table grants work with invoker RPC and admin RLS", () => {
+  const repeatSql = readFileSync(REPEAT_QUOTE_MIGRATION_FILE, "utf8");
+  const grantsSql = readFileSync(REPEAT_QUOTE_GRANTS_MIGRATION_FILE, "utf8");
+  const permissions = readRepeatQuotePermissionsContract(repeatSql, grantsSql);
+
+  assert.equal(permissions.repeatQuoteIsSecurityInvoker, true);
+  assert.equal(permissions.repeatQuoteEnforcesAdminCheck, true);
+  assert.equal(permissions.idempotencyTableHasAdminRls, true);
+  assert.equal(permissions.idempotencyTableHasAuthenticatedGrants, true);
+  assert.equal(permissions.doesNotDisableRls, true);
+  assert.equal(permissions.doesNotGrantUnrestrictedAccess, true);
+
+  assert.doesNotMatch(
+    repeatSql,
+    /GRANT SELECT, INSERT, UPDATE ON TABLE public\.quote_repeat_requests/
+  );
+  assert.match(
+    grantsSql,
+    /GRANT SELECT, INSERT, UPDATE ON TABLE public\.quote_repeat_requests TO authenticated/
+  );
+  assert.match(
+    grantsSql,
+    /GRANT SELECT, INSERT, UPDATE ON TABLE public\.quote_repeat_requests TO service_role/
+  );
+  assert.doesNotMatch(grantsSql, /GRANT DELETE ON TABLE public\.quote_repeat_requests/);
+  assert.doesNotMatch(grantsSql, /DISABLE ROW LEVEL SECURITY/);
 });
 
 test("repeat quote UI and API exist", () => {
