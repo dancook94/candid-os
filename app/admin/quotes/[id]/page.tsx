@@ -418,9 +418,19 @@ export default async function QuoteDetailPage({
           title={formatQuotePageTitle(quote.project_name)}
           description={`Quote Q-${quote.quote_number}`}
           actions={
-            <Link href="/admin/quotes">
-              <Button variant="outline">Back to quotes</Button>
-            </Link>
+            <div className="flex flex-wrap items-center gap-2">
+              {!missingVersions && quoteVersion ? (
+                <RepeatQuoteButton
+                  quoteId={quote.id}
+                  sourceVersionId={quoteVersion.id}
+                  sourceVersionNumber={selectedVersionNumber}
+                  quoteNumber={quote.quote_number}
+                />
+              ) : null}
+              <Link href="/admin/quotes">
+                <Button variant="outline">Back to quotes</Button>
+              </Link>
+            </div>
           }
         />
 
@@ -458,16 +468,18 @@ export default async function QuoteDetailPage({
                 currentVersion={quote.current_version}
               />
 
-              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start">
+              <div className="space-y-3 border-t border-border/70 pt-4">
+                <p className="text-sm font-medium text-foreground">Version actions</p>
+                <p className="text-sm text-muted-foreground">
+                  Use{" "}
+                  <span className="font-medium text-foreground">Repeat quote</span> (top
+                  right) to copy this quote to a new quote number. Use{" "}
+                  <span className="font-medium text-foreground">Create New Version</span>{" "}
+                  to revise under the same quote number.
+                </p>
                 <CreateQuoteVersionButton
                   quoteId={quote.id}
                   sourceVersionId={quoteVersion.id}
-                />
-                <RepeatQuoteButton
-                  quoteId={quote.id}
-                  sourceVersionId={quoteVersion.id}
-                  sourceVersionNumber={selectedVersionNumber}
-                  quoteNumber={quote.quote_number}
                 />
               </div>
             </CardContent>

@@ -33,6 +33,7 @@ import {
   useGlobalSearchShortcut,
 } from "@/components/global-search";
 import { CommunicationModeBanner } from "@/components/communication-mode-banner";
+import { TestEnvironmentBadge } from "@/components/test-environment-indicator";
 import { StaffAvatarDisplay } from "@/components/staff-avatar-display";
 import { getCustomerPortalStatusSubtitle } from "@/lib/customer-portal-status";
 import { createClient } from "@/lib/supabase/client";
@@ -462,8 +463,9 @@ export function AppShell({
             />
 
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold tracking-tight text-foreground">
+              <p className="flex min-w-0 items-center gap-2 truncate text-sm font-semibold tracking-tight text-foreground">
                 Candid OS
+                <TestEnvironmentBadge />
               </p>
               <p className="truncate text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                 {portalLabel}
@@ -523,8 +525,9 @@ export function AppShell({
                 />
 
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold tracking-tight text-foreground">
+                  <p className="flex min-w-0 items-center gap-2 truncate text-sm font-semibold tracking-tight text-foreground">
                     Candid OS
+                    <TestEnvironmentBadge />
                   </p>
                   <p className="truncate text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                     {portalLabel}
@@ -584,7 +587,10 @@ export function AppShell({
               className="h-auto w-20 shrink-0"
             />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold text-foreground">Candid OS</p>
+              <p className="flex min-w-0 items-center gap-2 truncate text-sm font-semibold text-foreground">
+                Candid OS
+                <TestEnvironmentBadge />
+              </p>
               <p className="truncate text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                 {portalLabel}
               </p>

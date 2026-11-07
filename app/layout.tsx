@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+
+import { TestEnvironmentBanner } from "@/components/test-environment-indicator";
+import { isTestAppEnvironment } from "@/lib/app-env";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -12,8 +15,10 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const testEnvironment = isTestAppEnvironment();
+
 export const metadata: Metadata = {
-  title: "Candid OS",
+  title: testEnvironment ? "Candid OS — TEST" : "Candid OS",
   description: "Candid Creative customer and admin portal",
 };
 
@@ -25,9 +30,13 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      data-app-env={testEnvironment ? "test" : undefined}
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <TestEnvironmentBanner />
+        {children}
+      </body>
     </html>
   );
 }

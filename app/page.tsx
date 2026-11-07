@@ -1,7 +1,9 @@
 import Image from "next/image";
 import Link from "next/link";
 
+import { TestEnvironmentBadge } from "@/components/test-environment-indicator";
 import { buttonVariants } from "@/components/ui/button";
+import { isTestAppEnvironment } from "@/lib/app-env";
 import { cn } from "@/lib/utils";
 
 export default function Home() {
@@ -23,8 +25,15 @@ export default function Home() {
             className="mx-auto h-auto w-[min(240px,75vw)] lg:mx-0"
           />
 
-          <p className="mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+          <p
+            className={cn(
+              "mt-8 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground",
+              isTestAppEnvironment() &&
+                "flex items-center justify-center gap-2 lg:justify-start"
+            )}
+          >
             Candid OS
+            <TestEnvironmentBadge />
           </p>
 
           <h1 className="mt-3 text-4xl font-semibold tracking-tight text-foreground sm:text-5xl lg:text-[3.25rem] lg:leading-[1.05]">

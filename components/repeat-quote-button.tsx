@@ -72,7 +72,7 @@ export function RepeatQuoteButton({
 
   return (
     <div className="space-y-2">
-      <Button type="button" variant="outline" onClick={() => setOpen(true)}>
+      <Button type="button" variant="default" onClick={() => setOpen(true)}>
         Repeat quote
       </Button>
 
