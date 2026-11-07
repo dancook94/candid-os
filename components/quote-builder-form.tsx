@@ -135,6 +135,7 @@ type QuoteBuilderFormProps = {
   inheritedContactLabel?: string | null;
   materialCatalog?: QuoteMaterialCatalogItem[];
   showInternalCosting?: boolean;
+  isRepeatedQuote?: boolean;
 };
 
 function formatSupabaseError(error: unknown) {
@@ -417,6 +418,7 @@ export function QuoteBuilderForm({
   inheritedContactLabel = null,
   materialCatalog = [],
   showInternalCosting = false,
+  isRepeatedQuote = false,
 }: QuoteBuilderFormProps) {
   const router = useRouter();
   const supabase = createClient();
@@ -1103,6 +1105,13 @@ export function QuoteBuilderForm({
       return;
     }
 
+    if (profitFigures.provisional) {
+      setError(
+        "Complete internal costing on every included line before sending this quote."
+      );
+      return;
+    }
+
     setError("");
     setSuccess("");
     setWarning("");
@@ -1558,15 +1567,35 @@ export function QuoteBuilderForm({
         </div>
       )}
 
+      {isRepeatedQuote && !isReadOnly ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-medium text-amber-950">Review profitability</p>
+          <p className="mt-1 text-sm text-amber-900">
+            This quote was created as a repeat order. Selling prices match the source
+            quote; confirm margins after material costing is complete.
+          </p>
+        </div>
+      ) : null}
+
       {!isReadOnly && (
         <div className="flex flex-col items-end gap-2">
           <TestCommunicationHint />
+          {profitFigures.provisional ? (
+            <p className="w-full text-sm text-amber-900">
+              Sending is blocked until internal costing is complete on every included
+              line. You can still save this draft.
+            </p>
+          ) : null}
           <div className="flex w-full flex-col-reverse justify-end gap-2 sm:flex-row">
           <Button type="submit" variant="outline" disabled={isBusy}>
             {isSaving ? "Saving..." : "Save draft"}
           </Button>
           {mode === "edit" && (
-            <Button type="button" disabled={isBusy} onClick={handleSendQuote}>
+            <Button
+              type="button"
+              disabled={isBusy || profitFigures.provisional}
+              onClick={handleSendQuote}
+            >
               {isSending
                 ? "Sending..."
                 : isTestCommunicationModePublic()

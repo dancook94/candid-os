@@ -62,7 +62,29 @@ ROLLBACK;
 
 Expect `one_off` in the allowed type list.
 
-## 4. Invoice confirm validation (already on Test)
+## 4. Repeat quote (`20261109140000_quote_repeat.sql`)
+
+Adds `repeat_quote`, quote lineage columns, idempotency table, and
+`allocate_next_quote_number()`.
+
+**Pre-check:** `duplicate_quote_version` already exists on Test (RPC probe
+returns admin permission error, not “function missing”). This migration does
+**not** replace `duplicate_quote_version`.
+
+Paste the full file:
+
+`supabase/migrations/20261109140000_quote_repeat.sql`
+
+**Post-apply smoke:**
+
+```sql
+BEGIN;
+SELECT to_regprocedure('public.repeat_quote(uuid, boolean, uuid, date)') IS NOT NULL AS has_repeat;
+SELECT to_regprocedure('public.allocate_next_quote_number()') IS NOT NULL AS has_allocate;
+ROLLBACK;
+```
+
+## 5. Invoice confirm validation (already on Test)
 
 Run rollback-only script (no commit):
 

@@ -1,0 +1,66 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+
+import {
+  QUOTE_NUMBER_COLLISION_REPORT,
+  QUOTE_NUMBER_ADVISORY_LOCK_KEY,
+} from "@/lib/quotes/quote-number-allocation";
+import {
+  REPEAT_QUOTE_MIGRATION_FILE,
+  readRepeatQuoteMigrationContract,
+  repeatQuoteRefreshFlag,
+} from "@/lib/quotes/repeat-quote";
+
+test("repeat quote migration defines RPC, lineage, idempotency and allocator", () => {
+  const sql = readFileSync(REPEAT_QUOTE_MIGRATION_FILE, "utf8");
+  const contract = readRepeatQuoteMigrationContract(sql);
+
+  assert.equal(contract.hasRepeatRpc, true);
+  assert.equal(contract.hasAllocator, true);
+  assert.equal(contract.hasIdempotencyTable, true);
+  assert.equal(contract.hasLineageColumns, true);
+  assert.equal(contract.doesNotUpdateSourceQuote, true);
+  assert.equal(contract.grantsAuthenticatedOnly, true);
+  assert.match(sql, /quote_repeat_refresh_material_component/);
+  assert.match(sql, /pricing_source = 'catalogue'/);
+  assert.match(sql, /component\.supplier_reference/);
+  assert.match(sql, /quote_request_id,\s*\n\s*opportunity_id,/);
+  assert.match(sql, /NULL,\s*\n\s*NULL,\s*\n\s*v_source_quote\.project_name/);
+});
+
+test("material pricing mode maps to refresh flag", () => {
+  assert.equal(repeatQuoteRefreshFlag("refresh_catalogue"), true);
+  assert.equal(repeatQuoteRefreshFlag("keep_saved"), false);
+});
+
+test("manual create still documents quote number collision risk", () => {
+  const form = readFileSync("components/quote-builder-form.tsx", "utf8");
+  assert.match(form, /getNextQuoteNumber/);
+  assert.equal(QUOTE_NUMBER_ADVISORY_LOCK_KEY, 89_124_001);
+  assert.match(QUOTE_NUMBER_COLLISION_REPORT.recommendedFollowUp, /follow-up/);
+});
+
+test("customer and PDF paths do not load internal quote costs", () => {
+  const files = [
+    "lib/customer-formal-quote-data.ts",
+    "lib/generate-customer-quote-pdf.ts",
+    "app/api/admin/quotes/[id]/repeat/route.ts",
+  ];
+
+  for (const file of files) {
+    const source = readFileSync(file, "utf8");
+    assert.equal(source.includes("quote_item_costs"), false, file);
+    assert.equal(source.includes("quote_item_material_components"), false, file);
+  }
+});
+
+test("repeat quote UI and API exist", () => {
+  const page = readFileSync("app/admin/quotes/[id]/page.tsx", "utf8");
+  assert.match(page, /RepeatQuoteButton/);
+  assert.match(page, /QuoteRepeatLineagePanel/);
+
+  const route = readFileSync("app/api/admin/quotes/[id]/repeat/route.ts", "utf8");
+  assert.match(route, /repeat_quote/);
+  assert.match(route, /validateActiveContactForCompany/);
+});

@@ -6,6 +6,8 @@ import { AdminQuoteFollowUpTaskPanel } from "@/components/admin-quote-follow-up-
 import { AdminQuoteLinkedJobPanel } from "@/components/admin-quote-linked-job-panel";
 import { AdminQuoteManagementActions } from "@/components/admin-quote-management-actions";
 import { CreateQuoteVersionButton } from "@/components/create-quote-version-button";
+import { QuoteRepeatLineagePanel } from "@/components/quote-repeat-lineage-panel";
+import { RepeatQuoteButton } from "@/components/repeat-quote-button";
 import { DeleteBrokenQuoteButton } from "@/components/delete-broken-quote-button";
 import { ActivityTimeline } from "@/components/crm/activity-timeline";
 import { NoteComposer } from "@/components/crm/note-composer";
@@ -99,7 +101,7 @@ export default async function QuoteDetailPage({
   const { data: quote, error: quoteError } = await supabase
     .from("quotes")
     .select(
-      "id, quote_number, company_id, contact_id, quote_request_id, opportunity_id, project_name, required_date, status, current_version, created_by, updated_at"
+      "id, quote_number, company_id, contact_id, quote_request_id, opportunity_id, project_name, required_date, status, current_version, created_by, updated_at, repeated_from_quote_id, repeated_from_quote_version_id, repeated_material_pricing"
     )
     .eq("id", id)
     .maybeSingle();
@@ -114,6 +116,36 @@ export default async function QuoteDetailPage({
 
   if (!quote) {
     notFound();
+  }
+
+  const [
+    { data: childRepeatQuotes },
+    { data: repeatedFromVersion },
+  ] = await Promise.all([
+    supabase
+      .from("quotes")
+      .select("id, quote_number, status")
+      .eq("repeated_from_quote_id", quote.id)
+      .order("quote_number", { ascending: false }),
+    quote.repeated_from_quote_version_id
+      ? supabase
+          .from("quote_versions")
+          .select("version_number")
+          .eq("id", quote.repeated_from_quote_version_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
+
+  let repeatedFromQuoteNumber: number | null = null;
+
+  if (quote.repeated_from_quote_id) {
+    const { data: sourceQuote } = await supabase
+      .from("quotes")
+      .select("quote_number")
+      .eq("id", quote.repeated_from_quote_id)
+      .maybeSingle();
+
+    repeatedFromQuoteNumber = sourceQuote?.quote_number ?? null;
   }
 
   const { data: allVersions, error: versionsError } = await supabase
@@ -407,6 +439,14 @@ export default async function QuoteDetailPage({
           </div>
         )}
 
+        <QuoteRepeatLineagePanel
+          repeatedFromQuoteId={quote.repeated_from_quote_id}
+          repeatedFromQuoteNumber={repeatedFromQuoteNumber}
+          repeatedFromVersionNumber={repeatedFromVersion?.version_number ?? null}
+          materialPricing={quote.repeated_material_pricing}
+          childRepeats={childRepeatQuotes ?? []}
+        />
+
         {!missingVersions && quoteVersion && (
           <Card className="portal-surface mb-6">
             <CardContent className="space-y-4 pt-6">
@@ -418,10 +458,18 @@ export default async function QuoteDetailPage({
                 currentVersion={quote.current_version}
               />
 
-              <CreateQuoteVersionButton
-                quoteId={quote.id}
-                sourceVersionId={quoteVersion.id}
-              />
+              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start">
+                <CreateQuoteVersionButton
+                  quoteId={quote.id}
+                  sourceVersionId={quoteVersion.id}
+                />
+                <RepeatQuoteButton
+                  quoteId={quote.id}
+                  sourceVersionId={quoteVersion.id}
+                  sourceVersionNumber={selectedVersionNumber}
+                  quoteNumber={quote.quote_number}
+                />
+              </div>
             </CardContent>
           </Card>
         )}
@@ -495,6 +543,7 @@ export default async function QuoteDetailPage({
               materialCatalogResult.ok ? materialCatalogResult.materials : []
             }
             showInternalCosting={isCandidAdminRole(profile.user_role)}
+            isRepeatedQuote={Boolean(quote.repeated_from_quote_id)}
           />
         ) : null}
 

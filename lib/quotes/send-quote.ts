@@ -4,6 +4,7 @@ import { getCommunicationConfig } from "@/lib/communications/config";
 import { syncOpportunityFromQuoteEvent } from "@/lib/crm/opportunity-stage-sync";
 import { notifyQuoteReadySafe } from "@/lib/notifications/triggers";
 import type { SendNotificationResult } from "@/lib/notifications/send-notification";
+import { assertQuoteVersionCostingCompleteForSend } from "@/lib/quotes/send-costing-guard";
 import { revalidateQuoteWorkflowRoutes } from "@/lib/quote-route-revalidation";
 
 export type SendQuoteInput = {
@@ -214,6 +215,15 @@ export async function sendQuoteAsStaff(
 
   if (!lineItemCount || lineItemCount < 1) {
     return failure("Add at least one line item before sending the quote.");
+  }
+
+  const costingGuard = await assertQuoteVersionCostingCompleteForSend(
+    adminClient,
+    version.id
+  );
+
+  if (!costingGuard.ok) {
+    return failure(costingGuard.message);
   }
 
   const { error: supersedeError } = await adminClient

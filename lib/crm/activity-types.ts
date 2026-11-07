@@ -23,6 +23,7 @@ export const CRM_ACTIVITY_TYPES = {
   opportunityLost: "opportunity_lost",
   opportunityDeleted: "opportunity_deleted",
   quoteCreated: "quote_created",
+  quoteRepeated: "quote_repeated",
   quoteVersionCreated: "quote_version_created",
   quoteSent: "quote_sent",
   quoteAccepted: "quote_accepted",
