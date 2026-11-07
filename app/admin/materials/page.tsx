@@ -67,6 +67,9 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
               <Link href="/admin/materials/suppliers">
                 <Button variant="outline">Suppliers</Button>
               </Link>
+              <Link href="/admin/materials/import">
+                <Button variant="outline">Import approved</Button>
+              </Link>
               <Link href="/admin/materials/new">
                 <Button>Add material</Button>
               </Link>

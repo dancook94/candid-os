@@ -141,6 +141,14 @@ export function formatCostPerSquareMetre(value: number | null) {
   return `${formatGbp(value)}/m²`;
 }
 
+export function formatCostPerLitre(value: number | null) {
+  if (value == null) {
+    return "—";
+  }
+
+  return `${formatGbp(value)}/L`;
+}
+
 export function buildSupplierProductViews(input: {
   material: MaterialRecord;
   products: Array<{

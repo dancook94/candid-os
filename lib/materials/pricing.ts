@@ -136,3 +136,15 @@ export function calculateCostPerSquareMetre(
   // Litre prices, including UV ink, stay as a price per litre.
   return null;
 }
+
+/** £/litre for a cartridge or container. Missing volume returns null. */
+export function calculateCostPerLitre(
+  price: number,
+  volumeLitres: number | null
+): number | null {
+  if (!Number.isFinite(price) || price <= 0 || volumeLitres == null || volumeLitres <= 0) {
+    return null;
+  }
+
+  return price / volumeLitres;
+}
