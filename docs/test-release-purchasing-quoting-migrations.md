@@ -62,7 +62,26 @@ ROLLBACK;
 
 Expect `one_off` in the allowed type list.
 
-## 4. Repeat quote (`20261109140000_quote_repeat.sql`)
+## 4. Quote create draft (`20261109160000_create_admin_quote_draft.sql`)
+
+Adds `create_admin_quote_draft`, idempotency table `quote_create_requests`, and grants.
+Requires `allocate_next_quote_number()` from `20261109140000_quote_repeat.sql` (apply that first).
+
+Paste the full file:
+
+`supabase/migrations/20261109160000_create_admin_quote_draft.sql`
+
+**Post-apply smoke:**
+
+```sql
+BEGIN;
+SELECT to_regprocedure(
+  'public.create_admin_quote_draft(uuid, uuid, uuid, uuid, text, date, uuid, date, integer, text, text, text, numeric, numeric, numeric, numeric)'
+) IS NOT NULL AS has_create_draft;
+ROLLBACK;
+```
+
+## 5. Repeat quote (`20261109140000_quote_repeat.sql`)
 
 Adds `repeat_quote`, quote lineage columns, idempotency table, and
 `allocate_next_quote_number()`.
@@ -84,7 +103,7 @@ SELECT to_regprocedure('public.allocate_next_quote_number()') IS NOT NULL AS has
 ROLLBACK;
 ```
 
-## 5. Invoice confirm validation (already on Test)
+## 6. Invoice confirm validation (already on Test)
 
 Run rollback-only script (no commit):
 

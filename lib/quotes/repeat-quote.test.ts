@@ -36,11 +36,12 @@ test("material pricing mode maps to refresh flag", () => {
   assert.equal(repeatQuoteRefreshFlag("keep_saved"), false);
 });
 
-test("manual create still documents quote number collision risk", () => {
+test("manual create uses transactional allocator via create_admin_quote_draft", () => {
   const form = readFileSync("components/quote-builder-form.tsx", "utf8");
-  assert.match(form, /getNextQuoteNumber/);
+  assert.match(form, /create_admin_quote_draft/);
+  assert.doesNotMatch(form, /getNextQuoteNumber/);
   assert.equal(QUOTE_NUMBER_ADVISORY_LOCK_KEY, 89_124_001);
-  assert.match(QUOTE_NUMBER_COLLISION_REPORT.recommendedFollowUp, /follow-up/);
+  assert.match(QUOTE_NUMBER_COLLISION_REPORT.manualCreate, /create_admin_quote_draft/);
 });
 
 test("customer and PDF paths do not load internal quote costs", () => {

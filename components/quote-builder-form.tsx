@@ -456,6 +456,7 @@ export function QuoteBuilderForm({
       : [createEmptyLineItem("new-0")]
   );
   const [isSaving, setIsSaving] = useState(false);
+  const createIdempotencyKeyRef = useRef(crypto.randomUUID());
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
@@ -660,31 +661,36 @@ export function QuoteBuilderForm({
     );
   }
 
-  async function getNextQuoteNumber() {
-    const { data, error: quoteNumberError } = await supabase
-      .from("quotes")
-      .select("quote_number")
-      .order("quote_number", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (quoteNumberError) {
-      throw new Error(quoteNumberError.message);
-    }
-
-    return (data?.quote_number ?? 0) + 1;
-  }
-
   async function rollbackCreatedQuote(
     quoteIdToRemove: string,
     versionIdToRemove: string
   ) {
-    await supabase
+    const { error: itemsError } = await supabase
       .from("quote_items")
       .delete()
       .eq("quote_version_id", versionIdToRemove);
-    await supabase.from("quote_versions").delete().eq("id", versionIdToRemove);
-    await supabase.from("quotes").delete().eq("id", quoteIdToRemove);
+
+    if (itemsError) {
+      throw new Error(itemsError.message);
+    }
+
+    const { error: versionError } = await supabase
+      .from("quote_versions")
+      .delete()
+      .eq("id", versionIdToRemove);
+
+    if (versionError) {
+      throw new Error(versionError.message);
+    }
+
+    const { error: quoteError } = await supabase
+      .from("quotes")
+      .delete()
+      .eq("id", quoteIdToRemove);
+
+    if (quoteError) {
+      throw new Error(quoteError.message);
+    }
   }
 
   async function persistQuote(
@@ -763,6 +769,9 @@ export function QuoteBuilderForm({
     const activeItems = totals.parsedItems.filter((item) => item.title.trim());
 
     if (!options?.silent) {
+      if (isSaving) {
+        return false;
+      }
       setIsSaving(true);
     }
 
@@ -855,9 +864,47 @@ export function QuoteBuilderForm({
       }
 
       if (mode === "create") {
-        const nextQuoteNumber = await getNextQuoteNumber();
-
         let linkedOpportunityId = opportunityId || null;
+
+        const { data: createRows, error: createError } = await supabase.rpc(
+          "create_admin_quote_draft",
+          {
+            p_company_id: companyId,
+            p_contact_id: contactId,
+            p_quote_request_id: resolvedQuoteRequestId,
+            p_opportunity_id: linkedOpportunityId,
+            p_project_name: trimmedProjectName,
+            p_required_date: quoteRequiredDate || null,
+            p_idempotency_key: createIdempotencyKeyRef.current,
+            p_expiry_date: versionFields.expiry_date,
+            p_payment_terms_days: versionFields.payment_terms_days,
+            p_introduction: versionFields.introduction,
+            p_customer_notes: versionFields.customer_notes,
+            p_internal_notes: versionFields.internal_notes,
+            p_subtotal: versionFields.subtotal,
+            p_vat_rate: versionFields.vat_rate,
+            p_vat_amount: versionFields.vat_amount,
+            p_total: versionFields.total,
+          }
+        );
+
+        if (createError) {
+          throw new Error(createError.message);
+        }
+
+        const createdRow = Array.isArray(createRows) ? createRows[0] : createRows;
+
+        if (
+          !createdRow ||
+          typeof createdRow !== "object" ||
+          !("quote_id" in createdRow) ||
+          !("version_id" in createdRow)
+        ) {
+          throw new Error("Unable to create quote.");
+        }
+
+        const createdQuote = { id: String(createdRow.quote_id) };
+        const createdVersion = { id: String(createdRow.version_id) };
 
         if (createOpportunityOnSave && !linkedOpportunityId) {
           const createResponse = await fetch(
@@ -879,6 +926,7 @@ export function QuoteBuilderForm({
           };
 
           if (!createResponse.ok || !createPayload.opportunityId) {
+            await rollbackCreatedQuote(createdQuote.id, createdVersion.id);
             throw new Error(
               createPayload.error ?? "Unable to create linked opportunity."
             );
@@ -886,44 +934,16 @@ export function QuoteBuilderForm({
 
           linkedOpportunityId = createPayload.opportunityId;
           setOpportunityId(createPayload.opportunityId);
-        }
 
-        const { data: createdQuote, error: quoteError } = await supabase
-          .from("quotes")
-          .insert({
-            quote_number: nextQuoteNumber,
-            company_id: companyId,
-            contact_id: contactId,
-            quote_request_id: resolvedQuoteRequestId,
-            opportunity_id: linkedOpportunityId,
-            project_name: trimmedProjectName,
-            required_date: quoteRequiredDate,
-            status: "draft",
-            current_version: 1,
-            created_by: createdBy,
-          })
-          .select("id")
-          .single();
+          const { error: opportunityLinkError } = await supabase
+            .from("quotes")
+            .update({ opportunity_id: linkedOpportunityId })
+            .eq("id", createdQuote.id);
 
-        if (quoteError || !createdQuote) {
-          throw new Error(quoteError?.message ?? "Unable to create quote.");
-        }
-
-        const { data: createdVersion, error: versionError } = await supabase
-          .from("quote_versions")
-          .insert({
-            quote_id: createdQuote.id,
-            version_number: 1,
-            ...versionFields,
-          })
-          .select("id")
-          .single();
-
-        if (versionError || !createdVersion) {
-          await supabase.from("quotes").delete().eq("id", createdQuote.id);
-          throw new Error(
-            versionError?.message ?? "Unable to create quote version."
-          );
+          if (opportunityLinkError) {
+            await rollbackCreatedQuote(createdQuote.id, createdVersion.id);
+            throw new Error(opportunityLinkError.message);
+          }
         }
 
         if (activeItems.length > 0) {
