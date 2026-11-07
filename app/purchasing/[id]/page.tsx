@@ -1,6 +1,7 @@
 import { AppShell } from "@/components/app-shell";
 import { PageHeader } from "@/components/page-header";
 import { PurchaseOrderDraftEditor } from "@/components/purchasing/draft-editor";
+import { PurchaseOrderIssuedPanel } from "@/components/purchasing/purchase-order-issued-panel";
 import { PurchaseOrderDetailView } from "@/components/purchasing/purchase-order-list";
 import { Card, CardContent } from "@/components/ui/card";
 import { buildPortalAppShellProps } from "@/lib/admin-shell-props";
@@ -12,6 +13,7 @@ import {
 import { isPurchaseOrderSupplierId } from "@/lib/purchasing/create-draft";
 import { loadPurchaseOrderEditor } from "@/lib/purchasing/draft-editor-data";
 import { loadPurchaseOrderDetail } from "@/lib/purchasing/purchase-order-detail";
+import { loadIssuedPurchaseOrderContext } from "@/lib/purchasing/purchase-order-issued";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +41,10 @@ export default async function PurchaseOrderDetailPage({
   ]);
   const editor =
     detail?.status === "draft" ? await loadPurchaseOrderEditor(supabase, id) : null;
+  const issuedContext =
+    detail?.status === "issued"
+      ? await loadIssuedPurchaseOrderContext(supabase, id)
+      : null;
 
   return (
     <AppShell {...shellProps}>
@@ -78,6 +84,9 @@ export default async function PurchaseOrderDetailPage({
                 catalogueError={editor.catalogueError}
                 jobsError={editor.jobsError}
               />
+            ) : null}
+            {issuedContext ? (
+              <PurchaseOrderIssuedPanel context={issuedContext} />
             ) : null}
           </>
         )}

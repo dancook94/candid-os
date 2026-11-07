@@ -98,8 +98,8 @@ export default async function IssuePurchaseOrderPage({ params }: IssuePurchaseOr
               <CardContent className="space-y-4 px-4 py-6 text-sm sm:px-6">
                 <p>
                   Issuing assigns the next official purchase order number and keeps this revision
-                  as the issued record. The draft editor will no longer change it. This does not
-                  email the supplier.
+                  as the issued record. The draft editor will no longer change it. Email the
+                  supplier from the purchase order detail page after issuing.
                 </p>
                 {blocker ? (
                   <p className="text-destructive" role="alert">

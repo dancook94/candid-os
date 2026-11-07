@@ -358,10 +358,13 @@ describe("draft purchase orders", () => {
     assert.doesNotMatch(action, /console\.error\(\s*error\s*\)/);
     assert.match(list, /href=\{purchaseOrderHref\(order\.id\)\}/);
     assert.match(list, /recorded on this revision/);
+    assert.match(detailPage, /PurchaseOrderIssuedPanel/);
     assert.match(action, /save_purchase_order_draft/);
     assert.match(action, /loadSavedDraftLines/);
     assert.match(action, /issue_purchase_order/);
-    assert.doesNotMatch(action, /enqueue_purchase_order_email/);
+    assert.match(action, /sendPurchaseOrderToSupplier/);
+    assert.match(action, /enqueue_purchase_order_email/);
+    assert.match(action, /receive_purchase_order/);
     assert.doesNotMatch(action, /PO-\$\{/);
     assert.doesNotMatch(action, /po_number\s*=/);
   });
@@ -394,8 +397,7 @@ describe("draft purchase orders", () => {
     assert.match(route, /requirePurchasingPageAccess/);
     assert.doesNotMatch(route, /createAdminClient/);
     assert.match(editor, /Quantity allocated/);
-    assert.match(issuePage, /does not/);
-    assert.match(issuePage, /email the supplier/);
+    assert.match(issuePage, /Email the supplier from the purchase order detail page after issuing/);
     assert.doesNotMatch(issuePage, /enqueue_purchase_order_email/);
   });
 
