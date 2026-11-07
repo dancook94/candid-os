@@ -82,6 +82,19 @@ function draftFromApprovedProduct(
     rateSource: "current" as const,
   };
 
+  if (product.currentPriceUnit === "litre" && product.currentPrice != null) {
+    return emptyMaterialComponent({
+      ...base,
+      costBasis: "consumption",
+      pricingSource: "catalogue",
+      rate: String(product.currentPrice),
+      purchaseUnit: "litre",
+      inheritDimensions: false,
+      inheritQuantity: true,
+      quantity: "",
+    });
+  }
+
   if (product.currentRatePerSqm != null) {
     return emptyMaterialComponent({
       ...base,
@@ -682,7 +695,7 @@ function MaterialCard({
             }
             className="h-8 w-full rounded-lg border border-neutral-300 bg-white px-2 text-sm"
           >
-            <option value="area">Finished area, plus 10% wastage</option>
+            <option value="area">Finished area, plus wastage</option>
             <option value="consumption">Quantity × unit cost</option>
           </select>
         </div>
@@ -790,6 +803,22 @@ function MaterialCard({
 
       {material.costBasis === "area" && (
         <div className="space-y-2">
+          <div className="space-y-1.5">
+            <Label htmlFor={`wastage-${material.clientKey}`} className="text-xs">
+              Wastage (%)
+            </Label>
+            <Input
+              id={`wastage-${material.clientKey}`}
+              type="number"
+              min={0}
+              max={99}
+              step="0.1"
+              disabled={disabled}
+              value={material.wastagePercent}
+              onChange={(event) => onChange({ wastagePercent: event.target.value })}
+              className="h-8 max-w-xs"
+            />
+          </div>
           <label className="flex items-center gap-2 text-xs text-neutral-700">
             <input
               type="checkbox"
@@ -861,8 +890,8 @@ function MaterialCard({
 
       {estimate?.state === "complete" && estimate.areaSqm != null && estimate.costedAreaSqm != null && (
         <p className="text-xs text-neutral-600">
-          {formatSquareMetres(estimate.areaSqm)} plus 10% wastage ={" "}
-          {formatSquareMetres(estimate.costedAreaSqm)} ·{" "}
+          {formatSquareMetres(estimate.areaSqm)} plus {material.wastagePercent.trim() || "10"}%
+          wastage = {formatSquareMetres(estimate.costedAreaSqm)} ·{" "}
           {estimate.materialCost == null ? "Incomplete" : formatGbp(estimate.materialCost)}
         </p>
       )}

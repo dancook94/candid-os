@@ -57,6 +57,7 @@ export type QuoteMaterialComponentDraft = {
   finishedWidthMm: string;
   finishedHeightMm: string;
   quantity: string;
+  wastagePercent: string;
   manualMaterialCost: string;
   confirmManualAmount: boolean;
 };
@@ -152,6 +153,7 @@ type SavedMaterialRow = {
   quantity: number | string | null;
   inherit_dimensions: boolean | null;
   inherit_quantity: boolean | null;
+  wastage_rate?: number | string | null;
   manual_material_cost: number | string | null;
 };
 
@@ -203,6 +205,7 @@ export function emptyMaterialComponent(
     finishedWidthMm: "",
     finishedHeightMm: "",
     quantity: "",
+    wastagePercent: "10",
     manualMaterialCost: "",
     confirmManualAmount: false,
     ...partial,
@@ -266,8 +269,32 @@ export function quoteAreaSqm(widthMm: number, heightMm: number, quantity: number
   return roundArea((widthMm * heightMm * quantity) / 1_000_000);
 }
 
-export function quoteCostedAreaSqm(areaSqm: number) {
-  return roundArea(areaSqm * (1 + QUOTE_WASTAGE_RATE));
+export function parseWastageRate(percentInput: string, fallback = QUOTE_WASTAGE_RATE) {
+  const trimmed = percentInput.trim();
+  if (trimmed === "") {
+    return fallback;
+  }
+
+  const percent = Number(trimmed);
+  if (!Number.isFinite(percent) || percent < 0 || percent > 99) {
+    return fallback;
+  }
+
+  return percent / 100;
+}
+
+export function formatWastagePercent(rate: number | null | undefined) {
+  if (rate == null || !Number.isFinite(rate)) {
+    return "10";
+  }
+
+  const percent = rate * 100;
+  return percent.toFixed(2).replace(/\.?0+$/, "");
+}
+
+export function quoteCostedAreaSqm(areaSqm: number, wastageRate = QUOTE_WASTAGE_RATE) {
+  const rate = Number.isFinite(wastageRate) && wastageRate >= 0 ? wastageRate : QUOTE_WASTAGE_RATE;
+  return roundArea(areaSqm * (1 + rate));
 }
 
 export function approvedRatePerSquareMetre(input: {
@@ -357,6 +384,7 @@ function draftMaterialFromSaved(row: SavedMaterialRow): QuoteMaterialComponentDr
     finishedWidthMm: formatDraftNumber(asNumber(row.finished_width_mm), 2),
     finishedHeightMm: formatDraftNumber(asNumber(row.finished_height_mm), 2),
     quantity: formatDraftNumber(asNumber(row.quantity), 4),
+    wastagePercent: formatWastagePercent(asNumber(row.wastage_rate)),
     manualMaterialCost: formatDraftNumber(asNumber(row.manual_material_cost), 2),
     confirmManualAmount: false,
   });
@@ -601,7 +629,7 @@ function estimateMaterial(
   }
 
   const areaSqm = quoteAreaSqm(width, height, quantity);
-  const costedAreaSqm = quoteCostedAreaSqm(areaSqm);
+  const costedAreaSqm = quoteCostedAreaSqm(areaSqm, parseWastageRate(material.wastagePercent));
 
   return {
     clientKey: material.clientKey,
@@ -880,6 +908,9 @@ export function buildReplaceDraftLinesPayload(lines: DraftQuoteLineInput[]) {
             ...(width == null ? {} : { finished_width_mm: width }),
             ...(height == null ? {} : { finished_height_mm: height }),
             ...(quantity == null ? {} : { quantity }),
+            ...(material.costBasis === "area"
+              ? { wastage_rate: roundRate(parseWastageRate(material.wastagePercent)) }
+              : {}),
             manual_material_cost: material.costBasis === "manual" ? manual : null,
             confirm_manual_amount:
               material.costBasis === "manual" && material.confirmManualAmount,

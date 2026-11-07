@@ -15,6 +15,7 @@ import {
   emptyQuoteLineCost,
   estimateQuoteLineCost,
   quoteAreaSqm,
+  parseWastageRate,
   quoteCostedAreaSqm,
   quoteProfitFigures,
   type QuoteLineCostDraft,
@@ -66,9 +67,30 @@ function line(overrides: Partial<Parameters<typeof buildReplaceDraftLinesPayload
   };
 }
 
+test("buildReplaceDraftLinesPayload sends wastage_rate for area materials", () => {
+  const payload = buildReplaceDraftLinesPayload([
+    line({
+      cost: lineCost([
+        {
+          ...board(),
+          wastagePercent: "12.5",
+        },
+      ]),
+    }),
+  ]);
+  assert.equal(payload.ok, true);
+  if (!payload.ok) {
+    return;
+  }
+  const material = payload.lines[0]?.cost?.materials?.[0] as { wastage_rate?: number };
+  assert.equal(material?.wastage_rate, 0.125);
+});
+
 test("square-metre costing uses a fixed 10 percent wastage", () => {
   assert.equal(quoteAreaSqm(1000, 2000, 5), 10);
   assert.equal(quoteCostedAreaSqm(10), 11);
+  assert.equal(quoteCostedAreaSqm(10, 0.15), 11.5);
+  assert.equal(parseWastageRate("15"), 0.15);
 
   const estimate = estimateQuoteLineCost({ cost: lineCost([board()]), quantity: 5 });
   assert.equal(estimate.state, "complete");

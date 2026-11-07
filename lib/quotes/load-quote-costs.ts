@@ -40,7 +40,7 @@ export async function loadQuoteLineCosts(
         supabase
           .from("quote_item_material_components")
           .select(
-            "id, quote_item_cost_id, sort_order, source_kind, cost_basis, pricing_source, material_id, material_supplier_product_id, material_price_id, material_name, supplier_name, purchase_unit, snapshotted_rate, finished_width_mm, finished_height_mm, quantity, inherit_dimensions, inherit_quantity, manual_material_cost"
+            "id, quote_item_cost_id, sort_order, source_kind, cost_basis, pricing_source, material_id, material_supplier_product_id, material_price_id, material_name, supplier_name, purchase_unit, snapshotted_rate, finished_width_mm, finished_height_mm, quantity, inherit_dimensions, inherit_quantity, wastage_rate, manual_material_cost"
           )
           .in("quote_item_cost_id", costIds),
       ]);
@@ -90,6 +90,7 @@ export async function loadQuoteLineCosts(
       quantity: material.quantity as number | string | null,
       inherit_dimensions: (material.inherit_dimensions as boolean | null) ?? null,
       inherit_quantity: (material.inherit_quantity as boolean | null) ?? null,
+      wastage_rate: material.wastage_rate as number | string | null,
       manual_material_cost: material.manual_material_cost as number | string | null,
     }));
 
