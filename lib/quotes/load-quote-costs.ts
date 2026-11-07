@@ -34,7 +34,7 @@ export async function loadQuoteLineCosts(
         supabase
           .from("quote_item_cost_components")
           .select(
-            "quote_item_cost_id, component_type, description, quantity, unit_cost, sort_order"
+            "quote_item_cost_id, component_type, description, quantity, unit_cost, sort_order, supplier_reference, notes"
           )
           .in("quote_item_cost_id", costIds),
         supabase
@@ -70,6 +70,8 @@ export async function loadQuoteLineCosts(
       quantity: component.quantity as number | string,
       unit_cost: component.unit_cost as number | string,
       sort_order: Number(component.sort_order),
+      supplier_reference: (component.supplier_reference as string | null) ?? null,
+      notes: (component.notes as string | null) ?? null,
     }));
     const savedMaterials = (materialsByCost.get(costId) ?? []).map((material) => ({
       id: String(material.id),

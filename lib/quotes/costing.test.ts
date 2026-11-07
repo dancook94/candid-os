@@ -12,8 +12,10 @@ import {
   costDraftFromSnapshot,
   detachQuoteLineCostIdentity,
   emptyMaterialComponent,
+  emptyOneOffCost,
   emptyQuoteLineCost,
   estimateQuoteLineCost,
+  lineProfit,
   quoteAreaSqm,
   parseWastageRate,
   quoteCostedAreaSqm,
@@ -307,8 +309,166 @@ test("labour and another component add to the material cost", () => {
     quantity: 5,
   });
 
+  assert.equal(estimate.productionCost, 70);
+  assert.equal(estimate.oneOffCost, 0);
   assert.equal(estimate.additionalCost, 70);
   assert.equal(estimate.totalCost, 166.47);
+});
+
+test("one-off purchase profit (scenario A)", () => {
+  const estimate = estimateQuoteLineCost({
+    cost: {
+      ...emptyQuoteLineCost(),
+      oneOffCosts: [
+        emptyOneOffCost({
+          description: "Display stands",
+          quantity: "5",
+          unitCost: "25",
+        }),
+      ],
+    },
+    quantity: 5,
+  });
+
+  assert.equal(estimate.state, "complete");
+  assert.equal(estimate.oneOffCost, 125);
+  assert.equal(estimate.totalCost, 125);
+
+  const profit = lineProfit(225, estimate);
+  assert.equal(profit.profit, 100);
+  assert.equal(profit.marginPercent, 44.44);
+});
+
+test("combined material, labour and one-off costing (scenario B)", () => {
+  const estimate = estimateQuoteLineCost({
+    cost: {
+      ...emptyQuoteLineCost(),
+      materials: [
+        emptyMaterialComponent({
+          costBasis: "manual",
+          pricingSource: "manual",
+          materialName: "Foamalite",
+          manualMaterialCost: "96.07",
+        }),
+        emptyMaterialComponent({
+          costBasis: "manual",
+          pricingSource: "manual",
+          materialName: "Digital Printing Ink",
+          manualMaterialCost: "20",
+        }),
+      ],
+      components: [
+        {
+          clientKey: "labour",
+          componentType: "labour",
+          description: "Labour",
+          quantity: "4",
+          unitCost: "20",
+        },
+      ],
+      oneOffCosts: [
+        emptyOneOffCost({
+          description: "Display stands",
+          quantity: "5",
+          unitCost: "25",
+        }),
+      ],
+    },
+    quantity: 1,
+  });
+
+  assert.equal(estimate.state, "complete");
+  assert.equal(estimate.materialCost, 116.07);
+  assert.equal(estimate.productionCost, 80);
+  assert.equal(estimate.oneOffCost, 125);
+  assert.equal(estimate.totalCost, 321.07);
+});
+
+test("one-off costs round-trip through save payload and snapshot load", () => {
+  const cost: QuoteLineCostDraft = {
+    ...lineCost([board()]),
+    oneOffCosts: [
+      emptyOneOffCost({
+        description: "Stands",
+        quantity: "2",
+        unitCost: "10.5",
+        supplierReference: "Amazon",
+        notes: "Rush",
+      }),
+    ],
+  };
+
+  const payload = buildReplaceDraftLinesPayload([line({ cost })]);
+  assert.equal(payload.ok, true);
+  if (!payload.ok) {
+    return;
+  }
+
+  const component = payload.lines[0].cost?.components?.[0] as {
+    component_type: string;
+    description: string;
+    quantity: number;
+    unit_cost: number;
+    supplier_reference: string;
+    notes: string;
+  };
+  assert.equal(component.component_type, "one_off");
+  assert.equal(component.description, "Stands");
+  assert.equal(component.quantity, 2);
+  assert.equal(component.unit_cost, 10.5);
+  assert.equal(component.supplier_reference, "Amazon");
+  assert.equal(component.notes, "Rush");
+
+  const reopened = costDraftFromSnapshot({
+    summary: { cost_kind: "composite" },
+    components: [
+      {
+        component_type: "one_off",
+        description: "Stands",
+        quantity: 2,
+        unit_cost: 10.5,
+        sort_order: 1,
+        supplier_reference: "Amazon",
+        notes: "Rush",
+      },
+    ],
+  });
+  assert.equal(reopened.oneOffCosts.length, 1);
+  assert.equal(reopened.oneOffCosts[0].description, "Stands");
+  assert.equal(reopened.oneOffCosts[0].supplierReference, "Amazon");
+  assert.equal(reopened.components.length, 0);
+});
+
+test("duplicated line costs keep values without snapshot ids", () => {
+  const detached = detachQuoteLineCostIdentity({
+    ...lineCost([board()]),
+    oneOffCosts: [emptyOneOffCost({ description: "Stands", quantity: "1", unitCost: "25" })],
+  });
+  assert.equal(detached.oneOffCosts.length, 1);
+  const payload = buildReplaceDraftLinesPayload([line({ cost: detached })]);
+  assert.equal(payload.ok, true);
+  if (!payload.ok) {
+    return;
+  }
+  assert.equal(payload.lines[0].cost?.components?.length, 1);
+});
+
+test("partial one-off rows make costing incomplete", () => {
+  const estimate = estimateQuoteLineCost({
+    cost: {
+      ...lineCost([board()]),
+      oneOffCosts: [
+        emptyOneOffCost({
+          description: "Stands",
+          quantity: "5",
+          unitCost: "",
+        }),
+      ],
+    },
+    quantity: 5,
+  });
+  assert.equal(estimate.state, "incomplete");
+  assert.equal(estimate.totalCost, null);
 });
 
 test("optional lines are excluded and an incomplete line makes profitability provisional", () => {

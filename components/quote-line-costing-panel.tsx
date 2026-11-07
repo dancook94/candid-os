@@ -15,6 +15,7 @@ import {
   QUOTE_COST_COMPONENT_TYPES,
   emptyCostComponent,
   emptyMaterialComponent,
+  emptyOneOffCost,
   clearQuoteLineCost,
   estimateQuoteLineCost,
   formatPercent,
@@ -25,6 +26,7 @@ import {
   type QuoteCostComponentType,
   type QuoteLineCostDraft,
   type QuoteMaterialComponentDraft,
+  type QuoteOneOffCostDraft,
   type QuoteMaterialPricingSource,
   type QuoteProfitFigures,
 } from "@/lib/quotes/costing";
@@ -493,13 +495,57 @@ export function QuoteLineCostingPanel({
           ))}
         </div>
 
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-medium text-neutral-700">One-off costs</p>
+            {!disabled && (
+              <button
+                type="button"
+                onClick={() =>
+                  onChange({
+                    ...cost,
+                    cleared: false,
+                    oneOffCosts: [...cost.oneOffCosts, emptyOneOffCost()],
+                  })
+                }
+                className="text-xs font-medium text-neutral-700 hover:text-neutral-950"
+              >
+                Add one-off cost
+              </button>
+            )}
+          </div>
+          <p className="text-xs text-neutral-500">
+            Internal purchase costs only. These never appear on customer quotes.
+          </p>
+          {cost.oneOffCosts.map((entry, index) => (
+            <OneOffCostRow
+              key={entry.clientKey}
+              index={index}
+              entry={entry}
+              disabled={disabled}
+              onChange={(patch) => {
+                const next = [...cost.oneOffCosts];
+                next[index] = { ...entry, ...patch };
+                onChange({ ...cost, oneOffCosts: next });
+              }}
+              onRemove={() =>
+                onChange({
+                  ...cost,
+                  oneOffCosts: cost.oneOffCosts.filter((row) => row.clientKey !== entry.clientKey),
+                })
+              }
+            />
+          ))}
+        </div>
+
         <dl className="grid gap-2 border-t border-neutral-200 pt-3 text-sm sm:grid-cols-2">
           <MoneyRow label="Selling price ex VAT" value={formatGbp(sellExVat)} />
           <MoneyRow
             label="Material cost"
             value={estimate.materialCost == null ? "Incomplete" : formatGbp(estimate.materialCost)}
           />
-          <MoneyRow label="Production costs" value={formatGbp(estimate.additionalCost)} />
+          <MoneyRow label="Production costs" value={formatGbp(estimate.productionCost)} />
+          <MoneyRow label="One-off purchases" value={formatGbp(estimate.oneOffCost)} />
           <MoneyRow
             label="Total estimated cost"
             value={estimate.totalCost == null ? "Incomplete" : formatGbp(estimate.totalCost)}
@@ -915,6 +961,101 @@ function MaterialCard({
   );
 }
 
+function oneOffLineTotal(entry: QuoteOneOffCostDraft) {
+  const quantity = Number(entry.quantity);
+  const unitCost = Number(entry.unitCost);
+  if (!Number.isFinite(quantity) || !Number.isFinite(unitCost) || quantity <= 0 || unitCost < 0) {
+    return null;
+  }
+
+  return quantity * unitCost;
+}
+
+function OneOffCostRow({
+  index,
+  entry,
+  disabled,
+  onChange,
+  onRemove,
+}: {
+  index: number;
+  entry: QuoteOneOffCostDraft;
+  disabled: boolean;
+  onChange: (patch: Partial<QuoteOneOffCostDraft>) => void;
+  onRemove: () => void;
+}) {
+  const lineTotal = oneOffLineTotal(entry);
+
+  return (
+    <div className="space-y-2 rounded-lg border border-neutral-200 bg-white p-2">
+      <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_90px_100px_auto]">
+        <Input
+          aria-label={`One-off description ${index + 1}`}
+          value={entry.description}
+          disabled={disabled}
+          placeholder="Description (required)"
+          onChange={(event) => onChange({ description: event.target.value })}
+          className="h-8"
+        />
+        <Input
+          aria-label={`One-off quantity ${index + 1}`}
+          type="number"
+          min={0}
+          step="0.01"
+          value={entry.quantity}
+          disabled={disabled}
+          placeholder="Qty"
+          onChange={(event) => onChange({ quantity: event.target.value })}
+          className="h-8"
+        />
+        <Input
+          aria-label={`One-off unit cost ${index + 1}`}
+          type="number"
+          min={0}
+          step="0.01"
+          value={entry.unitCost}
+          disabled={disabled}
+          placeholder="£ each ex VAT"
+          onChange={(event) => onChange({ unitCost: event.target.value })}
+          className="h-8"
+        />
+        {!disabled && (
+          <button
+            type="button"
+            aria-label={`Remove one-off cost ${index + 1}`}
+            onClick={onRemove}
+            className="h-8 px-2 text-xs text-neutral-500 hover:text-neutral-950"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Input
+          aria-label={`One-off supplier reference ${index + 1}`}
+          value={entry.supplierReference}
+          disabled={disabled}
+          placeholder="Supplier / reference (optional)"
+          onChange={(event) => onChange({ supplierReference: event.target.value })}
+          className="h-8"
+        />
+        <Input
+          aria-label={`One-off notes ${index + 1}`}
+          value={entry.notes}
+          disabled={disabled}
+          placeholder="Notes (optional)"
+          onChange={(event) => onChange({ notes: event.target.value })}
+          className="h-8"
+        />
+      </div>
+      <p className="text-xs text-neutral-600">
+        Total purchase cost:{" "}
+        {lineTotal == null ? "—" : formatGbp(lineTotal)}
+      </p>
+    </div>
+  );
+}
+
 function MoneyRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3">
@@ -946,7 +1087,7 @@ export function QuoteProfitabilitySummary({
           value={figures.materialCost == null ? "Incomplete" : formatGbp(figures.materialCost)}
         />
         <MoneyRow
-          label="Production costs"
+          label="Production & one-off costs"
           value={figures.additionalCost == null ? "Incomplete" : formatGbp(figures.additionalCost)}
         />
         <MoneyRow

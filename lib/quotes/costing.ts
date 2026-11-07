@@ -13,6 +13,8 @@ export const QUOTE_COST_COMPONENT_TYPES = [
   "other",
 ] as const;
 
+export const QUOTE_ONE_OFF_COMPONENT_TYPE = "one_off" as const;
+
 export type QuoteCostComponentType = (typeof QUOTE_COST_COMPONENT_TYPES)[number];
 
 export const QUOTE_COST_COMPONENT_LABELS: Record<QuoteCostComponentType, string> = {
@@ -35,6 +37,15 @@ export type QuoteCostComponentDraft = {
   description: string;
   quantity: string;
   unitCost: string;
+};
+
+export type QuoteOneOffCostDraft = {
+  clientKey: string;
+  description: string;
+  quantity: string;
+  unitCost: string;
+  supplierReference: string;
+  notes: string;
 };
 
 export type QuoteMaterialComponentDraft = {
@@ -67,6 +78,7 @@ export type QuoteLineCostDraft = {
   defaultFinishedHeightMm: string;
   materials: QuoteMaterialComponentDraft[];
   components: QuoteCostComponentDraft[];
+  oneOffCosts: QuoteOneOffCostDraft[];
   cleared?: boolean;
 };
 
@@ -87,6 +99,8 @@ export type QuoteLineEstimate = {
   ratePerSqm: number | null;
   materials: QuoteMaterialEstimate[];
   materialCost: number | null;
+  productionCost: number;
+  oneOffCost: number;
   additionalCost: number;
   totalCost: number | null;
   reason: string | null;
@@ -163,6 +177,8 @@ type SavedComponentRow = {
   quantity: number | string;
   unit_cost: number | string;
   sort_order: number;
+  supplier_reference?: string | null;
+  notes?: string | null;
 };
 
 export function emptyQuoteLineCost(): QuoteLineCostDraft {
@@ -171,6 +187,7 @@ export function emptyQuoteLineCost(): QuoteLineCostDraft {
     defaultFinishedHeightMm: "",
     materials: [],
     components: [],
+    oneOffCosts: [],
     cleared: false,
   };
 }
@@ -223,6 +240,10 @@ export function cloneQuoteLineCost(cost: QuoteLineCostDraft): QuoteLineCostDraft
       ...component,
       clientKey: crypto.randomUUID(),
     })),
+    oneOffCosts: cost.oneOffCosts.map((entry) => ({
+      ...entry,
+      clientKey: crypto.randomUUID(),
+    })),
   };
 }
 
@@ -250,6 +271,20 @@ export function emptyCostComponent(
     description: "",
     quantity: "",
     unitCost: "",
+  };
+}
+
+export function emptyOneOffCost(
+  partial: Partial<QuoteOneOffCostDraft> = {}
+): QuoteOneOffCostDraft {
+  return {
+    clientKey: crypto.randomUUID(),
+    description: "",
+    quantity: "1",
+    unitCost: "",
+    supplierReference: "",
+    notes: "",
+    ...partial,
   };
 }
 
@@ -448,6 +483,41 @@ export function costDraftFromSnapshot(input: {
           material ? [material] : []
         );
 
+  const sortedComponents = [...input.components].sort(
+    (left, right) => left.sort_order - right.sort_order
+  );
+  const components: QuoteCostComponentDraft[] = [];
+  const oneOffCosts: QuoteOneOffCostDraft[] = [];
+
+  for (const component of sortedComponents) {
+    const quantity = asNumber(component.quantity);
+    const unitCost = asNumber(component.unit_cost);
+
+    if (component.component_type === QUOTE_ONE_OFF_COMPONENT_TYPE) {
+      oneOffCosts.push({
+        clientKey: crypto.randomUUID(),
+        description: component.description ?? "",
+        quantity: quantity == null ? "1" : formatDraftNumber(quantity, 4),
+        unitCost: unitCost == null ? "" : formatDraftNumber(unitCost, 2),
+        supplierReference: component.supplier_reference?.trim() ?? "",
+        notes: component.notes?.trim() ?? "",
+      });
+      continue;
+    }
+
+    if (!isComponentType(component.component_type)) {
+      continue;
+    }
+
+    components.push({
+      clientKey: crypto.randomUUID(),
+      componentType: component.component_type,
+      description: component.description ?? "",
+      quantity: quantity == null ? "" : formatDraftNumber(quantity, 2),
+      unitCost: unitCost == null ? "" : formatDraftNumber(unitCost, 2),
+    });
+  }
+
   return {
     defaultFinishedWidthMm: formatDraftNumber(
       asNumber(input.summary.default_finished_width_mm ?? input.summary.finished_width_mm),
@@ -458,26 +528,8 @@ export function costDraftFromSnapshot(input: {
       2
     ),
     materials,
-    components: [...input.components]
-      .sort((left, right) => left.sort_order - right.sort_order)
-      .flatMap((component) => {
-        if (!isComponentType(component.component_type)) {
-          return [];
-        }
-
-        const quantity = asNumber(component.quantity);
-        const unitCost = asNumber(component.unit_cost);
-
-        return [
-          {
-            clientKey: crypto.randomUUID(),
-            componentType: component.component_type,
-            description: component.description ?? "",
-            quantity: quantity == null ? "" : formatDraftNumber(quantity, 2),
-            unitCost: unitCost == null ? "" : formatDraftNumber(unitCost, 2),
-          },
-        ];
-      }),
+    components,
+    oneOffCosts,
   };
 }
 
@@ -486,6 +538,16 @@ function componentIsBlank(component: QuoteCostComponentDraft) {
     component.description.trim() === "" &&
     component.quantity.trim() === "" &&
     component.unitCost.trim() === ""
+  );
+}
+
+function oneOffIsBlank(entry: QuoteOneOffCostDraft) {
+  return (
+    entry.description.trim() === "" &&
+    entry.quantity.trim() === "" &&
+    entry.unitCost.trim() === "" &&
+    entry.supplierReference.trim() === "" &&
+    entry.notes.trim() === ""
   );
 }
 
@@ -531,6 +593,84 @@ function parseComponents(components: QuoteCostComponentDraft[]) {
   }
 
   return { ok: true as const, rows, additionalCost };
+}
+
+type ParsedCostComponentRow = {
+  component_type: string;
+  description: string | null;
+  quantity: number;
+  unit_cost: number;
+  supplier_reference?: string | null;
+  notes?: string | null;
+};
+
+function parseOneOffCosts(oneOffCosts: QuoteOneOffCostDraft[]) {
+  const rows: ParsedCostComponentRow[] = [];
+  let oneOffCost = 0;
+
+  for (const entry of oneOffCosts) {
+    if (oneOffIsBlank(entry)) {
+      continue;
+    }
+
+    const description = entry.description.trim();
+    const quantity = Number(entry.quantity);
+    const unitCost = Number(entry.unitCost);
+
+    if (description === "") {
+      return {
+        ok: false as const,
+        error: "One-off cost needs a description.",
+      };
+    }
+
+    if (
+      entry.quantity.trim() === "" ||
+      entry.unitCost.trim() === "" ||
+      !Number.isFinite(quantity) ||
+      !Number.isFinite(unitCost) ||
+      quantity <= 0 ||
+      unitCost < 0
+    ) {
+      return {
+        ok: false as const,
+        error: "One-off cost needs a quantity and a unit purchase cost.",
+      };
+    }
+
+    const lineTotal = roundMoney(quantity * unitCost);
+    oneOffCost = roundMoney(oneOffCost + lineTotal);
+    rows.push({
+      component_type: QUOTE_ONE_OFF_COMPONENT_TYPE,
+      description,
+      quantity,
+      unit_cost: roundMoney(unitCost),
+      supplier_reference: entry.supplierReference.trim() || null,
+      notes: entry.notes.trim() || null,
+    });
+  }
+
+  return { ok: true as const, rows, oneOffCost };
+}
+
+function parseLineAdditionalCosts(cost: QuoteLineCostDraft) {
+  const parsedComponents = parseComponents(cost.components);
+  if (!parsedComponents.ok) {
+    return parsedComponents;
+  }
+
+  const parsedOneOff = parseOneOffCosts(cost.oneOffCosts);
+  if (!parsedOneOff.ok) {
+    return parsedOneOff;
+  }
+
+  return {
+    ok: true as const,
+    productionCost: parsedComponents.additionalCost,
+    oneOffCost: parsedOneOff.oneOffCost,
+    additionalCost: roundMoney(parsedComponents.additionalCost + parsedOneOff.oneOffCost),
+    rows: [...parsedComponents.rows, ...parsedOneOff.rows] as ParsedCostComponentRow[],
+  };
 }
 
 function positiveNumber(value: string) {
@@ -658,10 +798,12 @@ export function estimateQuoteLineCost(input: {
   cost: QuoteLineCostDraft;
   quantity: number;
 }): QuoteLineEstimate {
-  const parsedComponents = parseComponents(input.cost.components);
-  const additionalCost = parsedComponents.ok ? parsedComponents.additionalCost : 0;
+  const parsedAdditional = parseLineAdditionalCosts(input.cost);
+  const productionCost = parsedAdditional.ok ? parsedAdditional.productionCost : 0;
+  const oneOffCost = parsedAdditional.ok ? parsedAdditional.oneOffCost : 0;
+  const additionalCost = parsedAdditional.ok ? parsedAdditional.additionalCost : 0;
 
-  if (!parsedComponents.ok) {
+  if (!parsedAdditional.ok) {
     return {
       state: "incomplete",
       areaSqm: null,
@@ -669,13 +811,20 @@ export function estimateQuoteLineCost(input: {
       ratePerSqm: null,
       materials: [],
       materialCost: null,
+      productionCost: 0,
+      oneOffCost: 0,
       additionalCost: 0,
       totalCost: null,
-      reason: parsedComponents.error,
+      reason: parsedAdditional.error,
     };
   }
 
-  if (input.cost.materials.length === 0 && input.cost.components.every(componentIsBlank)) {
+  const hasCosting =
+    input.cost.materials.length > 0 ||
+    !input.cost.components.every(componentIsBlank) ||
+    !input.cost.oneOffCosts.every(oneOffIsBlank);
+
+  if (!hasCosting) {
     return {
       state: "unset",
       areaSqm: null,
@@ -683,23 +832,11 @@ export function estimateQuoteLineCost(input: {
       ratePerSqm: null,
       materials: [],
       materialCost: null,
+      productionCost: 0,
+      oneOffCost: 0,
       additionalCost: 0,
       totalCost: null,
       reason: "No costing saved",
-    };
-  }
-
-  if (input.cost.materials.length === 0) {
-    return {
-      state: "incomplete",
-      areaSqm: null,
-      costedAreaSqm: null,
-      ratePerSqm: null,
-      materials: [],
-      materialCost: null,
-      additionalCost,
-      totalCost: null,
-      reason: "Add a material. An empty material list is not zero.",
     };
   }
 
@@ -713,6 +850,38 @@ export function estimateQuoteLineCost(input: {
   const incomplete = materials.find((material) => material.state !== "complete");
   const onlyArea = materials.length === 1 ? materials[0] : null;
 
+  if (input.cost.materials.length === 0) {
+    if (additionalCost <= 0) {
+      return {
+        state: "incomplete",
+        areaSqm: null,
+        costedAreaSqm: null,
+        ratePerSqm: null,
+        materials: [],
+        materialCost: null,
+        productionCost,
+        oneOffCost,
+        additionalCost,
+        totalCost: null,
+        reason: "Add a material or an internal purchase cost.",
+      };
+    }
+
+    return {
+      state: "complete",
+      areaSqm: null,
+      costedAreaSqm: null,
+      ratePerSqm: null,
+      materials: [],
+      materialCost: 0,
+      productionCost,
+      oneOffCost,
+      additionalCost,
+      totalCost: additionalCost,
+      reason: null,
+    };
+  }
+
   if (incomplete) {
     return {
       state: "incomplete",
@@ -721,6 +890,8 @@ export function estimateQuoteLineCost(input: {
       ratePerSqm: onlyArea?.rate ?? null,
       materials,
       materialCost: null,
+      productionCost,
+      oneOffCost,
       additionalCost,
       totalCost: null,
       reason: incomplete.reason,
@@ -738,6 +909,8 @@ export function estimateQuoteLineCost(input: {
     ratePerSqm: onlyArea?.rate ?? null,
     materials,
     materialCost,
+    productionCost,
+    oneOffCost,
     additionalCost,
     totalCost: roundMoney(materialCost + additionalCost),
     reason: null,
@@ -817,12 +990,12 @@ export function buildReplaceDraftLinesPayload(lines: DraftQuoteLineInput[]) {
   const payload = [];
 
   for (const [index, line] of lines.entries()) {
-    const parsedComponents = parseComponents(line.cost.components);
+    const parsedAdditional = parseLineAdditionalCosts(line.cost);
 
-    if (!parsedComponents.ok) {
+    if (!parsedAdditional.ok) {
       return {
         ok: false as const,
-        error: `Item ${index + 1}: ${parsedComponents.error}`,
+        error: `Item ${index + 1}: ${parsedAdditional.error}`,
       };
     }
 
@@ -842,16 +1015,13 @@ export function buildReplaceDraftLinesPayload(lines: DraftQuoteLineInput[]) {
     if (
       line.cost.cleared === true &&
       line.cost.materials.length === 0 &&
-      parsedComponents.rows.length === 0
+      parsedAdditional.rows.length === 0
     ) {
       payload.push({ ...base, cost: { clear: true } });
       continue;
     }
 
-    if (
-      line.cost.materials.length === 0 &&
-      parsedComponents.rows.length === 0
-    ) {
+    if (line.cost.materials.length === 0 && parsedAdditional.rows.length === 0) {
       payload.push({ ...base, cost: null });
       continue;
     }
@@ -916,7 +1086,7 @@ export function buildReplaceDraftLinesPayload(lines: DraftQuoteLineInput[]) {
               material.costBasis === "manual" && material.confirmManualAmount,
           };
         }),
-        components: parsedComponents.rows,
+        components: parsedAdditional.rows,
       },
     });
   }
