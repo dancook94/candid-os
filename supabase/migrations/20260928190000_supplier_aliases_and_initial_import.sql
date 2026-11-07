@@ -122,6 +122,8 @@ DECLARE
     "heightMm": 1560,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "foamalite-3mm-3050x1560--pyramid-display-materials",
@@ -153,6 +155,8 @@ DECLARE
     "heightMm": 1220,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "foamalite-3mm-2440x1220--pyramid-display-materials",
@@ -184,6 +188,8 @@ DECLARE
     "heightMm": 3050,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "correx-1524x3050-3-5mm--pyramid-display-materials",
@@ -207,6 +213,8 @@ DECLARE
     "heightMm": 2440,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "correx-1220x2440-3-5mm--pyramid-display-materials",
@@ -230,6 +238,8 @@ DECLARE
     "heightMm": 3050,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "correx-1524x3050-4mm--antalis",
@@ -253,6 +263,8 @@ DECLARE
     "heightMm": 3050,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "swedboard-16mm-1600x3050--pyramid-display-materials",
@@ -276,6 +288,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": 100000,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "bubble-wrap-1500--pyramid-display-materials",
@@ -299,6 +313,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": 91400,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "perfectear-medium-1220--pyramid-display-materials",
@@ -322,6 +338,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": 220000,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "kraft-brown-600-90gsm--antalis",
@@ -345,6 +363,8 @@ DECLARE
     "heightMm": 1220,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "xanita-10mm-2440x1220--antalis",
@@ -368,6 +388,8 @@ DECLARE
     "heightMm": 1220,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "foamalite-5mm-2440x1220--pyramid-display-materials",
@@ -399,6 +421,8 @@ DECLARE
     "heightMm": 2440,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "dibond-sigwhite-3mm-1220x2440--pyramid-display-materials",
@@ -422,6 +446,8 @@ DECLARE
     "heightMm": 3050,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "dibond-eco-3mm-1500x3050--pyramid-display-materials",
@@ -445,6 +471,8 @@ DECLARE
     "heightMm": 3050,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "alupanel-mirror-3mm-1220x3050--pyramid-display-materials",
@@ -468,6 +496,8 @@ DECLARE
     "heightMm": 1220,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "alupanel-brushed-3mm-2440x1220--pyramid-display-materials",
@@ -491,6 +521,8 @@ DECLARE
     "heightMm": 1500,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "coala-white-3mm-3050x1500--antalis",
@@ -514,6 +546,8 @@ DECLARE
     "heightMm": 1220,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "coala-white-3mm-2440x1220--antalis",
@@ -537,6 +571,8 @@ DECLARE
     "heightMm": 2440,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "coala-silver-3mm-1220x2440--antalis",
@@ -560,6 +596,8 @@ DECLARE
     "heightMm": 3200,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "swedboard-16mm-1600x3200--pyramid-display-materials",
@@ -583,6 +621,8 @@ DECLARE
     "heightMm": 3200,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "swedboard-16mm-1600x3200-fr--pyramid-display-materials",
@@ -606,6 +646,8 @@ DECLARE
     "heightMm": 1220,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "hips-1mm-2440x1220--ppb",
@@ -629,6 +671,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": 50000,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "briteline-greyback-1370x50--pyramid-display-materials",
@@ -652,6 +696,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": 50000,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "su3-70-1350x50--all-print-supplies",
@@ -675,6 +721,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": 50000,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "simply-rollup-1067x50--pyramid-display-materials",
@@ -698,6 +746,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": 100000,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "simply-drywipe-1300x100--pyramid-display-materials",
@@ -721,6 +771,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": 30000,
     "inkVolumeLitres": null,
+    "costingUnit": "square_metre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "supreme-banner-1600x30--pyramid-display-materials",
@@ -744,6 +796,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": 0.3,
+    "costingUnit": "litre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "hp-730-photo-black-300--papergraphics",
@@ -767,6 +821,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": 0.3,
+    "costingUnit": "litre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "hp-730-matte-black-300--papergraphics",
@@ -790,6 +846,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": 0.3,
+    "costingUnit": "litre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "hp-730-grey-300--papergraphics",
@@ -813,6 +871,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": 1,
+    "costingUnit": "litre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "hp-832-cyan-1000--papergraphics",
@@ -836,6 +896,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": 1,
+    "costingUnit": "litre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "hp-832-magenta-1000--papergraphics",
@@ -859,6 +921,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": 1,
+    "costingUnit": "litre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "hp-832-black-1000--papergraphics",
@@ -882,6 +946,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": 1,
+    "costingUnit": "litre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "hp-832-yellow-1000--papergraphics",
@@ -905,6 +971,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": 1,
+    "costingUnit": "litre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "hp-832-optimiser-1000--papergraphics",
@@ -928,6 +996,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": 5,
+    "costingUnit": "litre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "hp-882-magenta-5000--perfect-colours",
@@ -951,6 +1021,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": 5,
+    "costingUnit": "litre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "hp-882-yellow-5000--perfect-colours",
@@ -974,6 +1046,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": 5,
+    "costingUnit": "litre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "hp-882-optimizer-5000--perfect-colours",
@@ -997,6 +1071,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": 5,
+    "costingUnit": "litre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "hp-882-overcoat-5000--perfect-colours",
@@ -1020,6 +1096,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": 3,
+    "costingUnit": "litre",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "hp-886-white-3000--perfect-colours",
@@ -1043,6 +1121,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "each",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "hp-latex-printhead-cleaning-kit--perfect-colours",
@@ -1066,6 +1146,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "each",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "showcard-strut-240--antalis",
@@ -1089,6 +1171,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "each",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "showcard-strut-190--antalis",
@@ -1112,6 +1196,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "each",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "showcard-strut-140--antalis",
@@ -1135,6 +1221,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "each",
+    "costingPackQuantity": 5,
     "products": [
       {
         "key": "tangential-knife-36-pack--perfect-colours",
@@ -1158,6 +1246,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": null,
     "inkVolumeLitres": null,
+    "costingUnit": "each",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "heavy-duty-cutout-knife--perfect-colours",
@@ -1181,6 +1271,8 @@ DECLARE
     "heightMm": null,
     "lengthMm": 50000,
     "inkVolumeLitres": null,
+    "costingUnit": "each",
+    "costingPackQuantity": null,
     "products": [
       {
         "key": "orabond-1395-12x50--antalis",
@@ -1193,7 +1285,7 @@ DECLARE
     ]
   }
 ]
-  $catalog$::jsonb;
+$catalog$::jsonb;
   v_aliases jsonb := $aliases$
 [
   {
@@ -1284,6 +1376,8 @@ DECLARE
   v_finish text;
   v_category text;
   v_ink numeric;
+  v_costing_unit text;
+  v_costing_pack_quantity numeric;
   v_creating boolean;
   v_material_id uuid;
   v_product jsonb;
@@ -1520,6 +1614,8 @@ BEGIN
     v_finish := NULLIF(v_item->>'finish', '');
     v_category := NULLIF(v_item->>'category', '');
     v_ink := (v_item->>'inkVolumeLitres')::numeric;
+    v_costing_unit := NULLIF(v_item->>'costingUnit', '');
+    v_costing_pack_quantity := (v_item->>'costingPackQuantity')::numeric;
     v_width := (v_item->>'widthMm')::numeric;
     v_height := (v_item->>'heightMm')::numeric;
     v_length := (v_item->>'lengthMm')::numeric;
@@ -1580,6 +1676,8 @@ BEGIN
         purchase_height_mm,
         purchase_length_mm,
         ink_volume_litres,
+        costing_unit,
+        costing_pack_quantity,
         identity_key,
         active
       )
@@ -1594,6 +1692,8 @@ BEGIN
         v_height,
         v_length,
         v_ink,
+        v_costing_unit,
+        v_costing_pack_quantity,
         '',
         true
       )

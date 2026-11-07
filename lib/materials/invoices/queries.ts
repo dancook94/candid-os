@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  coerceMaterialCostingUnit,
+  invoicePackSheetUnitPriceWarning,
+} from "@/lib/materials/costing-unit";
 import { normalizeSupplierDescription } from "@/lib/materials/identity";
 import { isMaterialsSchemaMissing } from "@/lib/materials/write-error";
 import { formatPriceDecision } from "@/lib/materials/invoices/price-change";
@@ -49,7 +53,7 @@ export async function loadInvoiceMatchCatalog(supabase: SupabaseClient) {
       supabase
         .from("materials")
         .select(
-          "id, name, thickness_mm, colour, purchase_unit, purchase_width_mm, purchase_height_mm, purchase_length_mm"
+          "id, name, thickness_mm, colour, purchase_unit, purchase_width_mm, purchase_height_mm, purchase_length_mm, costing_unit, costing_pack_quantity"
         ),
       supabase
         .from("material_supplier_products")
@@ -149,6 +153,8 @@ export async function loadInvoiceMatchCatalog(supabase: SupabaseClient) {
       widthMm: numeric(material.purchase_width_mm),
       heightMm: numeric(material.purchase_height_mm),
       lengthMm: numeric(material.purchase_length_mm),
+      costingUnit: coerceMaterialCostingUnit(material.costing_unit),
+      costingPackQuantity: numeric(material.costing_pack_quantity),
       currentPrice: current?.price ?? null,
       currentPriceUnit: current?.priceUnit ?? null,
       currentPriceId: current?.id ?? null,
@@ -314,6 +320,7 @@ export type InvoiceDetailLine = {
   matchMethod: MatchMethod | null;
   reviewStatus: InvoiceReviewStatus;
   mathsWarning: string | null;
+  unitCostingWarning: string | null;
   internalNote: string | null;
   materialName: string | null;
   productDescription: string | null;
@@ -376,6 +383,20 @@ export async function loadInvoiceDetail(supabase: SupabaseClient, invoiceId: str
       : null;
     const invoicePrice = numeric(row.reviewed_unit_price) ?? numeric(row.raw_unit_price);
     const purchaseUnit = normalizePurchaseUnit(row.reviewed_unit ?? row.raw_unit);
+    const unitCostingWarning =
+      product &&
+      product.currentPrice != null &&
+      product.currentPriceUnit &&
+      invoicePrice != null &&
+      purchaseUnit
+        ? invoicePackSheetUnitPriceWarning({
+            costingUnit: product.costingUnit ?? null,
+            packQuantity: product.costingPackQuantity ?? null,
+            invoiceUnit: purchaseUnit,
+            invoiceUnitPrice: invoicePrice,
+            approvedUnitPrice: product.currentPrice,
+          })
+        : null;
     const comparison =
       product &&
       product.currentPrice != null &&
@@ -384,7 +405,8 @@ export async function loadInvoiceDetail(supabase: SupabaseClient, invoiceId: str
       product.currentEffectiveDate &&
       invoicePrice != null &&
       purchaseUnit === product.purchaseUnit &&
-      purchaseUnit === product.currentPriceUnit
+      purchaseUnit === product.currentPriceUnit &&
+      !unitCostingWarning
         ? compareApprovedPrice(product.currentPrice, invoicePrice, product.currentPriceUnit, {
             currentPriceId: product.currentPriceId,
             currentEffectiveDate: product.currentEffectiveDate,
@@ -439,6 +461,7 @@ export async function loadInvoiceDetail(supabase: SupabaseClient, invoiceId: str
       matchMethod: row.match_method as MatchMethod | null,
       reviewStatus: row.review_status as InvoiceReviewStatus,
       mathsWarning: row.maths_warning,
+      unitCostingWarning,
       internalNote: row.internal_note,
       comparison,
       suggestedSupplierSku:

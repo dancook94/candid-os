@@ -1,3 +1,4 @@
+import type { MaterialCostingUnit } from "@/lib/materials/costing-unit";
 import type { PurchaseUnit } from "@/lib/materials/units";
 
 export const SUPPLIER_INVOICE_FILES_BUCKET = "supplier-invoice-files";
@@ -61,6 +62,8 @@ export type InvoiceMatchProduct = {
   widthMm: number | null;
   heightMm: number | null;
   lengthMm: number | null;
+  costingUnit?: MaterialCostingUnit | null;
+  costingPackQuantity?: number | null;
   currentPrice: number | null;
   currentPriceUnit: PurchaseUnit | null;
   currentPriceId?: string | null;

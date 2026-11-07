@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatGbp } from "@/lib/format-currency";
 import { PURCHASE_UNIT_LABELS, type PurchaseUnit } from "@/lib/materials/units";
+import { draftFromApprovedCatalogProduct } from "@/lib/quotes/catalog-defaults";
 import type {
   QuoteMaterialCatalogItem,
   QuoteMaterialCatalogProduct,
@@ -72,67 +73,20 @@ function draftFromApprovedProduct(
   material: QuoteMaterialCatalogItem,
   product: QuoteMaterialCatalogProduct
 ): QuoteMaterialComponentDraft {
-  const base = {
-    sourceKind: "approved_material" as const,
-    materialId: material.id,
-    productId: product.id,
-    priceId: product.currentPriceId,
-    materialName: material.name,
-    supplierName: product.supplierName,
-    purchaseUnit: product.currentPriceUnit ?? "",
-    refreshRate: true,
-    rateSource: "current" as const,
-  };
-
-  if (product.currentPriceUnit === "litre" && product.currentPrice != null) {
-    return emptyMaterialComponent({
-      ...base,
-      costBasis: "consumption",
-      pricingSource: "catalogue",
-      rate: String(product.currentPrice),
-      purchaseUnit: "litre",
-      inheritDimensions: false,
-      inheritQuantity: true,
-      quantity: "",
-    });
-  }
-
-  if (product.currentRatePerSqm != null) {
-    return emptyMaterialComponent({
-      ...base,
-      costBasis: "area",
-      pricingSource: "catalogue",
-      rate: String(product.currentRatePerSqm),
-      inheritDimensions: true,
-      inheritQuantity: true,
-    });
-  }
-
-  if (
-    product.currentPrice != null &&
-    (product.currentPriceUnit === "unit" || product.currentPriceUnit === "pack")
-  ) {
-    return emptyMaterialComponent({
-      ...base,
-      costBasis: "consumption",
-      pricingSource: "catalogue",
-      rate: String(product.currentPrice),
-      inheritDimensions: false,
-      inheritQuantity: false,
-      quantity: "1",
-    });
-  }
-
-  return emptyMaterialComponent({
-    ...base,
-    costBasis: "manual",
-    pricingSource: "manual",
-    refreshRate: false,
-    rate: "",
-    rateSource: "saved",
-    inheritDimensions: false,
-    inheritQuantity: false,
-  });
+  return draftFromApprovedCatalogProduct(
+    {
+      id: material.id,
+      name: material.name,
+      costingUnit: material.costingUnit,
+      costingPackQuantity: material.costingPackQuantity,
+      purchaseUnit: material.purchaseUnit,
+      purchaseWidthMm: material.purchaseWidthMm,
+      purchaseHeightMm: material.purchaseHeightMm,
+      purchaseLengthMm: material.purchaseLengthMm,
+      inkVolumeLitres: material.inkVolumeLitres,
+    },
+    product
+  );
 }
 
 export function QuoteLineCostingPanel({
@@ -646,6 +600,16 @@ function MaterialCard({
         name: material.materialName,
         specification: "",
         purchaseFormat: "",
+        costingUnit: null,
+        costingPackQuantity: null,
+        inkVolumeLitres: null,
+        purchaseUnit:
+          material.purchaseUnit in PURCHASE_UNIT_LABELS
+            ? (material.purchaseUnit as PurchaseUnit)
+            : "unit",
+        purchaseWidthMm: null,
+        purchaseHeightMm: null,
+        purchaseLengthMm: null,
         searchText: "",
         products: [],
       },

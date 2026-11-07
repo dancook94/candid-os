@@ -241,6 +241,9 @@ function InvoiceLineCard({
         Original: {line.rawDescription}
         {line.rawSupplierSku ? ` · SKU ${line.rawSupplierSku}` : ""}
       </p>
+      {line.unitCostingWarning ? (
+        <p className="mt-2 text-sm text-amber-800">{line.unitCostingWarning}</p>
+      ) : null}
       {line.mathsWarning ? (
         <p className="mt-2 text-sm text-amber-800">{line.mathsWarning}</p>
       ) : null}

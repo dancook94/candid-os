@@ -8,6 +8,7 @@ import {
 } from "@/lib/materials/present";
 import type { PurchaseUnit } from "@/lib/materials/units";
 import { selectCurrentApprovedPrice, type ApprovedPriceRecord } from "@/lib/materials/pricing";
+import { coerceMaterialCostingUnit, type MaterialCostingUnit } from "@/lib/materials/costing-unit";
 import { approvedRatePerSquareMetre } from "@/lib/quotes/costing";
 
 export type QuoteMaterialCatalogProduct = {
@@ -27,6 +28,13 @@ export type QuoteMaterialCatalogItem = {
   name: string;
   specification: string;
   purchaseFormat: string;
+  costingUnit: MaterialCostingUnit | null;
+  costingPackQuantity: number | null;
+  inkVolumeLitres: number | null;
+  purchaseUnit: PurchaseUnit;
+  purchaseWidthMm: number | null;
+  purchaseHeightMm: number | null;
+  purchaseLengthMm: number | null;
   searchText: string;
   products: QuoteMaterialCatalogProduct[];
 };
@@ -58,7 +66,7 @@ export async function loadQuoteMaterialCatalog(
   const { data: materialRows, error: materialError } = await supabase
     .from("materials")
     .select(
-      "id, name, category, thickness_mm, colour, finish, purchase_unit, purchase_width_mm, purchase_height_mm, purchase_length_mm, active"
+      "id, name, category, thickness_mm, colour, finish, purchase_unit, purchase_width_mm, purchase_height_mm, purchase_length_mm, ink_volume_litres, costing_unit, costing_pack_quantity, active"
     )
     .eq("active", true)
     .order("name", { ascending: true });
@@ -74,6 +82,10 @@ export async function loadQuoteMaterialCatalog(
       return [];
     }
 
+    const costingUnit = coerceMaterialCostingUnit(row.costing_unit);
+    const costingPackQuantity = numeric(row.costing_pack_quantity);
+    const inkVolumeLitres = numeric(row.ink_volume_litres);
+
     const material: MaterialRecord = {
       id: String(row.id),
       name: String(row.name),
@@ -85,6 +97,9 @@ export async function loadQuoteMaterialCatalog(
       purchaseWidthMm: numeric(row.purchase_width_mm),
       purchaseHeightMm: numeric(row.purchase_height_mm),
       purchaseLengthMm: numeric(row.purchase_length_mm),
+      inkVolumeLitres,
+      costingUnit,
+      costingPackQuantity,
       active: true,
     };
 
@@ -171,15 +186,22 @@ export async function loadQuoteMaterialCatalog(
       .filter((product) => product.materialId === material.id)
       .map((product) => {
         const current = selectCurrentApprovedPrice(pricesByProduct.get(product.id) ?? []);
-        const currentRatePerSqm = current
-          ? approvedRatePerSquareMetre({
-              price: current.price,
-              priceUnit: current.priceUnit,
-              widthMm: material.purchaseWidthMm,
-              heightMm: material.purchaseHeightMm,
-              lengthMm: material.purchaseLengthMm,
-            })
-          : null;
+        const useAreaRate =
+          material.costingUnit === "square_metre" ||
+          material.costingUnit === "linear_metre" ||
+          (material.costingUnit == null &&
+            material.purchaseUnit !== "unit" &&
+            material.purchaseUnit !== "pack");
+        const currentRatePerSqm =
+          current && useAreaRate
+            ? approvedRatePerSquareMetre({
+                price: current.price,
+                priceUnit: current.priceUnit,
+                widthMm: material.purchaseWidthMm,
+                heightMm: material.purchaseHeightMm,
+                lengthMm: material.purchaseLengthMm,
+              })
+            : null;
 
         return {
           id: product.id,
@@ -209,6 +231,13 @@ export async function loadQuoteMaterialCatalog(
       name: material.name,
       specification,
       purchaseFormat,
+      costingUnit: material.costingUnit ?? null,
+      costingPackQuantity: material.costingPackQuantity ?? null,
+      inkVolumeLitres: material.inkVolumeLitres ?? null,
+      purchaseUnit: material.purchaseUnit,
+      purchaseWidthMm: material.purchaseWidthMm,
+      purchaseHeightMm: material.purchaseHeightMm,
+      purchaseLengthMm: material.purchaseLengthMm,
       searchText: [
         material.name,
         material.category,

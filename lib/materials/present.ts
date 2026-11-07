@@ -5,6 +5,7 @@ import {
   selectPreferredSupplierProduct,
   type ApprovedPriceRecord,
 } from "@/lib/materials/pricing";
+import type { MaterialCostingUnit } from "@/lib/materials/costing-unit";
 import {
   isPurchaseUnit,
   PURCHASE_UNIT_LABELS,
@@ -31,6 +32,9 @@ export type MaterialRecord = {
   purchaseWidthMm: number | null;
   purchaseHeightMm: number | null;
   purchaseLengthMm: number | null;
+  inkVolumeLitres?: number | null;
+  costingUnit?: MaterialCostingUnit | null;
+  costingPackQuantity?: number | null;
   active: boolean;
 };
 

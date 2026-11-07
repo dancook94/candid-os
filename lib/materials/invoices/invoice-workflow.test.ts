@@ -38,6 +38,8 @@ const pyramidProduct: InvoiceMatchProduct = {
   widthMm: 3050,
   heightMm: 1560,
   lengthMm: null,
+  costingUnit: null,
+  costingPackQuantity: null,
   currentPrice: 41.75,
   currentPriceUnit: "sheet",
 };

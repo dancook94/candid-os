@@ -3,6 +3,7 @@ import type { CatalogImportSource } from "@/lib/materials/initial-import-plan";
 import type { InitialImportMaterial } from "@/lib/materials/initial-import-catalog";
 import { calculateCostPerSquareMetre } from "@/lib/materials/pricing";
 import { KNOWN_SUPPLIER_FAMILIES } from "@/lib/materials/supplier-aliases";
+import type { MaterialCostingUnit } from "@/lib/materials/costing-unit";
 import type { PurchaseUnit } from "@/lib/materials/units";
 
 export const MEDIUM_IMPORT_CATALOG_VERSION = "medium-approved-batch-2";
@@ -92,7 +93,9 @@ function sheetMaterial(
   supplierName: string,
   supplierDescription: string,
   price: number,
-  thicknessMm: number | null = null
+  thicknessMm: number | null = null,
+  costingUnit: MaterialCostingUnit = "sheet",
+  costingPackQuantity: number | null = null
 ): InitialImportMaterial {
   return {
     key,
@@ -106,6 +109,8 @@ function sheetMaterial(
     purchaseHeightMm: heightMm,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit,
+    costingPackQuantity,
     products: [
       withArea(
         key,
@@ -143,6 +148,7 @@ function rollMaterial(
     purchaseHeightMm: null,
     purchaseLengthMm: lengthMm,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       withArea(
         key,
@@ -179,6 +185,7 @@ function metreMaterial(
     purchaseHeightMm: null,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       withArea(
         key,
@@ -213,6 +220,7 @@ function unitMaterial(
     purchaseHeightMm: null,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "each",
     products: [offer(key, supplierName, supplierDescription, price, "unit")],
   };
 }
@@ -235,6 +243,7 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: null,
     purchaseLengthMm: 100000,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       withArea(
         BUBBLE_WRAP_KEY,
@@ -267,6 +276,7 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: null,
     purchaseLengthMm: 91400,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       withArea(
         PERFECTEAR_KEY,
@@ -297,7 +307,10 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     320,
     "Antalis",
     "Edixion, Offset, white, 350g/m2 450mm x 320mm, SRA3, short grain pack of 125 sheets, FSC Mix Credit",
-    0.08254
+    0.08254,
+    null,
+    "sheet",
+    125
   ),
   sheetMaterial(
     "edixion-offset-300-sra3",
@@ -309,7 +322,10 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     320,
     "Antalis",
     "Edixion, Offset, white, 300g/m2 450mm x 320mm, SRA3, short grain pack of 125 sheets, FSC Mix Credit",
-    0.06983
+    0.06983,
+    null,
+    "sheet",
+    125
   ),
   sheetMaterial(
     "edixion-offset-250-sra3",
@@ -321,7 +337,10 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     320,
     "Antalis",
     "Edixion, Offset, white, woodfree ECF 250g/m2 450mm x 320mm, SRA3, short grain pack of 125 sheets, FSC Mix Credit",
-    0.05817
+    0.05817,
+    null,
+    "sheet",
+    125
   ),
   sheetMaterial(
     "edixion-offset-170-sra3",
@@ -333,7 +352,10 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     320,
     "Antalis",
     "Edixion, Offset, white, 170g/m2, 450mm x 320mm, SRA3, short grain, pack of 250 sheets, FSC Mix Credit",
-    0.03826
+    0.03826,
+    null,
+    "sheet",
+    250
   ),
   sheetMaterial(
     "novatec-silk-350-sra3",
@@ -345,7 +367,10 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     320,
     "Antalis",
     "Novatech, Digital silk, Silk 2-side coated, white, woodfree ECF 350g/m2 450mm x 320mm, SRA3, short grain pack of 125 sheets, FSC Mix Credit",
-    0.08919
+    0.08919,
+    null,
+    "sheet",
+    125
   ),
   sheetMaterial(
     "novatec-silk-300-sra3",
@@ -357,7 +382,10 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     320,
     "Antalis",
     "Novatech, Digital silk, Silk 2-side coated, white, woodfree ECF 300g/m2 450mm x 320mm, SRA3, short grain pack of 125 sheets, FSC Mix Credit",
-    0.07548
+    0.07548,
+    null,
+    "sheet",
+    125
   ),
   sheetMaterial(
     "novatec-silk-250-sra3",
@@ -369,7 +397,10 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     320,
     "Antalis",
     "Novatech, Digital silk, Silk 2-side coated, white, woodfree ECF 250g/m2 450mm x 320mm, SRA3, short grain pack of 125 sheets, FSC Mix Credit",
-    0.06212
+    0.06212,
+    null,
+    "sheet",
+    125
   ),
   sheetMaterial(
     "novatec-silk-170-sra3",
@@ -381,7 +412,10 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     450,
     "Antalis",
     "Novatech, Digital silk, Silk 2-side coated, white, woodfree ECF 170g/m2 320mm x 450mm, SRA3, long grain pack of 250 sheets, FSC Mix Credit",
-    0.04132
+    0.04132,
+    null,
+    "sheet",
+    250
   ),
   sheetMaterial(
     "emblem-greyboard-300-450x640",
@@ -394,7 +428,9 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     "Antalis",
     "EMBLEM, Greyboard, Grey, 100% recycled 300g/m2, 480µm 450mm x 640mm, long grain Bundle of 265 Sheets, FSC Recycled 100% Pallet of 18 Bundles",
     0.12854,
-    0.48
+    0.48,
+    "sheet",
+    265
   ),
   unitMaterial(
     "stationery-box-a4-brown",
@@ -442,7 +478,9 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     1575,
     "Pyramid Display Materials",
     "E Flute 190Y/180W 1067x1575mm (Short Flute) Corrugated Board (PQ 700) 'FSC Mix Credit",
-    2.741
+    2.741,
+    null,
+    "square_metre"
   ),
   sheetMaterial(
     "e-flute-long-1575x1065",
@@ -455,7 +493,8 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     "Antalis",
     "Corrugated Board, E - Flute, white 190Y/180W, Long Flute, 504g/m2, 1700µm 1575mm x 1065mm, FSC Mix Credit",
     3.65,
-    1.7
+    1.7,
+    "square_metre"
   ),
   rollMaterial(
     "nucoat-m16-permanent-1370x50",
@@ -550,6 +589,7 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: null,
     purchaseLengthMm: null,
     inkVolumeLitres: 5,
+    costingUnit: "litre",
     products: [
       offer(
         "hp-882-black-5000",
@@ -572,7 +612,8 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     "PPB",
     "WHITE PS1275 P91 GLOSS/MATT HIPS WITH FILM (ON GLOSS SIDE) 1MM BULK PACK 2440mm x 1220mm",
     26,
-    1
+    1,
+    "square_metre"
   ),
   rollMaterial(
     "inkjet-90gsm-841x90",
@@ -692,7 +733,8 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     "PPB",
     "WHITE 7231 GLOSS/MATT HIPS WITH FILM (ON GLOSS SIDE) 1MM BULK PACK 3050mm x 1524mm",
     30,
-    1
+    1,
+    "square_metre"
   ),
 ];
 
@@ -810,6 +852,8 @@ export function mediumImportSqlCatalog() {
     heightMm: material.purchaseHeightMm,
     lengthMm: material.purchaseLengthMm,
     inkVolumeLitres: material.inkVolumeLitres,
+    costingUnit: material.costingUnit,
+    costingPackQuantity: material.costingPackQuantity ?? null,
     products: material.products.map((product) => ({
       key: product.key,
       supplierName: product.supplierName,

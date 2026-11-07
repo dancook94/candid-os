@@ -2,6 +2,7 @@ import {
   buildMaterialIdentityKey,
   normalizeSupplierName,
 } from "@/lib/materials/identity";
+import type { MaterialCostingUnit } from "@/lib/materials/costing-unit";
 import type { PurchaseUnit } from "@/lib/materials/units";
 
 import { KNOWN_SUPPLIER_FAMILIES } from "@/lib/materials/supplier-aliases";
@@ -68,6 +69,10 @@ export type InitialImportMaterial = {
   purchaseLengthMm: number | null;
   /** Cartridge or container volume. Not part of the material identity. */
   inkVolumeLitres: number | null;
+  /** Quote and internal cost basis, independent of purchase_unit. */
+  costingUnit: MaterialCostingUnit;
+  /** When purchase is a pack but quotes consume singles (e.g. blades). */
+  costingPackQuantity?: number | null;
   products: readonly InitialImportOffer[];
 };
 
@@ -135,6 +140,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 1560,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "foamalite-3mm-3050x1560",
@@ -167,6 +173,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 1220,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "foamalite-3mm-2440x1220",
@@ -199,6 +206,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 3050,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "correx-1524x3050-3-5mm",
@@ -222,6 +230,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 2440,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "correx-1220x2440-3-5mm",
@@ -245,6 +254,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 3050,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "correx-1524x3050-4mm",
@@ -268,6 +278,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 3050,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "swedboard-16mm-1600x3050",
@@ -291,6 +302,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: null,
     purchaseLengthMm: 100000,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "bubble-wrap-1500",
@@ -314,6 +326,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: null,
     purchaseLengthMm: 91400,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "perfectear-medium-1220",
@@ -337,6 +350,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: null,
     purchaseLengthMm: 220000,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "kraft-brown-600-90gsm",
@@ -360,6 +374,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 1220,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "xanita-10mm-2440x1220",
@@ -383,6 +398,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 1220,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "foamalite-5mm-2440x1220",
@@ -415,6 +431,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 2440,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "dibond-sigwhite-3mm-1220x2440",
@@ -438,6 +455,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 3050,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "dibond-eco-3mm-1500x3050",
@@ -461,6 +479,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 3050,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "alupanel-mirror-3mm-1220x3050",
@@ -484,6 +503,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 1220,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "alupanel-brushed-3mm-2440x1220",
@@ -507,6 +527,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 1500,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "coala-white-3mm-3050x1500",
@@ -530,6 +551,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 1220,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "coala-white-3mm-2440x1220",
@@ -553,6 +575,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 2440,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "coala-silver-3mm-1220x2440",
@@ -576,6 +599,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 3200,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "swedboard-16mm-1600x3200",
@@ -599,6 +623,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 3200,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "swedboard-16mm-1600x3200-fr",
@@ -622,6 +647,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: 1220,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "hips-1mm-2440x1220",
@@ -645,6 +671,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: null,
     purchaseLengthMm: 50000,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "briteline-greyback-1370x50",
@@ -668,6 +695,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: null,
     purchaseLengthMm: 50000,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "su3-70-1350x50",
@@ -691,6 +719,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: null,
     purchaseLengthMm: 50000,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "simply-rollup-1067x50",
@@ -714,6 +743,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: null,
     purchaseLengthMm: 100000,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "simply-drywipe-1300x100",
@@ -737,6 +767,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: null,
     purchaseLengthMm: 30000,
     inkVolumeLitres: null,
+    costingUnit: "square_metre",
     products: [
       area(
         "supreme-banner-1600x30",
@@ -809,7 +840,8 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     "Perfect Colours",
     "STANDARD TANGENTIAL KNIFE 36' (Pack of 5)",
     173.4,
-    "pack"
+    "pack",
+    { costingPackQuantity: 5 }
   ),
   unitItem(
     "heavy-duty-cutout-knife",
@@ -833,6 +865,7 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
     purchaseHeightMm: null,
     purchaseLengthMm: 50000,
     inkVolumeLitres: null,
+    costingUnit: "each",
     products: [
       offer(
         "orabond-1395-12x50",
@@ -866,6 +899,7 @@ function ink(
     purchaseHeightMm: null,
     purchaseLengthMm: null,
     inkVolumeLitres: volumeLitres,
+    costingUnit: "litre",
     products: [
       offer(key, supplierName, description, price, "unit", {
         expectedCostPerLitre: price / volumeLitres,
@@ -882,7 +916,8 @@ function unitItem(
   supplierName: string,
   description: string,
   price: number,
-  purchaseUnit: Extract<PurchaseUnit, "unit" | "pack">
+  purchaseUnit: Extract<PurchaseUnit, "unit" | "pack">,
+  options: { costingPackQuantity?: number } = {}
 ): InitialImportMaterial {
   return {
     key,
@@ -896,6 +931,8 @@ function unitItem(
     purchaseHeightMm: null,
     purchaseLengthMm: null,
     inkVolumeLitres: null,
+    costingUnit: purchaseUnit === "pack" && options.costingPackQuantity ? "each" : "each",
+    costingPackQuantity: options.costingPackQuantity ?? null,
     products: [offer(key, supplierName, description, price, purchaseUnit)],
   };
 }
@@ -962,6 +999,8 @@ export function initialImportSqlCatalog() {
     heightMm: material.purchaseHeightMm,
     lengthMm: material.purchaseLengthMm,
     inkVolumeLitres: material.inkVolumeLitres,
+    costingUnit: material.costingUnit,
+    costingPackQuantity: material.costingPackQuantity ?? null,
     products: material.products.map((product) => ({
       key: product.key,
       supplierName: product.supplierName,
