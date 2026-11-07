@@ -18,6 +18,7 @@ import { PURCHASE_UNIT_LABELS, PURCHASE_UNITS, type PurchaseUnit } from "@/lib/m
 type BulkSubmission =
   | { action: "ignore_charges" }
   | { action: "confirm_product"; productId: string }
+  | { action: "confirm_existing_link"; productId: string }
   | { action: "keep_historical_price" }
   | { action: "approve_current_price"; approveCurrent: true }
   | { action: "set_purchase_unit"; unit: PurchaseUnit }
@@ -34,6 +35,7 @@ const KIND_LABELS: Record<BulkReviewKind, string> = {
   rounding: "Rounding differences",
   charge: "Non-material charges",
   historical_price: "Historical prices",
+  existing_link: "Existing matches",
   existing_product: "Existing materials",
   purchase_unit: "Purchase units",
   new_material: "New materials",
@@ -309,6 +311,21 @@ function GroupCard(props: {
           <Button disabled={props.pending} onClick={() => props.onSubmit({ action: "ignore_charges" })}>
             Confirm selected lines are non-material charges
           </Button>
+        ) : null}
+        {group.kind === "existing_link" && group.canApply ? (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Confirms the supplier product already linked to the selected lines. A matching price closes the line. A
+              different price stays for a price decision. This does not create a material, a price, or a rule for future
+              invoices.
+            </p>
+            <Button
+              disabled={props.pending || !props.productId}
+              onClick={() => props.onSubmit({ action: "confirm_existing_link", productId: props.productId })}
+            >
+              Confirm the existing match
+            </Button>
+          </div>
         ) : null}
         {group.kind === "existing_product" ? (
           <div className="flex flex-wrap items-end gap-3">

@@ -1,6 +1,7 @@
 import { buildMaterialIdentityKey } from "@/lib/materials/identity";
 import { normalizeSupplierDescription } from "@/lib/materials/identity";
 import {
+  existingLinkConflict,
   invoiceWidthConflicts,
   normalizePurchaseUnit,
   reliableRollSize,
@@ -77,6 +78,7 @@ export type BulkCatalogueMaterial = {
 export type BulkReviewKind =
   | "charge"
   | "historical_price"
+  | "existing_link"
   | "existing_product"
   | "purchase_unit"
   | "new_material"
@@ -106,6 +108,7 @@ export type BulkReviewLineView = {
   lineTotal: number | null;
   reviewStatus: InvoiceReviewStatus;
   olderThanCurrentPrice: boolean;
+  supplierId: string | null;
 };
 
 export type BulkReviewGroup = {
@@ -158,6 +161,7 @@ export type BulkDecision = {
 } & (
   | { action: "ignore_charges" }
   | { action: "confirm_product"; productId: string }
+  | { action: "confirm_existing_link"; productId: string }
   | { action: "keep_historical_price" }
   | { action: "approve_current_price"; approveCurrent: boolean }
   | { action: "set_purchase_unit"; unit: string }
@@ -189,6 +193,13 @@ export type BulkPlan =
             productId: string;
             createMapping: false;
             createPrice: false;
+          }
+        | {
+            type: "confirm_existing_link";
+            productId: string;
+            createMapping: false;
+            createPrice: false;
+            createsMaterial: false;
           }
         | {
             type: "keep_historical_price";
@@ -419,6 +430,28 @@ export function buildBulkReview(input: {
 
     const product = input.products.find((item) => item.id === line.matchedProductId) ?? null;
 
+    if (line.reviewStatus === "needs_review" && line.matchedProductId) {
+      const conflict = product
+        ? existingLinkConflict({
+            description: line.description,
+            sku: line.sku,
+            unit: line.reviewedUnit ?? line.statedUnit,
+            invoiceSupplierId: invoice.supplierId,
+            product,
+          })
+        : "The linked supplier product is not in the catalogue.";
+      const ready = conflict == null && product != null;
+
+      add(
+        product && ready ? `existing-link:${product.id}` : `existing-link-blocked:${line.id}`,
+        "existing_link",
+        line,
+        existingLinkSeed(invoice, line, product, conflict)
+      );
+      claimed.add(line.id);
+      continue;
+    }
+
     if (
       line.reviewStatus === "price_change" &&
       product &&
@@ -508,11 +541,32 @@ export function buildBulkReview(input: {
   return { groups: ordered, summary: summarise(ordered) };
 }
 
+export function existingLinkReviewStatus(
+  product: InvoiceMatchProduct,
+  unitPrice: number | null,
+  unit: string | null
+): "processed" | "price_change" | "needs_review" {
+  const purchaseUnit = normalizePurchaseUnit(unit);
+
+  if (
+    unitPrice == null ||
+    purchaseUnit == null ||
+    product.currentPrice == null ||
+    product.currentPriceUnit == null ||
+    purchaseUnit !== product.currentPriceUnit
+  ) {
+    return "needs_review";
+  }
+
+  return moneyMatches(product.currentPrice, unitPrice) ? "processed" : "price_change";
+}
+
 export function planBulkDecision(
   groups: readonly BulkReviewGroup[],
   selected: readonly BulkReviewSourceLine[],
   materials: readonly BulkCatalogueMaterial[],
-  decision: BulkDecision
+  decision: BulkDecision,
+  products: readonly InvoiceMatchProduct[] = []
 ): BulkPlan {
   if (decision.confirmed !== true) {
     return { ok: false, status: 400, error: "Confirm the decision before it is applied." };
@@ -539,6 +593,10 @@ export function planBulkDecision(
 
   if (decision.action === "confirm_product") {
     return planConfirm(groups, rows, decision.productId);
+  }
+
+  if (decision.action === "confirm_existing_link") {
+    return planConfirmExisting(groups, rows, products, decision.productId);
   }
 
   if (decision.action === "keep_historical_price") {
@@ -636,6 +694,91 @@ function planConfirm(
     createMapping: false,
     createPrice: false,
   });
+}
+
+function planConfirmExisting(
+  groups: readonly BulkReviewGroup[],
+  rows: readonly BulkReviewSourceLine[],
+  products: readonly InvoiceMatchProduct[],
+  productId: string
+): BulkPlan {
+  const product = products.find((item) => item.id === productId) ?? null;
+  const pending = rows.filter((line) => !existingLinkSettled(line, productId, product));
+
+  if (pending.length === 0 && product && rows.every((line) => existingLinkSettled(line, productId, product))) {
+    return complete(rows.map((line) => line.id));
+  }
+
+  const holders = groups.filter(
+    (group) =>
+      group.kind === "existing_link" &&
+      pending.every((line) => group.lines.some((view) => view.id === line.id))
+  );
+
+  if (holders.length !== 1) {
+    return { ok: false, status: 400, error: "Selected lines are not in the same review group." };
+  }
+
+  const group = holders[0]!;
+
+  if (!group.canApply) {
+    return {
+      ok: false,
+      status: 400,
+      error: group.warnings[0] ?? "This existing link cannot be confirmed.",
+    };
+  }
+
+  if (!product || group.productId !== productId) {
+    return { ok: false, status: 409, error: "The catalogue product changed. Reload before applying." };
+  }
+
+  for (const line of pending) {
+    if (line.matchedProductId !== productId) {
+      return {
+        ok: false,
+        status: 400,
+        error: "Confirm the supplier product already linked to this line. A different product is not substituted.",
+      };
+    }
+
+    if (line.reviewStatus !== "needs_review") {
+      return changedError();
+    }
+
+    const view = group.lines.find((item) => item.id === line.id);
+    const conflict = existingLinkConflict({
+      description: line.description,
+      sku: line.sku,
+      unit: line.reviewedUnit ?? line.statedUnit,
+      invoiceSupplierId: view?.supplierId ?? group.supplierId,
+      product,
+    });
+
+    if (conflict) {
+      return { ok: false, status: 400, error: conflict };
+    }
+  }
+
+  return ready(pending.map((line) => line.id), {
+    type: "confirm_existing_link",
+    productId,
+    createMapping: false,
+    createPrice: false,
+    createsMaterial: false,
+  });
+}
+
+function existingLinkSettled(
+  line: BulkReviewSourceLine,
+  productId: string,
+  product: InvoiceMatchProduct | null
+) {
+  if (!product || line.matchedProductId !== productId || line.matchConfidence !== "high") {
+    return false;
+  }
+
+  return line.reviewStatus === existingLinkReviewStatus(product, line.unitPrice, line.reviewedUnit ?? line.statedUnit);
 }
 
 function planKeep(groups: readonly BulkReviewGroup[], rows: readonly BulkReviewSourceLine[]): BulkPlan {
@@ -1000,9 +1143,10 @@ const KIND_ORDER: Record<BulkReviewKind, number> = {
   rounding: 1,
   charge: 2,
   historical_price: 3,
-  existing_product: 4,
-  purchase_unit: 5,
-  new_material: 6,
+  existing_link: 4,
+  existing_product: 5,
+  purchase_unit: 6,
+  new_material: 7,
 };
 
 function summarise(groups: readonly BulkReviewGroup[]): BulkReviewSummary {
@@ -1098,6 +1242,7 @@ function lineView(
     lineTotal: line.lineTotal,
     reviewStatus: line.reviewStatus,
     olderThanCurrentPrice: older && seed.cataloguePrice != null && line.unitPrice != null && !moneyMatches(seed.cataloguePrice, line.unitPrice),
+    supplierId: invoice?.supplierId ?? null,
   };
 }
 
@@ -1167,6 +1312,33 @@ function priceSeed(
     invoicePrice: price,
     sku: line.sku,
     choices: [choiceFromProduct(product)],
+  });
+}
+
+function existingLinkSeed(
+  invoice: BulkReviewSourceInvoice,
+  line: BulkReviewSourceLine,
+  product: InvoiceMatchProduct | null,
+  conflict: string | null
+): BulkReviewGroup {
+  return baseGroup({
+    id: product ? `existing-link:${product.id}` : `existing-link-blocked:${line.id}`,
+    kind: "existing_link",
+    invoice,
+    title: product?.materialName ?? cleanInvoiceProductName(line.description),
+    proposedAction: conflict
+      ? conflict
+      : "Confirm the supplier product already linked to the selected lines. A matching price closes the line. A different price stays for a price decision. No future invoice rule is created.",
+    warnings: conflict ? [conflict] : [],
+    canApply: conflict == null && product != null,
+    productId: product?.id ?? null,
+    choices: product ? [choiceFromProduct(product)] : [],
+    purchaseUnit: product?.purchaseUnit ?? null,
+    catalogueMaterial: product?.materialName ?? null,
+    cataloguePrice: product?.currentPrice ?? null,
+    currentPriceId: product?.currentPriceId ?? null,
+    currentEffectiveDate: product?.currentEffectiveDate ?? null,
+    sku: line.sku,
   });
 }
 

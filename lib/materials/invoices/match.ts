@@ -523,6 +523,66 @@ function skusConflict(invoiceSku: string | null, productSku: string | null) {
   return invoiceSku.trim().toLowerCase() !== productSku.trim().toLowerCase();
 }
 
+export function existingLinkConflict(input: {
+  description: string;
+  sku: string | null;
+  unit: string | null;
+  invoiceSupplierId: string | null;
+  product: InvoiceMatchProduct;
+}): string | null {
+  if (!input.invoiceSupplierId || input.invoiceSupplierId !== input.product.supplierId) {
+    return "The linked supplier product belongs to a different supplier.";
+  }
+
+  const unit = normalizePurchaseUnit(input.unit);
+
+  if (!unit || unit !== input.product.purchaseUnit) {
+    return "The invoice unit does not match the material purchase unit.";
+  }
+
+  if (skusConflict(input.sku, input.product.sku)) {
+    return "The invoice SKU does not match the supplier product.";
+  }
+
+  if (invoiceWidthConflicts(input.description, input.product)) {
+    return "The invoice width does not match the catalogue product.";
+  }
+
+  const sheet = reliableSheetSize(input.description);
+  const roll = reliableRollSize(input.description);
+
+  if (sheet && roll) {
+    return "More than one size was read from the invoice line.";
+  }
+
+  if (sheet) {
+    if (!sameDimensions([sheet.widthMm, sheet.heightMm], input.product.widthMm, input.product.heightMm)) {
+      return "The invoice sheet size does not match the catalogue product.";
+    }
+  } else if (roll) {
+    if (
+      input.product.widthMm == null ||
+      input.product.lengthMm == null ||
+      Math.round(roll.widthMm) !== Math.round(input.product.widthMm) ||
+      Math.abs(roll.lengthMm - input.product.lengthMm) > 1
+    ) {
+      return "The invoice roll size does not match the catalogue product.";
+    }
+  } else if (input.product.widthMm != null || input.product.heightMm != null || input.product.lengthMm != null) {
+    return "The invoice size could not be checked against the catalogue product.";
+  }
+
+  if (input.product.thicknessMm != null) {
+    const thickness = extractThickness(input.description);
+
+    if (thickness == null || Math.abs(thickness - input.product.thicknessMm) >= 0.15) {
+      return "The invoice thickness does not match the catalogue product.";
+    }
+  }
+
+  return null;
+}
+
 function bestSpecification(identity: LineIdentity, products: readonly InvoiceMatchProduct[]) {
   const matched = products.filter((product) => specificationCompatible(identity, product));
 

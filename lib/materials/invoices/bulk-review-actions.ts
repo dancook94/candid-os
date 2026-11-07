@@ -102,7 +102,8 @@ export async function applyBulkReviewDecision(body: unknown) {
     built.groups,
     selected.filter((line): line is BulkReviewSourceLine => line != null),
     loaded.materials,
-    decision
+    decision,
+    loaded.products
   );
 
   if (!plan.ok) {
@@ -142,6 +143,14 @@ async function applyPlan(
 
   if (write.type === "confirm_product") {
     return callRpc(supabase, "confirm_bulk_invoice_products", {
+      p_line_ids: lineIds,
+      p_product_id: write.productId,
+      p_actor_id: actorId,
+    });
+  }
+
+  if (write.type === "confirm_existing_link") {
+    return callRpc(supabase, "confirm_existing_bulk_invoice_links", {
       p_line_ids: lineIds,
       p_product_id: write.productId,
       p_actor_id: actorId,
@@ -473,6 +482,10 @@ function parseDecision(body: unknown): BulkDecision | null {
   }
 
   if (action === "confirm_product" && typeof record.productId === "string") {
+    return { action, confirmed, lineIds, productId: record.productId };
+  }
+
+  if (action === "confirm_existing_link" && typeof record.productId === "string") {
     return { action, confirmed, lineIds, productId: record.productId };
   }
 

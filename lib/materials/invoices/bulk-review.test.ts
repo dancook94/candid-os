@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 import {
   buildBulkReview,
   cleanInvoiceProductName,
+  existingLinkReviewStatus,
   planBulkDecision,
   type BulkCatalogueMaterial,
   type BulkDecision,
@@ -853,6 +854,162 @@ describe("bulk invoice review decisions", () => {
     });
 
     assert.equal(plan.ok, false);
+  });
+});
+
+describe("existing supplier-product link confirmation", () => {
+  const description = "Foamalite, XPRESS, Filmed, white 5.000mm 1220mm x 2440mm, 7301037";
+
+  function foamProduct(overrides: Partial<InvoiceMatchProduct> = {}) {
+    return product({
+      id: "81e453a5-589d-432c-936e-42c02e5a002e",
+      supplierId: "antalis",
+      description: "Foamalite, XPRESS, Filmed, white 5.000mm 1220mm x 2440mm",
+      materialName: "Foamalite 5mm PVC 2440mm x 1220mm",
+      purchaseUnit: "sheet",
+      thicknessMm: 5,
+      colour: "White",
+      widthMm: 2440,
+      heightMm: 1220,
+      currentPrice: 23.77,
+      currentPriceUnit: "sheet",
+      currentPriceId: "foam-price",
+      currentEffectiveDate: "2026-10-01",
+      ...overrides,
+    });
+  }
+
+  function foamLine(overrides: Partial<BulkReviewSourceLine> = {}) {
+    return line({
+      id: "57ce87ca-c6b2-47e8-88e9-5f88f37b5909",
+      invoiceId: "6701397556",
+      description,
+      sku: "609745",
+      quantity: 15,
+      statedUnit: "sheet",
+      unitPrice: 23.77,
+      lineTotal: 356.55,
+      reviewStatus: "needs_review",
+      matchedProductId: "81e453a5-589d-432c-936e-42c02e5a002e",
+      matchConfidence: "medium",
+      ...overrides,
+    });
+  }
+
+  function foamReview(catalogue = foamProduct(), row = foamLine()) {
+    const invoices = [invoice({ id: "6701397556", supplierId: "antalis", supplierName: "Antalis", number: "6701397556", date: "2026-07-20" })];
+    return { invoices, row, catalogue, built: review({ invoices, lines: [row], products: [catalogue] }) };
+  }
+
+  it("confirms the Foamalite link when the price matches and creates no future rule", () => {
+    const { built, row, catalogue } = foamReview();
+    const group = built.groups.find((item) => item.lines.some((line) => line.id === row.id));
+    const plan = planBulkDecision(built.groups, [row], [], {
+      action: "confirm_existing_link",
+      confirmed: true,
+      productId: catalogue.id,
+      lineIds: [row.id],
+    }, [catalogue]);
+
+    assert.equal(group?.kind, "existing_link");
+    assert.equal(group?.canApply, true);
+    assert.equal(existingLinkReviewStatus(catalogue, row.unitPrice, row.statedUnit), "processed");
+    assert.equal(plan.ok, true);
+    if (plan.ok && plan.write?.type === "confirm_existing_link") {
+      assert.equal(plan.write.productId, catalogue.id);
+      assert.equal(plan.write.createMapping, false);
+      assert.equal(plan.write.createPrice, false);
+      assert.equal(plan.write.createsMaterial, false);
+    } else {
+      assert.fail("expected an existing-link confirmation");
+    }
+  });
+
+  it("leaves a different invoice price for a price decision and a missing price unresolved", () => {
+    const different = foamProduct({ currentPrice: 25 });
+    const missing = foamProduct({ currentPrice: null, currentPriceUnit: null, currentPriceId: null });
+    const row = foamLine();
+
+    assert.equal(existingLinkReviewStatus(different, row.unitPrice, row.statedUnit), "price_change");
+    assert.equal(existingLinkReviewStatus(missing, row.unitPrice, row.statedUnit), "needs_review");
+
+    for (const catalogue of [different, missing]) {
+      const { built } = foamReview(catalogue, row);
+      const plan = planBulkDecision(built.groups, [row], [], {
+        action: "confirm_existing_link",
+        confirmed: true,
+        productId: catalogue.id,
+        lineIds: [row.id],
+      }, [catalogue]);
+
+      assert.equal(plan.ok, true);
+      if (plan.ok) {
+        assert.equal(plan.write?.type, "confirm_existing_link");
+      }
+    }
+  });
+
+  it("rejects a different supplier, a different size, and a repeat that is already confirmed", () => {
+    const wrongSupplier = foamProduct({ supplierId: "pyramid" });
+    const wrongSize = foamProduct({ widthMm: 3050, heightMm: 1560 });
+    const supplierReview = foamReview(wrongSupplier);
+    const sizeReview = foamReview(wrongSize);
+    const supplierPlan = planBulkDecision(supplierReview.built.groups, [supplierReview.row], [], {
+      action: "confirm_existing_link",
+      confirmed: true,
+      productId: wrongSupplier.id,
+      lineIds: [supplierReview.row.id],
+    }, [wrongSupplier]);
+    const sizePlan = planBulkDecision(sizeReview.built.groups, [sizeReview.row], [], {
+      action: "confirm_existing_link",
+      confirmed: true,
+      productId: wrongSize.id,
+      lineIds: [sizeReview.row.id],
+    }, [wrongSize]);
+    const { built, row, catalogue } = foamReview();
+    const repeated = planBulkDecision(built.groups, [{ ...row, reviewStatus: "processed", matchConfidence: "high" }], [], {
+      action: "confirm_existing_link",
+      confirmed: true,
+      productId: catalogue.id,
+      lineIds: [row.id],
+    }, [catalogue]);
+
+    assert.equal(supplierPlan.ok, false);
+    if (!supplierPlan.ok) {
+      assert.match(supplierPlan.error, /different supplier/);
+    }
+    assert.equal(sizePlan.ok, false);
+    if (!sizePlan.ok) {
+      assert.match(sizePlan.error, /sheet size/);
+    }
+    assert.equal(repeated.ok && repeated.alreadyComplete, true);
+    assert.equal(repeated.ok && repeated.write, null);
+  });
+
+  it("does not create a future rule or rewrite invoice amounts in the database function", async () => {
+    const panel = await readFile(new URL("../../../components/materials/bulk-review-panel.tsx", import.meta.url), "utf8");
+    const action = await readFile(new URL("./bulk-review-actions.ts", import.meta.url), "utf8");
+    const migration = await readFile(
+      new URL("../../../supabase/migrations/20261102153000_confirm_existing_invoice_links.sql", import.meta.url),
+      "utf8"
+    );
+
+    assert.match(panel, /Confirm the existing match/);
+    assert.match(action, /confirm_existing_bulk_invoice_links/);
+    assert.match(action, /verifyApprovedAdmin/);
+    assert.match(migration, /is_approved_candid_admin/);
+    assert.match(migration, /auth\.uid\(\) IS DISTINCT FROM p_actor_id/);
+    assert.match(migration, /product_match_confirmed/);
+    assert.match(migration, /'futureRule', false/);
+    assert.match(migration, /WHEN v_invoice_price IS NULL OR v_current\.id IS NULL/);
+    assert.match(migration, /invoice_existing_link_dimension_conflict/);
+    assert.match(migration, /The invoice sheet size does not match the catalogue product/);
+    assert.match(migration, /The invoice roll size does not match the catalogue product/);
+    assert.match(migration, /The invoice thickness does not match the catalogue product/);
+    assert.match(migration, /The invoice SKU does not match the supplier product/);
+    assert.match(migration, /REVOKE ALL ON FUNCTION public\.invoice_existing_link_dimension_conflict/);
+    assert.doesNotMatch(migration, /supplier_product_description_mappings|INSERT INTO public\.material_prices|INSERT INTO public\.supplier_invoice_historical_prices/);
+    assert.doesNotMatch(migration, /raw_description\s*=|raw_quantity\s*=|raw_unit_price\s*=|raw_line_total\s*=|raw_supplier_sku\s*=/);
   });
 });
 
