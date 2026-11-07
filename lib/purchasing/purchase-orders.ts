@@ -75,6 +75,17 @@ export function isPurchaseOrderStatus(
   return (PURCHASE_ORDER_STATUSES as readonly string[]).includes(status);
 }
 
+/** Issued document lifecycle: email, receive, and receipt history stay on the detail page. */
+export function purchaseOrderShowsIssuedOperationsPanel(
+  status: PurchaseOrderStatus | "unknown"
+): boolean {
+  return (
+    status === "issued" ||
+    status === "partially_received" ||
+    status === "received"
+  );
+}
+
 export function formatPurchaseOrderDate(value: string | null) {
   if (!value) {
     return null;

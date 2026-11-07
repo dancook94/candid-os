@@ -14,6 +14,7 @@ import { isPurchaseOrderSupplierId } from "@/lib/purchasing/create-draft";
 import { loadPurchaseOrderEditor } from "@/lib/purchasing/draft-editor-data";
 import { loadPurchaseOrderDetail } from "@/lib/purchasing/purchase-order-detail";
 import { loadIssuedPurchaseOrderContext } from "@/lib/purchasing/purchase-order-issued";
+import { purchaseOrderShowsIssuedOperationsPanel } from "@/lib/purchasing/purchase-orders";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -42,7 +43,7 @@ export default async function PurchaseOrderDetailPage({
   const editor =
     detail?.status === "draft" ? await loadPurchaseOrderEditor(supabase, id) : null;
   const issuedContext =
-    detail?.status === "issued"
+    detail && purchaseOrderShowsIssuedOperationsPanel(detail.status)
       ? await loadIssuedPurchaseOrderContext(supabase, id)
       : null;
 
