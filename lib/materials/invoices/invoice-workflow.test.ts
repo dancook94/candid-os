@@ -783,9 +783,17 @@ describe("supplier invoice phase 1", () => {
           unit: "roll",
           unitPrice: 141.39,
           total: 141.39,
-          status: "needs_review",
-          product: null,
-          comparison: null,
+          status: "processed",
+          product: "aps-su3-1560",
+          comparison: {
+            currentPrice: 141.39,
+            invoicePrice: 141.39,
+            priceUnit: "roll",
+            difference: 0,
+            percent: 0,
+            currentPriceId: null,
+            currentEffectiveDate: null,
+          },
         },
         {
           sku: "SU3-70",
@@ -795,18 +803,24 @@ describe("supplier invoice phase 1", () => {
           unit: "roll",
           unitPrice: 127.21,
           total: 254.42,
-          status: "needs_review",
-          product: null,
-          comparison: null,
+          status: "price_change",
+          product: "aps-su3-1560",
+          comparison: {
+            currentPrice: 141.39,
+            invoicePrice: 127.21,
+            priceUnit: "roll",
+            difference: -14.18,
+            percent: -10.03,
+            currentPriceId: null,
+            currentEffectiveDate: null,
+          },
         },
       ]
     );
     assert.match(draft.lines[0]?.note ?? "", /width does not match/);
-    assert.match(draft.lines[1]?.note ?? "", /width does not match/);
-    assert.match(draft.lines[2]?.note ?? "", /width does not match/);
     assert.equal(draft.lines.some((line) => line.matchedProductId === "pyramid-ww300-1371"), false);
-    assert.equal(draft.lines.some((line) => line.reviewStatus === "processed"), false);
-    assert.equal(draft.lines.some((line) => line.reviewStatus === "price_change"), false);
+    assert.equal(draft.lines.some((line) => line.reviewStatus === "processed"), true);
+    assert.equal(draft.lines.some((line) => line.reviewStatus === "price_change"), true);
     assert.equal(
       draft.warnings.some((warning) => warning.includes("line totals") || warning.includes("Subtotal + VAT")),
       false

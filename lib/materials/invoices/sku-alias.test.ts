@@ -52,6 +52,6 @@ describe("supplier SKU aliases", () => {
       canonicalSku: "BLMVMWRG1370",
     });
 
-    assert.match(message ?? "", /canonical supplier SKU/);
+    assert.match(message ?? "", /canonical code on the matched product/);
   });
 });

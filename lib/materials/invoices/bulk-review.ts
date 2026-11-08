@@ -1584,12 +1584,22 @@ function existingProductChoices(
   }
 
   const text = comparable(line.description);
+  const size = readSize(line.description);
   const matches = products.filter((product) => {
     if (product.supplierId !== invoice.supplierId || product.purchaseUnit !== unit) {
       return false;
     }
 
     if (invoiceWidthConflicts(line.description, product)) {
+      return false;
+    }
+
+    if (
+      size.slit &&
+      product.widthMm != null &&
+      size.widthMm != null &&
+      Math.round(size.widthMm) !== Math.round(product.widthMm)
+    ) {
       return false;
     }
 
