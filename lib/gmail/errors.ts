@@ -4,22 +4,48 @@ export type GmailRequestError = Error & {
   retryAfterSeconds?: number;
 };
 
-export function sanitizeGmailError(error: unknown, oauthErrorCode?: string | null) {
-  const message = error instanceof Error ? error.message : "Gmail could not be reached.";
+const LEAKED_TOKEN_PATTERN = /\b(ya29\.[a-zA-Z0-9._-]{10,}|1\/\/[a-zA-Z0-9_-]{20,})\b/;
 
-  if (/bearer|refresh_token|access_token|client_secret|ciphertext|ya29\.|1\/\//i.test(message)) {
-    return "Gmail authorization failed.";
-  }
+export function gmailOAuthUserMessage(input: { message: string; code?: string | null }) {
+  const message = input.message.trim();
+  const code = input.code?.trim() || null;
 
   if (
-    oauthErrorCode === "invalid_client" ||
+    code === "invalid_client" ||
     /client secret is invalid/i.test(message) ||
     /oauth client was not found/i.test(message)
   ) {
     return "Google rejected the OAuth client ID or secret. In Vercel candid-os-test (Production only), GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET must come from the same Google Cloud Web application client, with no surrounding quotes, then redeploy.";
   }
 
+  if (code === "redirect_uri_mismatch") {
+    return "The OAuth redirect URI does not match Google Cloud. Copy the redirect URI shown on this page into the same Web client.";
+  }
+
+  if (code === "invalid_grant") {
+    return "Google rejected the authorization grant. Disconnect any old Gmail link, then connect again so Google issues a new refresh token.";
+  }
+
+  if (code === "access_denied") {
+    return "Google sign-in was cancelled or access was denied.";
+  }
+
+  if (LEAKED_TOKEN_PATTERN.test(message)) {
+    return "Gmail authorization failed.";
+  }
+
   return message.slice(0, 300);
+}
+
+export function sanitizeGmailError(error: unknown, oauthErrorCode?: string | null) {
+  const message = error instanceof Error ? error.message : "Gmail could not be reached.";
+  const code =
+    oauthErrorCode ??
+    (typeof error === "object" && error && "code" in error
+      ? String((error as { code?: string }).code ?? "")
+      : null);
+
+  return gmailOAuthUserMessage({ message, code: code || null });
 }
 
 export function gmailErrorStatus(error: unknown) {

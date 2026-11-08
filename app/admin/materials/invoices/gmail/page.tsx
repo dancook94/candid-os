@@ -22,7 +22,7 @@ import { createClient } from "@/lib/supabase/server";
 export const dynamic = "force-dynamic";
 
 type GmailImportPageProps = {
-  searchParams: Promise<{ error?: string; connected?: string }>;
+  searchParams: Promise<{ error?: string; connected?: string; errorStage?: string }>;
 };
 
 export default async function GmailImportPage({ searchParams }: GmailImportPageProps) {
@@ -82,7 +82,16 @@ export default async function GmailImportPage({ searchParams }: GmailImportPageP
             {params.connected === "1" ? (
               <p className="text-sm text-emerald-800">Gmail is connected.</p>
             ) : null}
-            {params.error ? <p className="text-sm text-amber-900">{params.error}</p> : null}
+            {params.error ? (
+              <p className="text-sm text-amber-900">
+                {params.error}
+                {params.errorStage ? (
+                  <span className="mt-1 block text-xs text-muted-foreground">
+                    Failure stage: {params.errorStage.replaceAll("_", " ")}
+                  </span>
+                ) : null}
+              </p>
+            ) : null}
             {loadError ? <p className="text-sm text-amber-900">{loadError}</p> : null}
             {view ? (
               <GmailImportPanel

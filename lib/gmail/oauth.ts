@@ -5,7 +5,7 @@ import {
   gmailClientIdLooksValid,
   GMAIL_READONLY_SCOPE,
 } from "@/lib/gmail/config";
-import { sanitizeGmailError, type GmailRequestError } from "@/lib/gmail/errors";
+import type { GmailRequestError } from "@/lib/gmail/errors";
 
 export const GMAIL_OAUTH_STATE_COOKIE = "gmail_oauth_state";
 
@@ -145,10 +145,7 @@ async function postToken(body: URLSearchParams) {
 
   if (!response.ok || !payload.access_token) {
     const error = new Error(
-      sanitizeGmailError(
-        new Error(payload.error_description || payload.error || "Gmail authorization failed."),
-        payload.error
-      )
+      payload.error_description || payload.error || "Gmail token exchange failed."
     ) as GmailRequestError;
     error.status = response.status;
     error.code = payload.error;

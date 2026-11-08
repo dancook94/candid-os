@@ -1,9 +1,11 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 
+import { normalizeOAuthEnvValue } from "@/lib/gmail/config";
+
 const ALGORITHM = "aes-256-gcm";
 
 function encryptionKey() {
-  const encoded = process.env.GMAIL_TOKEN_KEY?.trim();
+  const encoded = normalizeOAuthEnvValue(process.env.GMAIL_TOKEN_KEY);
 
   if (!encoded) {
     throw new Error("GMAIL_TOKEN_KEY is not configured.");

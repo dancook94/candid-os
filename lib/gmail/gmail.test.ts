@@ -227,6 +227,31 @@ test("stores a rotated refresh token and reports a revoked grant", async () => {
   }
 });
 
+test("maps Google OAuth failures without hiding client config errors", async () => {
+  const { gmailOAuthUserMessage, sanitizeGmailError } = await import("@/lib/gmail/errors");
+
+  assert.match(
+    gmailOAuthUserMessage({
+      message: "Invalid client_secret parameter.",
+      code: "invalid_client",
+    }),
+    /Google rejected the OAuth client ID or secret/
+  );
+  assert.match(
+    gmailOAuthUserMessage({
+      message: "The refresh_token field is required.",
+      code: null,
+    }),
+    /refresh_token field/
+  );
+  assert.equal(
+    sanitizeGmailError(
+      Object.assign(new Error("Token has been expired or revoked."), { code: "invalid_grant" })
+    ),
+  gmailOAuthUserMessage({ message: "Token has been expired or revoked.", code: "invalid_grant" })
+  );
+});
+
 test("normalizes OAuth credentials pasted with quotes or a BOM", async () => {
   const { normalizeOAuthEnvValue, gmailClientIdLooksValid, getGmailOAuthConfig } = await import(
     "@/lib/gmail/config"
