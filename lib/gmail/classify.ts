@@ -53,7 +53,6 @@ export function classifyPdfText(text: string): Exclude<GmailDocumentType, "unsup
     /\btax\s+invoice\b/,
     /\binvoice\s+no\b/,
     /\binvoice\s+number\b/,
-    /\binvoice\s*:\s*\d/,
   ]);
   const orderAt = earliest(top, [
     /\bsales\s+order\b/,

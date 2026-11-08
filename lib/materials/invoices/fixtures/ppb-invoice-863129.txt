@@ -1,0 +1,13 @@
+PPB Ltd
+Invoice Number: 863129
+Invoice Date: 15 October 2026
+Account Number: CANDID01
+
+No. Description Quantity Unit Price Line Total
+STYWH-1000-2440-1220 HIPS 1mm White 2440x1220 5 Sheet 26.00 130.00
+
+Goods Total 130.00
+VAT 26.00
+Total Amount 156.00
+
+VAT Registration GB123456789

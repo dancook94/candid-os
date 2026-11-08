@@ -76,6 +76,12 @@ export type DescriptionMappingRef = {
   productId: string;
 };
 
+export type SkuAliasRef = {
+  supplierId: string;
+  productId: string;
+  sku: string;
+};
+
 export type IgnoreRuleRef = {
   supplierId: string;
   normalizedDescription: string;

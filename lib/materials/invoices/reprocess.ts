@@ -61,6 +61,7 @@ export async function rebuildStoredInvoice(
     aliases: catalog.aliases,
     products: catalog.products,
     mappings: catalog.mappings,
+    skuAliases: catalog.skuAliases,
     ignoreRules: catalog.ignoreRules,
   });
   const duplicate = findDuplicateInvoice({

@@ -105,7 +105,10 @@ export default async function SupplierInvoicePage({
                   <Fact label="Invoice date" value={invoice.invoice_date || "Not found"} />
                   <Fact label="Received" value={formatReceived(invoice.received_at)} />
                   <Fact label="Subtotal" value={money(invoice.subtotal)} />
-                  <Fact label="VAT" value={money(invoice.vat)} />
+                  <Fact
+                    label="VAT"
+                    value={vatLabel(invoice.vat, warnings)}
+                  />
                   <Fact label="Total" value={money(invoice.total)} />
                   <Fact
                     label="Extraction"
@@ -136,7 +139,6 @@ export default async function SupplierInvoicePage({
               supplierChosen={Boolean(invoice.supplier_id)}
               supplierName={supplierName || ""}
               invoiceDate={invoice.invoice_date}
-              invoiceIgnored={invoice.processing_status === "ignored"}
               products={result.products.map((product) => ({
                 id: product.id,
                 label: `${product.materialName} — ${product.description}`,
@@ -215,6 +217,18 @@ function money(value: unknown) {
 
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? formatGbp(parsed) : "Not found";
+}
+
+function vatLabel(value: unknown, warnings: readonly string[]) {
+  const amount = money(value);
+
+  if (amount === "Not found") {
+    return amount;
+  }
+
+  const calculated = warnings.some((warning) => warning.includes("calculated from the subtotal and total"));
+
+  return calculated ? `${amount} (calculated, not extracted)` : amount;
 }
 
 function formatReceived(value: string) {

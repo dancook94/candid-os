@@ -1,4 +1,5 @@
 import { normalizeSupplierDescription } from "@/lib/materials/identity";
+import { invoiceCatalogDescription } from "@/lib/materials/invoices/description";
 import {
   materialFamilies,
   materialFamiliesConflict,
@@ -16,6 +17,7 @@ import type {
   DescriptionMappingRef,
   IgnoreRuleRef,
   InvoiceMatchProduct,
+  SkuAliasRef,
   InvoiceProcessingStatus,
   InvoiceReviewStatus,
   MatchConfidence,
@@ -76,6 +78,7 @@ export function classifyInvoiceLine(input: {
   supplierId: string | null;
   products: readonly InvoiceMatchProduct[];
   mappings: readonly DescriptionMappingRef[];
+  skuAliases?: readonly SkuAliasRef[];
   ignoreRules: readonly IgnoreRuleRef[];
   forcedProductId?: string | null;
   forcedMethod?: MatchMethod;
@@ -86,8 +89,9 @@ export function classifyInvoiceLine(input: {
   unitPrice?: number | null;
   lineTotal?: number | null;
 }): ClassifiedLine {
+  const rawDescription = input.description ?? input.line.rawDescription;
   const identity: LineIdentity = {
-    description: input.description ?? input.line.rawDescription,
+    description: invoiceCatalogDescription(rawDescription),
     sku: input.sku === undefined ? input.line.rawSupplierSku : input.sku,
     quantity: input.quantity === undefined ? input.line.rawQuantity : input.quantity,
     unit: input.unit === undefined ? input.line.rawUnit : input.unit,
@@ -144,7 +148,8 @@ export function classifyInvoiceLine(input: {
         input.supplierId,
         supplierProducts,
         compatibleProducts,
-        input.mappings
+        input.mappings,
+        input.skuAliases ?? []
       );
   const statedUnit = normalizePurchaseUnit(identity.unit);
   const statedUnitText = identity.unit?.trim() ?? "";
@@ -292,14 +297,16 @@ function findSupplierMatch(
   supplierId: string | null,
   supplierProducts: readonly InvoiceMatchProduct[],
   compatibleProducts: readonly InvoiceMatchProduct[],
-  mappings: readonly DescriptionMappingRef[]
+  mappings: readonly DescriptionMappingRef[],
+  skuAliases: readonly SkuAliasRef[]
 ) {
   const match = findMatch(
     identity,
     normalizedDescription,
     supplierId,
     compatibleProducts,
-    mappings
+    mappings,
+    skuAliases
   );
 
   if (match.productId || match.note || compatibleProducts.length === supplierProducts.length) {
@@ -311,7 +318,8 @@ function findSupplierMatch(
     normalizedDescription,
     supplierId,
     supplierProducts,
-    mappings
+    mappings,
+    skuAliases
   );
   const rejectedProduct = supplierProducts.find((product) => product.id === rejected.productId);
 
@@ -333,15 +341,8 @@ export function invoiceWidthConflicts(description: string, product: InvoiceMatch
   }
 
   const width = Math.round(product.widthMm);
-  const slitWidths = [...description.matchAll(/\bslit to\s+(\d{3,4}(?:\.\d+)?)\s*mm\b/gi)]
-    .map((match) => Math.round(Number(match[1])))
-    .filter((value) => Number.isFinite(value));
-
-  if (slitWidths.length > 0) {
-    return slitWidths.some((value) => value !== width);
-  }
-
-  const stated = statedRollWidthMm(description);
+  const catalogDescription = invoiceCatalogDescription(description);
+  const stated = statedRollWidthMm(catalogDescription);
 
   if (stated == null) {
     return false;
@@ -408,6 +409,22 @@ function uniquePairs(pairs: readonly (readonly [number, number])[]) {
 }
 
 function statedRollWidthMm(description: string) {
+  const sheetStyle = description.match(
+    /\b(\d{3,4}(?:\.\d+)?)\s*[x×]\s*(\d{3,4}(?:\.\d+)?)\s*mm\b/i
+  );
+
+  if (sheetStyle) {
+    return Math.round(Number(sheetStyle[1]));
+  }
+
+  const catalogueWidths = [...description.matchAll(/\b(\d{3,4}(?:\.\d+)?)\s*mm\b/gi)]
+    .map((match) => Math.round(Number(match[1])))
+    .filter((value) => Number.isFinite(value));
+
+  if (catalogueWidths.length === 1) {
+    return catalogueWidths[0];
+  }
+
   return rollSizes(description)[0]?.widthMm ?? null;
 }
 
@@ -420,7 +437,8 @@ function findMatch(
   normalizedDescription: string,
   supplierId: string | null,
   products: readonly InvoiceMatchProduct[],
-  mappings: readonly DescriptionMappingRef[]
+  mappings: readonly DescriptionMappingRef[],
+  skuAliases: readonly SkuAliasRef[]
 ): {
   productId: string | null;
   confidence: MatchConfidence | null;
@@ -448,6 +466,21 @@ function findMatch(
     if (skuMatches.length === 1) {
       return {
         productId: skuMatches[0].id,
+        confidence: "high",
+        method: "sku",
+        note: null,
+      };
+    }
+
+    const aliasMatch = skuAliases.find(
+      (alias) =>
+        alias.supplierId === supplierId && alias.sku.trim().toLowerCase() === sku
+    );
+    const aliasProduct = products.find((product) => product.id === aliasMatch?.productId);
+
+    if (aliasProduct) {
+      return {
+        productId: aliasProduct.id,
         confidence: "high",
         method: "sku",
         note: null,

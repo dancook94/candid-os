@@ -5,6 +5,7 @@ import type {
   DescriptionMappingRef,
   IgnoreRuleRef,
   InvoiceAliasRef,
+  SkuAliasRef,
   InvoiceDraft,
   InvoiceExtractionStatus,
   InvoiceMatchProduct,
@@ -20,6 +21,7 @@ export function buildInvoiceDraft(input: {
   aliases: readonly InvoiceAliasRef[];
   products: readonly InvoiceMatchProduct[];
   mappings: readonly DescriptionMappingRef[];
+  skuAliases?: readonly SkuAliasRef[];
   ignoreRules: readonly IgnoreRuleRef[];
 }): InvoiceDraft {
   const warnings = [...(input.extractionWarnings ?? [])];
@@ -58,6 +60,7 @@ export function buildInvoiceDraft(input: {
       supplierId: supplier.supplierId,
       products: input.products,
       mappings: input.mappings,
+      skuAliases: input.skuAliases ?? [],
       ignoreRules: input.ignoreRules,
     })
   );

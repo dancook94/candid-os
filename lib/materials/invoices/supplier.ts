@@ -9,6 +9,7 @@ const BLOCKED_SUPPLIER_NAMES = new Set([
   "candid creative",
   "candid creative ltd",
   "candid creative ltd.",
+  "candid creative limited",
   "aps",
 ]);
 
@@ -18,7 +19,12 @@ const BLOCKED_SUPPLIER_NAMES = new Set([
  */
 const INVOICE_SUPPLIER_DOMAINS = [
   { domain: "allprint.co.uk", canonicalName: "All Print Supplies" },
+  { domain: "pyramid-display.co.uk", canonicalName: "Pyramid Display Materials" },
+  { domain: "ppb.co.uk", canonicalName: "PPB" },
 ] as const;
+
+const DELIVERY_SECTION =
+  /(?:^|\n)\s*(?:ship(?:ping)?\s*-?\s*to|deliver(?:y)?\s+(?:to|address)|bill\s*-?\s*to(?:\s+customer)?)\b[\s\S]*?(?=(?:^|\n)\s*(?:invoice|document|account|sales|unit price|no\.|quantity)\b|$)/gi;
 
 export function isBlockedSupplierName(value: string) {
   return BLOCKED_SUPPLIER_NAMES.has(normalizeSupplierName(value));
@@ -60,38 +66,22 @@ export function resolveInvoiceSupplier(
     };
   }
 
-  const hits = suppliers.filter((supplier) =>
-    phraseAppears(documentText, supplier.name)
-  );
-  const aliasHits = aliases.flatMap((alias) => {
-    if (!phraseAppears(documentText, alias.alias)) {
-      return [];
-    }
+  const issuerText = issuerDocumentText(documentText);
+  const ranked = rankSupplierEvidence(issuerText, documentText, suppliers, aliases);
 
-    const supplier = suppliers.find((item) => item.id === alias.supplierId);
-    return supplier ? [supplier] : [];
-  });
-  const domainHits = domainSuppliers(documentText, suppliers);
-  const unique = new Map(
-    [...hits, ...aliasHits, ...domainHits.map((hit) => hit.supplier)].map((supplier) => [
-      supplier.id,
-      supplier,
-    ])
-  );
-
-  if (unique.size === 1) {
-    const supplier = [...unique.values()][0];
-    const domainLabel = domainHits.find((hit) => hit.supplier.id === supplier.id)?.evidence ?? null;
-    const phraseLabel = longestDocumentPhrase(documentText, suppliers, aliases, supplier.id);
+  if (ranked.length === 0) {
     return {
-      supplierId: supplier.id,
-      supplierName: supplier.name,
-      documentLabel: longerLabel(phraseLabel, domainLabel),
-      warning: null,
+      supplierId: null,
+      supplierName: null,
+      documentLabel: null,
+      warning: "The supplier was not found on this invoice.",
     };
   }
 
-  if (unique.size > 1) {
+  const best = ranked[0];
+  const runnerUp = ranked[1];
+
+  if (runnerUp && runnerUp.score === best.score) {
     return {
       supplierId: null,
       supplierName: null,
@@ -100,58 +90,86 @@ export function resolveInvoiceSupplier(
     };
   }
 
-  return {
-    supplierId: null,
-    supplierName: null,
-    documentLabel: null,
-    warning: "The supplier was not found on this invoice.",
-  };
-}
-
-export function resolveHistoricalSupplier(input: {
-  text: string;
-  filename?: string | null;
-  sender?: string | null;
-  rawSupplierName?: string | null;
-  suppliers: readonly InvoiceSupplierRef[];
-  aliases: readonly InvoiceAliasRef[];
-}) {
-  const fromText = resolveInvoiceSupplier(
-    input.rawSupplierName ?? null,
-    input.text,
-    input.suppliers,
-    input.aliases
-  );
-  const context = [input.filename, input.sender].filter((value) => value?.trim()).join("\n");
-  const fromContext = context
-    ? resolveInvoiceSupplier(null, context, input.suppliers, input.aliases)
-    : null;
-  const blocked = Boolean(
-    input.rawSupplierName && isBlockedSupplierName(input.rawSupplierName)
-  );
-
-  if (
-    fromText.supplierId &&
-    fromContext?.supplierId &&
-    fromText.supplierId !== fromContext.supplierId
-  ) {
+  if (runnerUp && best.score - runnerUp.score < 2) {
     return {
       supplierId: null,
       supplierName: null,
       documentLabel: null,
-      warning: "The file and the invoice name different suppliers.",
+      warning: "More than one supplier name appears on this invoice.",
     };
   }
 
-  if (fromText.supplierId || blocked || fromText.warning?.includes("More than one")) {
-    return fromText;
+  const domainLabel = best.domainEvidence ?? null;
+  const phraseLabel = longestDocumentPhrase(documentText, suppliers, aliases, best.supplier.id);
+
+  return {
+    supplierId: best.supplier.id,
+    supplierName: best.supplier.name,
+    documentLabel: phraseLabel ?? domainLabel,
+    warning: null,
+  };
+}
+
+function issuerDocumentText(documentText: string) {
+  return documentText.replace(DELIVERY_SECTION, "\n");
+}
+
+type SupplierScore = {
+  supplier: InvoiceSupplierRef;
+  score: number;
+  domainEvidence: string | null;
+};
+
+function rankSupplierEvidence(
+  issuerText: string,
+  fullText: string,
+  suppliers: readonly InvoiceSupplierRef[],
+  aliases: readonly InvoiceAliasRef[]
+) {
+  const scores = new Map<string, SupplierScore>();
+
+  const note = (supplier: InvoiceSupplierRef, points: number, domainEvidence?: string | null) => {
+    const current = scores.get(supplier.id) ?? {
+      supplier,
+      score: 0,
+      domainEvidence: null,
+    };
+    current.score += points;
+
+    if (domainEvidence) {
+      current.domainEvidence = longerLabel(current.domainEvidence, domainEvidence);
+    }
+
+    scores.set(supplier.id, current);
+  };
+
+  for (const supplier of suppliers) {
+    if (phraseAppears(issuerText, supplier.name)) {
+      note(supplier, 2);
+    }
   }
 
-  if (input.rawSupplierName?.trim()) {
-    return fromText;
+  for (const alias of aliases) {
+    if (!phraseAppears(issuerText, alias.alias)) {
+      continue;
+    }
+
+    const supplier = suppliers.find((item) => item.id === alias.supplierId);
+
+    if (supplier) {
+      note(supplier, 2);
+    }
   }
 
-  return fromContext?.supplierId ? fromContext : fromText;
+  for (const hit of domainSuppliers(fullText, suppliers)) {
+    note(hit.supplier, 5, hit.evidence);
+  }
+
+  for (const hit of domainSuppliers(issuerText, suppliers)) {
+    note(hit.supplier, 3, hit.evidence);
+  }
+
+  return [...scores.values()].sort((left, right) => right.score - left.score);
 }
 
 function longestDocumentPhrase(
@@ -235,4 +253,8 @@ function phraseAppears(text: string, phrase: string) {
   }
 
   return normalizedText.includes(normalizedPhrase);
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

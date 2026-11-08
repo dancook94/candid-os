@@ -321,6 +321,18 @@ function InvoiceLineCard({
           <Button
             type="button"
             variant="outline"
+            disabled={pending || !supplierChosen}
+            onClick={(event) => {
+              const form = event.currentTarget.form;
+              if (!form) return;
+              void send({ action: "confirm_sku_alias", ...readForm(form) });
+            }}
+          >
+            Confirm supplier SKU alias
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
             disabled={pending}
             onClick={(event) => {
               const form = event.currentTarget.form;
@@ -371,6 +383,8 @@ function InvoiceLineCard({
         <p className="text-xs text-muted-foreground sm:col-span-2">
           Create new material is for a line that is not already a product. A price change is
           approved, kept, or queried from the price panel. Confirm match does not change a price.
+          Confirm supplier SKU alias adds an alternate code for matching; it never overwrites the
+          canonical supplier SKU.
         </p>
         {error ? <p className="text-sm text-red-700 sm:col-span-2">{error}</p> : null}
       </form>

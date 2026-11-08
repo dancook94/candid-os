@@ -25,6 +25,7 @@ import type {
   InvoiceSupplierRef,
   MatchConfidence,
   MatchMethod,
+  SkuAliasRef,
 } from "@/lib/materials/invoices/model";
 import type { ExistingInvoiceRef } from "@/lib/materials/invoices/duplicate";
 
@@ -46,7 +47,7 @@ function schemaError(error: { code?: string; message?: string } | null) {
 }
 
 export async function loadInvoiceMatchCatalog(supabase: SupabaseClient) {
-  const [suppliers, aliases, materials, products, prices, mappings, ignoreRules, files, invoices] =
+  const [suppliers, aliases, materials, products, prices, mappings, skuAliases, ignoreRules, files, invoices] =
     await Promise.all([
       supabase.from("suppliers").select("id, name, normalized_name"),
       supabase.from("supplier_aliases").select("supplier_id, alias, normalized_alias"),
@@ -69,6 +70,9 @@ export async function loadInvoiceMatchCatalog(supabase: SupabaseClient) {
         .from("supplier_product_description_mappings")
         .select("supplier_id, normalized_description, material_supplier_product_id"),
       supabase
+        .from("material_supplier_product_sku_aliases")
+        .select("supplier_id, material_supplier_product_id, supplier_sku"),
+      supabase
         .from("supplier_invoice_ignore_rules")
         .select("supplier_id, normalized_description"),
       supabase.from("supplier_invoice_files").select("invoice_id, checksum_sha256"),
@@ -77,6 +81,9 @@ export async function loadInvoiceMatchCatalog(supabase: SupabaseClient) {
         .select("id, supplier_id, invoice_number, invoice_date"),
     ]);
 
+  const skuAliasLoadError =
+    skuAliases.error && !isMaterialsSchemaMissing(skuAliases.error) ? skuAliases.error : null;
+
   const error =
     suppliers.error ??
     aliases.error ??
@@ -84,6 +91,7 @@ export async function loadInvoiceMatchCatalog(supabase: SupabaseClient) {
     products.error ??
     prices.error ??
     mappings.error ??
+    skuAliasLoadError ??
     ignoreRules.error ??
     files.error ??
     invoices.error;
@@ -188,6 +196,13 @@ export async function loadInvoiceMatchCatalog(supabase: SupabaseClient) {
         supplierId: row.supplier_id,
         normalizedDescription: row.normalized_description,
         productId: row.material_supplier_product_id,
+      })
+    ),
+    skuAliases: (skuAliases.error ? [] : skuAliases.data ?? []).map(
+      (row): SkuAliasRef => ({
+        supplierId: row.supplier_id,
+        productId: row.material_supplier_product_id,
+        sku: row.supplier_sku,
       })
     ),
     ignoreRules: (ignoreRules.data ?? []).map(

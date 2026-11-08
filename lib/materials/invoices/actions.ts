@@ -23,6 +23,10 @@ import {
 } from "@/lib/materials/invoices/model";
 import { isBlockedSupplierName } from "@/lib/materials/invoices/supplier";
 import { loadInvoiceMatchCatalog } from "@/lib/materials/invoices/queries";
+import {
+  normalizeSupplierSku,
+  skuAliasConflictMessage,
+} from "@/lib/materials/invoices/sku-alias";
 import { supplierSkuSuggestion } from "@/lib/materials/invoices/supplier-sku";
 import { postgresColumnMissing } from "@/lib/materials/write-error";
 
@@ -111,6 +115,7 @@ export async function uploadSupplierInvoice(file: File): Promise<
     aliases: catalog.aliases,
     products: catalog.products,
     mappings: catalog.mappings,
+    skuAliases: catalog.skuAliases,
     ignoreRules: catalog.ignoreRules,
   });
   const identityDuplicate = findDuplicateInvoice({
@@ -641,6 +646,10 @@ export async function reviewInvoiceLine(
     return confirmLineMatch(access, invoice, line, catalog, body);
   }
 
+  if (action === "confirm_sku_alias") {
+    return confirmSkuAlias(access, invoice, line, catalog, body);
+  }
+
   if (action === "confirm_supplier_sku") {
     return confirmSupplierSku(access, invoice, line, catalog, body);
   }
@@ -702,6 +711,7 @@ export async function reviewInvoiceLine(
     supplierId: invoice.supplier_id,
     products: catalog.products,
     mappings: catalog.mappings,
+    skuAliases: catalog.skuAliases,
     ignoreRules: catalog.ignoreRules,
     description: reviewed.reviewed_description,
     sku: reviewed.reviewed_supplier_sku,
@@ -814,6 +824,7 @@ export async function addInvoiceLine(
     supplierId: invoice.supplier_id,
     products: catalog.products,
     mappings: catalog.mappings,
+    skuAliases: catalog.skuAliases,
     ignoreRules: catalog.ignoreRules,
   });
   const { data: added, error } = await access.supabase
@@ -864,6 +875,110 @@ export async function addInvoiceLine(
   });
   await refreshProcessingStatus(access.supabase, invoiceId);
   refreshInvoicePages(invoiceId);
+  return { ok: true as const };
+}
+
+async function confirmSkuAlias(
+  access: { supabase: SupabaseClient; userId: string },
+  invoice: { id: string; supplier_id: string | null; invoice_date?: string | null },
+  line: {
+    id: string;
+    raw_supplier_sku: string | null;
+    reviewed_supplier_sku: string | null;
+    matched_supplier_product_id: string | null;
+  },
+  catalog: Awaited<ReturnType<typeof loadInvoiceMatchCatalog>> & { ok: true },
+  body: Record<string, unknown>
+) {
+  if (!invoice.supplier_id) {
+    return { ok: false as const, status: 400, error: "Choose the supplier before confirming a SKU." };
+  }
+
+  const productId = textValue(body.productId) || line.matched_supplier_product_id;
+  const product = catalog.products.find(
+    (item) => item.id === productId && item.supplierId === invoice.supplier_id
+  );
+
+  if (!product) {
+    return { ok: false as const, status: 400, error: "Choose the supplier product this SKU refers to." };
+  }
+
+  const invoiceSku = textValue(body.sku) || line.reviewed_supplier_sku || line.raw_supplier_sku || "";
+  const canonicalConflict = skuAliasConflictMessage({
+    invoiceSku,
+    canonicalSku: product.sku,
+  });
+
+  if (canonicalConflict) {
+    return { ok: false as const, status: 400, error: canonicalConflict };
+  }
+
+  const normalized = normalizeSupplierSku(invoiceSku);
+  const existingAlias = catalog.skuAliases.find(
+    (alias) => alias.supplierId === invoice.supplier_id && normalizeSupplierSku(alias.sku) === normalized
+  );
+  const conflictingProduct = existingAlias
+    ? catalog.products.find((item) => item.id === existingAlias.productId)
+    : null;
+
+  if (existingAlias && existingAlias.productId !== product.id) {
+    return {
+      ok: false as const,
+      status: 409,
+      error:
+        skuAliasConflictMessage({
+          invoiceSku,
+          canonicalSku: null,
+          existingAliasProductDescription: conflictingProduct?.description ?? null,
+        }) ?? "This SKU is already linked to another product.",
+    };
+  }
+
+  if (existingAlias?.productId === product.id) {
+    return { ok: true as const, alreadyLinked: true as const };
+  }
+
+  const { error } = await access.supabase.from("material_supplier_product_sku_aliases").insert({
+    supplier_id: invoice.supplier_id,
+    material_supplier_product_id: product.id,
+    supplier_sku: invoiceSku.trim(),
+    created_by: access.userId,
+    created_from_invoice_line_id: line.id,
+  });
+
+  if (error) {
+    if (error.code === "23505") {
+      return {
+        ok: false as const,
+        status: 409,
+        error: "This supplier SKU is already stored for another product.",
+      };
+    }
+
+    return { ok: false as const, status: 400, error: "The SKU alias could not be saved." };
+  }
+
+  await recordEvent(access.supabase, {
+    invoiceId: invoice.id,
+    lineId: line.id,
+    actorId: access.userId,
+    action: "sku_alias_confirmed",
+    metadata: { sku: invoiceSku.trim(), productId: product.id },
+  });
+
+  const refreshedCatalog = await loadInvoiceMatchCatalog(access.supabase);
+
+  if (refreshedCatalog.ok) {
+    await reclassifyStoredLines(
+      access.supabase,
+      invoice.id,
+      invoice.supplier_id,
+      refreshedCatalog,
+      access.userId
+    );
+  }
+
+  refreshInvoicePages(invoice.id);
   return { ok: true as const };
 }
 
@@ -1029,6 +1144,7 @@ async function confirmLineMatch(
         productId: product.id,
       },
     ],
+    skuAliases: catalog.skuAliases,
     ignoreRules: catalog.ignoreRules,
     forcedProductId: product.id,
     forcedMethod: "mapping",
@@ -1190,6 +1306,7 @@ async function reclassifyStoredLines(
       supplierId,
       products: catalog.products,
       mappings: catalog.mappings,
+      skuAliases: catalog.skuAliases,
       ignoreRules: catalog.ignoreRules,
       description: line.reviewed_description,
       sku: line.reviewed_supplier_sku,
