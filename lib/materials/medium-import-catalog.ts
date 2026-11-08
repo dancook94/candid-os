@@ -601,20 +601,6 @@ export const MEDIUM_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
       ),
     ],
   },
-  sheetMaterial(
-    "hips-p91-1mm-2440x1220",
-    "HIPS PS1275 P91 1mm White 2440mm x 1220mm",
-    "Board",
-    "White",
-    "Gloss/matt",
-    2440,
-    1220,
-    "PPB",
-    "WHITE PS1275 P91 GLOSS/MATT HIPS WITH FILM (ON GLOSS SIDE) 1MM BULK PACK 2440mm x 1220mm",
-    26,
-    1,
-    "square_metre"
-  ),
   rollMaterial(
     "inkjet-90gsm-841x90",
     "Colour Inkjet Paper 90gsm 841mm x 90m",

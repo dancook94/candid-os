@@ -19,6 +19,7 @@ import {
   initialImportIdentity,
   initialImportSqlCatalog,
 } from "@/lib/materials/initial-import-catalog";
+import { MEDIUM_IMPORT_MATERIALS } from "@/lib/materials/medium-import-catalog";
 import {
   buildInitialImportPayload,
   buildInitialImportPlan,
@@ -91,11 +92,11 @@ describe("initial material import", () => {
     const offers = INITIAL_IMPORT_MATERIALS.flatMap((material) => material.products);
 
     assert.equal(INITIAL_IMPORT_MATERIALS.length, 46);
-    assert.equal(offers.length, 49);
+    assert.equal(offers.length, 50);
     assert.equal(plan.canCommit, true);
     assert.equal(plan.counts.materialsToCreate, 46);
-    assert.equal(plan.counts.productsToCreate, 49);
-    assert.equal(plan.counts.pricesToCreate, 49);
+    assert.equal(plan.counts.productsToCreate, 50);
+    assert.equal(plan.counts.pricesToCreate, 50);
     assert.equal(plan.counts.suppliersToCreate, 5);
     assert.equal(plan.counts.suppliersMatched, 1);
     assert.equal(plan.counts.aliasesToCreate, 14);
@@ -137,7 +138,7 @@ describe("initial material import", () => {
     const payload = buildInitialImportPayload(plan, "2026-09-28");
     assert.ok(payload);
     assert.equal(payload.createMaterialKeys.length, 46);
-    assert.equal(payload.createProductKeys.length, 49);
+    assert.equal(payload.createProductKeys.length, 50);
     assert.equal(payload.confirmation, "IMPORT APPROVED MATERIALS");
     assert.equal(
       payload.suppliers.find((supplier) => supplier.action === "match")?.expectedId,
@@ -381,7 +382,7 @@ describe("initial material import", () => {
       false
     );
     assert.equal(payload?.createMaterialKeys.length, 45);
-    assert.equal(payload?.createProductKeys.length, 47);
+    assert.equal(payload?.createProductKeys.length, 48);
   });
 
   it("adds the Antalis Foamalite product under the existing Pyramid material", () => {
@@ -447,6 +448,7 @@ describe("initial material import", () => {
         "foamalite-3mm-3050x1560",
         "foamalite-3mm-2440x1220",
         "foamalite-5mm-2440x1220",
+        "hips-1mm-2440x1220",
       ].join(",")
     );
   });
@@ -461,6 +463,13 @@ describe("initial material import", () => {
     assert.equal(priceOf("dibond-sigwhite-3mm-1220x2440", "Pyramid Display Materials"), 26.69);
     assert.equal(priceOf("dibond-eco-3mm-1500x3050", "Pyramid Display Materials"), 41.15);
     assert.equal(priceOf("hips-1mm-2440x1220", "PPB"), 26);
+    const hips = INITIAL_IMPORT_MATERIALS.find((item) => item.key === "hips-1mm-2440x1220");
+    assert.equal(hips?.products.length, 2);
+    assert.equal(
+      hips?.products.find((product) => product.key === "hips-1mm-2440x1220--ppb-ps1275-p91")
+        ?.preferred,
+      false
+    );
     assert.equal(priceOf("coala-white-3mm-3050x1500", "Antalis"), 55.25);
     assert.equal(priceOf("coala-white-3mm-2440x1220", "Antalis"), 35.94);
     assert.equal(priceOf("coala-silver-3mm-1220x2440", "Antalis"), 45.44);
@@ -562,7 +571,7 @@ describe("initial material import", () => {
   it("keeps the database catalog aligned with the approved records", async () => {
     const sql = await readFile(
       new URL(
-        "../../supabase/migrations/20260928190000_supplier_aliases_and_initial_import.sql",
+        "../../supabase/migrations/20261110120000_consolidate_hips_duplicate.sql",
         import.meta.url
       ),
       "utf8"
@@ -588,7 +597,7 @@ describe("initial material import", () => {
     assert.match(sql, new RegExp(INITIAL_IMPORT_SOURCE_REFERENCE));
     assert.doesNotMatch(sql, /APS/);
     assert.doesNotMatch(catalogMatch[1], /PQ80/);
-    assert.doesNotMatch(sql, /UPDATE public\.materials/);
+    assert.match(sql, /UPDATE public\.materials[\s\S]*SET active = false/);
     assert.match(sql, /RAISE EXCEPTION 'Material already exists:/);
     assert.match(sql, /RAISE EXCEPTION 'Protected Foamalite record cannot be imported'/);
     assert.match(sql, /RAISE EXCEPTION 'Supplier product already exists:/);
@@ -603,5 +612,15 @@ describe("initial material import", () => {
     assert.match(sql, /RAISE EXCEPTION 'Supplier alias already exists:/);
     assert.match(sql, /ink_volume_litres/);
     assert.equal(sql.includes("initial-approved-9"), false);
+  });
+});
+
+describe("medium import catalog", () => {
+  it("does not define a second HIPS 2440×1220 material", () => {
+    assert.equal(MEDIUM_IMPORT_MATERIALS.length, 35);
+    assert.equal(
+      MEDIUM_IMPORT_MATERIALS.some((item) => item.name.includes("PS1275 P91")),
+      false
+    );
   });
 });

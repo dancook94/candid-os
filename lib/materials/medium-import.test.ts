@@ -123,7 +123,7 @@ describe("medium approved batch 2", () => {
     assert.equal(MEDIUM_IMPORT_CATALOG_VERSION, "medium-approved-batch-2");
     assert.notEqual(MEDIUM_IMPORT_CATALOG_VERSION, INITIAL_IMPORT_CATALOG_VERSION);
     assert.equal(INITIAL_IMPORT_MATERIALS.length, 46);
-    assert.equal(MEDIUM_IMPORT_MATERIALS.length, 36);
+    assert.equal(MEDIUM_IMPORT_MATERIALS.length, 35);
   });
 
   it("does not create Candid Creative or map APS", () => {
@@ -156,10 +156,10 @@ describe("medium approved batch 2", () => {
         "PerfecTear Medium Application Tape 1220mm",
       ]
     );
-    assert.equal(created.length, 34);
-    assert.equal(plan.counts.materialsToCreate, 34);
-    assert.equal(plan.counts.productsToCreate, 36);
-    assert.equal(plan.counts.pricesToCreate, 36);
+    assert.equal(created.length, 33);
+    assert.equal(plan.counts.materialsToCreate, 33);
+    assert.equal(plan.counts.productsToCreate, 35);
+    assert.equal(plan.counts.pricesToCreate, 35);
     assert.equal(plan.counts.suppliersToCreate, 0);
     assert.equal(plan.counts.aliasesToCreate, 0);
     assert.equal(plan.counts.alreadyMatched, 2);
@@ -176,8 +176,8 @@ describe("medium approved batch 2", () => {
       payload.suppliers.every((supplier) => supplier.action === "match"),
       true
     );
-    assert.equal(payload.createMaterialKeys.length, 34);
-    assert.equal(payload.createProductKeys.length, 36);
+    assert.equal(payload.createMaterialKeys.length, 33);
+    assert.equal(payload.createProductKeys.length, 35);
     assert.equal(payload.createMaterialKeys.includes("bubble-wrap-1500"), false);
     assert.equal(
       payload.createMaterialKeys.includes("perfectear-medium-1220"),
@@ -272,10 +272,10 @@ describe("medium approved batch 2", () => {
     }
   });
 
-  it("keeps both approved catalogs inside the import function", async () => {
+  it("keeps approved catalogs in the forward import-function migration", async () => {
     const sql = await readFile(
       new URL(
-        "../../supabase/migrations/20261001170000_medium_approved_batch_2_import.sql",
+        "../../supabase/migrations/20261110120000_consolidate_hips_duplicate.sql",
         import.meta.url
       ),
       "utf8"
@@ -293,10 +293,13 @@ describe("medium approved batch 2", () => {
     assert.deepEqual(JSON.parse(mediumMatch[1]), mediumImportSqlCatalog());
     assert.match(sql, /initial-approved-46/);
     assert.match(sql, /medium-approved-batch-2/);
-    assert.doesNotMatch(sql, /UPDATE public\.materials/);
+    assert.match(sql, /v_expected_materials := 35;/);
+    assert.doesNotMatch(mediumMatch[1], /hips-p91-1mm-2440x1220/);
     assert.doesNotMatch(mediumMatch[1], /APS/);
     assert.doesNotMatch(mediumMatch[1], /Candid/);
-    assert.equal(mediumImportSqlCatalog().length, 36);
+    assert.equal(mediumImportSqlCatalog().length, 35);
     assert.equal(initialImportSqlCatalog().length, 46);
+    const hips = initialImportSqlCatalog().find((item) => item.key === "hips-1mm-2440x1220");
+    assert.equal(hips?.products.length, 2);
   });
 });

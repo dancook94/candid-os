@@ -657,6 +657,17 @@ export const INITIAL_IMPORT_MATERIALS: readonly InitialImportMaterial[] = [
         "sheet",
         8.734211233539371
       ),
+      {
+        key: "hips-1mm-2440x1220--ppb-ps1275-p91",
+        supplierName: "PPB",
+        supplierDescription:
+          "WHITE PS1275 P91 GLOSS/MATT HIPS WITH FILM (ON GLOSS SIDE) 1MM BULK PACK 2440mm x 1220mm",
+        price: 26,
+        priceUnit: "sheet",
+        preferred: false,
+        expectedCostPerSquareMetre: 8.734211233539371,
+        expectedCostPerLitre: null,
+      },
     ],
   },
   {
