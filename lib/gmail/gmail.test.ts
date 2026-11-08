@@ -227,13 +227,48 @@ test("stores a rotated refresh token and reports a revoked grant", async () => {
   }
 });
 
+test("normalizes OAuth credentials pasted with quotes or a BOM", async () => {
+  const { normalizeOAuthEnvValue, gmailClientIdLooksValid, getGmailOAuthConfig } = await import(
+    "@/lib/gmail/config"
+  );
+  const previous = {
+    id: process.env.GMAIL_CLIENT_ID,
+    secret: process.env.GMAIL_CLIENT_SECRET,
+    appUrl: process.env.NEXT_PUBLIC_APP_URL,
+  };
+
+  process.env.GMAIL_CLIENT_ID = '\uFEFF"123456789012-abc.apps.googleusercontent.com"';
+  process.env.GMAIL_CLIENT_SECRET = '"GOCSPX-example-secret"';
+  process.env.NEXT_PUBLIC_APP_URL = "https://candid-os-test.vercel.app/";
+
+  try {
+    const oauth = getGmailOAuthConfig();
+    assert.equal(
+      oauth.clientId,
+      "123456789012-abc.apps.googleusercontent.com"
+    );
+    assert.equal(oauth.clientSecret, "GOCSPX-example-secret");
+    assert.equal(
+      oauth.redirectUri,
+      "https://candid-os-test.vercel.app/api/admin/materials/invoices/gmail/callback"
+    );
+    assert.equal(normalizeOAuthEnvValue("  value  "), "value");
+    assert.equal(gmailClientIdLooksValid(oauth.clientId ?? ""), true);
+    assert.equal(gmailClientIdLooksValid("not-a-client-id"), false);
+  } finally {
+    process.env.GMAIL_CLIENT_ID = previous.id;
+    process.env.GMAIL_CLIENT_SECRET = previous.secret;
+    process.env.NEXT_PUBLIC_APP_URL = previous.appUrl;
+  }
+});
+
 test("requests read-only Gmail access", () => {
   const previous = {
     id: process.env.GMAIL_CLIENT_ID,
     secret: process.env.GMAIL_CLIENT_SECRET,
     appUrl: process.env.NEXT_PUBLIC_APP_URL,
   };
-  process.env.GMAIL_CLIENT_ID = "client-id";
+  process.env.GMAIL_CLIENT_ID = "123456789012-abcdef.apps.googleusercontent.com";
   process.env.GMAIL_CLIENT_SECRET = "client-secret";
   process.env.NEXT_PUBLIC_APP_URL = "https://os.candidcreative.uk";
 

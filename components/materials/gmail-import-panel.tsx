@@ -77,6 +77,20 @@ export function GmailImportPanel(props: {
         <p className="text-sm text-muted-foreground">
           Mailbox {props.connection.mailbox}. Status {props.connection.status.replaceAll("_", " ")}.
           {props.connection.googleEmail ? ` Confirmed ${props.connection.googleEmail}.` : ""}
+          {props.connection.oauthRedirectUri ? (
+            <>
+              {" "}
+              OAuth redirect URI: <code className="text-xs">{props.connection.oauthRedirectUri}</code>
+              {props.connection.oauthClientIdValid ? null : (
+                <>
+                  {" "}
+                  <span className="text-amber-900">
+                    GMAIL_CLIENT_ID does not look like a Google Web client ID.
+                  </span>
+                </>
+              )}
+            </>
+          ) : null}
           {props.connection.lastSuccessAt
             ? ` Last success ${props.connection.lastSuccessAt.slice(0, 16).replace("T", " ")} UTC.`
             : ""}

@@ -1,7 +1,13 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { decryptGmailRefreshToken, encryptGmailRefreshToken } from "@/lib/gmail/crypto";
-import { GMAIL_IMPORT_MAILBOX, GMAIL_READONLY_SCOPE, missingGmailEnv } from "@/lib/gmail/config";
+import {
+  getGmailOAuthConfig,
+  gmailClientIdLooksValid,
+  GMAIL_IMPORT_MAILBOX,
+  GMAIL_READONLY_SCOPE,
+  missingGmailEnv,
+} from "@/lib/gmail/config";
 import { sanitizeGmailError } from "@/lib/gmail/errors";
 import {
   fetchGmailProfile,
@@ -20,6 +26,8 @@ export type GmailConnectionView = {
   lastError: string | null;
   credentialsConfigured: boolean;
   missingEnv: string[];
+  oauthRedirectUri: string | null;
+  oauthClientIdValid: boolean;
 };
 
 export type GmailRunView = {
@@ -69,6 +77,15 @@ type ConnectionRow = {
   last_error: string | null;
 };
 
+function gmailOAuthSetup() {
+  const oauth = getGmailOAuthConfig();
+
+  return {
+    oauthRedirectUri: oauth.redirectUri,
+    oauthClientIdValid: oauth.clientId ? gmailClientIdLooksValid(oauth.clientId) : false,
+  };
+}
+
 function emptyConnection(): GmailConnectionView {
   const missingEnv = missingGmailEnv();
 
@@ -82,6 +99,7 @@ function emptyConnection(): GmailConnectionView {
     lastError: null,
     credentialsConfigured: missingEnv.length === 0,
     missingEnv,
+    ...gmailOAuthSetup(),
   };
 }
 
@@ -135,6 +153,7 @@ export async function loadGmailImportView(admin: SupabaseClient) {
         lastError: (connection as ConnectionRow).last_error,
         credentialsConfigured: missingEnv.length === 0,
         missingEnv,
+        ...gmailOAuthSetup(),
       }
     : emptyConnection();
 

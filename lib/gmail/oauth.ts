@@ -1,6 +1,10 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
-import { GMAIL_READONLY_SCOPE } from "@/lib/gmail/config";
+import {
+  getGmailOAuthConfig,
+  gmailClientIdLooksValid,
+  GMAIL_READONLY_SCOPE,
+} from "@/lib/gmail/config";
 import { sanitizeGmailError, type GmailRequestError } from "@/lib/gmail/errors";
 
 export const GMAIL_OAUTH_STATE_COOKIE = "gmail_oauth_state";
@@ -19,7 +23,7 @@ type GmailProfile = {
 };
 
 function signingSecret() {
-  const secret = process.env.GMAIL_CLIENT_SECRET?.trim();
+  const secret = getGmailOAuthConfig().clientSecret;
 
   if (!secret) {
     throw new Error("GMAIL_CLIENT_SECRET is not configured.");
@@ -33,13 +37,7 @@ function sign(body: string) {
 }
 
 export function gmailRedirectUri() {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.trim().replace(/\/+$/, "");
-
-  if (!appUrl) {
-    return null;
-  }
-
-  return `${appUrl}/api/admin/materials/invoices/gmail/callback`;
+  return getGmailOAuthConfig().redirectUri;
 }
 
 export function createGmailOAuthState(expiresAt = Date.now() + 10 * 60 * 1000) {
@@ -111,11 +109,16 @@ export function gmailOAuthCookieOptions(maxAge = 10 * 60) {
 }
 
 export function buildGmailAuthorizeUrl(state: string) {
-  const clientId = process.env.GMAIL_CLIENT_ID?.trim();
-  const redirectUri = gmailRedirectUri();
+  const { clientId, redirectUri } = getGmailOAuthConfig();
 
   if (!clientId || !redirectUri) {
     throw new Error("Set GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, and NEXT_PUBLIC_APP_URL.");
+  }
+
+  if (!gmailClientIdLooksValid(clientId)) {
+    throw new Error(
+      "GMAIL_CLIENT_ID must be the Web client ID ending in .apps.googleusercontent.com."
+    );
   }
 
   const params = new URLSearchParams({
@@ -143,7 +146,8 @@ async function postToken(body: URLSearchParams) {
   if (!response.ok || !payload.access_token) {
     const error = new Error(
       sanitizeGmailError(
-        new Error(payload.error_description || payload.error || "Gmail authorization failed.")
+        new Error(payload.error_description || payload.error || "Gmail authorization failed."),
+        payload.error
       )
     ) as GmailRequestError;
     error.status = response.status;
@@ -155,12 +159,16 @@ async function postToken(body: URLSearchParams) {
 }
 
 export async function exchangeGmailAuthorizationCode(code: string) {
-  const clientId = process.env.GMAIL_CLIENT_ID?.trim();
-  const clientSecret = process.env.GMAIL_CLIENT_SECRET?.trim();
-  const redirectUri = gmailRedirectUri();
+  const { clientId, clientSecret, redirectUri } = getGmailOAuthConfig();
 
   if (!clientId || !clientSecret || !redirectUri) {
     throw new Error("Gmail OAuth is not configured.");
+  }
+
+  if (!gmailClientIdLooksValid(clientId)) {
+    throw new Error(
+      "GMAIL_CLIENT_ID must be the Web client ID ending in .apps.googleusercontent.com."
+    );
   }
 
   const payload = await postToken(
@@ -181,8 +189,7 @@ export async function exchangeGmailAuthorizationCode(code: string) {
 }
 
 export async function refreshGmailAccessToken(refreshToken: string) {
-  const clientId = process.env.GMAIL_CLIENT_ID?.trim();
-  const clientSecret = process.env.GMAIL_CLIENT_SECRET?.trim();
+  const { clientId, clientSecret } = getGmailOAuthConfig();
 
   if (!clientId || !clientSecret) {
     throw new Error("Gmail OAuth is not configured.");

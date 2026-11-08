@@ -31,21 +31,59 @@ export const GMAIL_ONGOING_SYNC_ENABLED = false;
 
 export const GMAIL_SYNC_OVERLAP_MINUTES = 180;
 
+export function normalizeOAuthEnvValue(value: string | undefined) {
+  if (!value) {
+    return undefined;
+  }
+
+  let normalized = value.replace(/^\uFEFF/, "").trim();
+
+  if (
+    (normalized.startsWith('"') && normalized.endsWith('"')) ||
+    (normalized.startsWith("'") && normalized.endsWith("'"))
+  ) {
+    normalized = normalized.slice(1, -1).trim();
+  }
+
+  return normalized || undefined;
+}
+
+export function gmailClientIdLooksValid(clientId: string) {
+  return /\d+-[a-z0-9]+\.apps\.googleusercontent\.com$/i.test(clientId);
+}
+
+export function getGmailOAuthConfig() {
+  const clientId = normalizeOAuthEnvValue(process.env.GMAIL_CLIENT_ID);
+  const clientSecret = normalizeOAuthEnvValue(process.env.GMAIL_CLIENT_SECRET);
+  const appUrl = normalizeOAuthEnvValue(process.env.NEXT_PUBLIC_APP_URL)?.replace(/\/+$/, "");
+
+  return {
+    clientId: clientId ?? null,
+    clientSecret: clientSecret ?? null,
+    redirectUri: appUrl
+      ? `${appUrl}/api/admin/materials/invoices/gmail/callback`
+      : null,
+  };
+}
+
 export function gmailCredentialsConfigured() {
+  const oauth = getGmailOAuthConfig();
+
   return Boolean(
-    process.env.GMAIL_CLIENT_ID?.trim() &&
-      process.env.GMAIL_CLIENT_SECRET?.trim() &&
-      process.env.GMAIL_TOKEN_KEY?.trim() &&
-      process.env.NEXT_PUBLIC_APP_URL?.trim()
+    oauth.clientId &&
+      oauth.clientSecret &&
+      normalizeOAuthEnvValue(process.env.GMAIL_TOKEN_KEY) &&
+      oauth.redirectUri
   );
 }
 
 export function missingGmailEnv() {
+  const oauth = getGmailOAuthConfig();
   const names: Array<[string, string | undefined]> = [
-    ["GMAIL_CLIENT_ID", process.env.GMAIL_CLIENT_ID],
-    ["GMAIL_CLIENT_SECRET", process.env.GMAIL_CLIENT_SECRET],
-    ["GMAIL_TOKEN_KEY", process.env.GMAIL_TOKEN_KEY],
-    ["NEXT_PUBLIC_APP_URL", process.env.NEXT_PUBLIC_APP_URL],
+    ["GMAIL_CLIENT_ID", oauth.clientId ?? undefined],
+    ["GMAIL_CLIENT_SECRET", oauth.clientSecret ?? undefined],
+    ["GMAIL_TOKEN_KEY", normalizeOAuthEnvValue(process.env.GMAIL_TOKEN_KEY)],
+    ["NEXT_PUBLIC_APP_URL", normalizeOAuthEnvValue(process.env.NEXT_PUBLIC_APP_URL)],
   ];
 
   return names.filter(([, value]) => !value?.trim()).map(([name]) => name);

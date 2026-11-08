@@ -4,11 +4,19 @@ export type GmailRequestError = Error & {
   retryAfterSeconds?: number;
 };
 
-export function sanitizeGmailError(error: unknown) {
+export function sanitizeGmailError(error: unknown, oauthErrorCode?: string | null) {
   const message = error instanceof Error ? error.message : "Gmail could not be reached.";
 
   if (/bearer|refresh_token|access_token|client_secret|ciphertext|ya29\.|1\/\//i.test(message)) {
     return "Gmail authorization failed.";
+  }
+
+  if (
+    oauthErrorCode === "invalid_client" ||
+    /client secret is invalid/i.test(message) ||
+    /oauth client was not found/i.test(message)
+  ) {
+    return "Google rejected the OAuth client ID or secret. In Vercel candid-os-test (Production only), GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET must come from the same Google Cloud Web application client, with no surrounding quotes, then redeploy.";
   }
 
   return message.slice(0, 300);
