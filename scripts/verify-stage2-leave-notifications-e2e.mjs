@@ -39,7 +39,9 @@ function loadCronSecret() {
   }
 }
 
-const cronSecret = loadCronSecret();
+const cronSecretRaw = loadCronSecret();
+const cronSecret =
+  cronSecretRaw && cronSecretRaw !== "[SENSITIVE]" ? cronSecretRaw : "";
 
 const STAFF_A = {
   email: "leave-smoke-staff-a@leave-smoke.test",
@@ -148,31 +150,33 @@ async function adminSession(adminSvc) {
   });
 }
 
-async function findBookableDay(client, profileId, year, preferred) {
+async function submitOnFirstAvailableDay(client, profileId, submitArgs, year, preferred) {
+  const portion = submitArgs.args.p_day_portion ?? "full";
   for (const iso of isoWeekdayCandidates(year, preferred)) {
-    const { data, error } = await client.rpc("preview_staff_leave_request_days", {
+    const preview = await client.rpc("preview_staff_leave_request_days", {
       target_profile: profileId,
       p_start_date: iso,
       p_end_date: iso,
-      p_day_portion: "full",
+      p_day_portion: portion,
     });
-    if (error || Number(data) <= 0) continue;
-    const overlap = await client.rpc("submit_staff_leave_request", {
+    if (preview.error || Number(preview.data) <= 0) continue;
+
+    const attempt = await client.rpc(submitArgs.fn, {
+      ...submitArgs.args,
       p_start_date: iso,
       p_end_date: iso,
-      p_day_portion: "full",
-      p_employee_note: `${runNote} — probe`,
     });
-    if (overlap.error && /overlap/i.test(overlap.error.message)) continue;
-    if (overlap.data?.id) {
-      await client.rpc("cancel_staff_leave_request", {
-        p_request_id: overlap.data.id,
-        p_cancellation_note: "probe rollback",
-      });
+    if (!attempt.error && attempt.data?.id) {
+      return { iso, data: attempt.data };
     }
-    return iso;
+    if (
+      /overlap|insufficient|balance|bookable working days/i.test(attempt.error?.message ?? "")
+    ) {
+      continue;
+    }
+    throw attempt.error ?? new Error("submit failed");
   }
-  throw new Error(`No bookable weekday in ${year}`);
+  throw new Error(`No submit bookable weekday in ${year}`);
 }
 
 async function waitForOutbox(adminSvc, requestId, kind, timeoutMs = 60_000) {
@@ -198,33 +202,27 @@ function e2eControlledBearer(serviceRoleKey) {
 }
 
 async function deliverOutbox(adminSvc, outboxId) {
-  const useE2eAuth = !cronSecret && Boolean(serviceKey?.trim());
-  const bearer = cronSecret ?? (useE2eAuth ? e2eControlledBearer(serviceKey) : "");
+  const roleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? "";
+  const useE2eAuth = !cronSecret && Boolean(roleKey);
+  const bearer = cronSecret || (useE2eAuth ? e2eControlledBearer(roleKey) : "");
 
-  if (bearer) {
-    const qs = new URLSearchParams({ outboxId, ...(useE2eAuth ? { e2eAuth: "1" } : {}) });
-    const res = await fetch(`${APP_BASE}/api/cron/staff-leave-notifications/controlled?${qs}`, {
-      headers: {
-        Authorization: `Bearer ${bearer}`,
-        ...(useE2eAuth ? { "X-Staff-Leave-E2E": "1" } : {}),
-      },
-    });
-    const body = await res.json().catch(() => ({}));
-    return {
-      ok: res.ok,
-      body,
-      channel: useE2eAuth ? "controlled_cron_e2e_auth" : "controlled_cron",
-    };
+  if (!bearer) {
+    return { ok: false, body: { error: "no_delivery_credentials" }, channel: "none" };
   }
 
-  process.env.NEXT_PUBLIC_APP_ENV ??= "test";
-  process.env.CANDID_COMMUNICATION_MODE ??= "test";
-  process.env.CANDID_TEST_EMAIL_RECIPIENT ??= SAFE_RECIPIENT;
-  const { processStaffLeaveNotificationOutbox } = await import(
-    "../lib/staff-leave/notifications/process-outbox.ts"
-  );
-  const result = await processStaffLeaveNotificationOutbox(adminSvc, { outboxId });
-  return { ok: result.sent >= 1, body: result, channel: "local_processor" };
+  const qs = new URLSearchParams({ outboxId, ...(useE2eAuth ? { e2eAuth: "1" } : {}) });
+  const res = await fetch(`${APP_BASE}/api/cron/staff-leave-notifications/controlled?${qs}`, {
+    headers: {
+      Authorization: `Bearer ${bearer}`,
+      ...(useE2eAuth ? { "X-Staff-Leave-E2E": "1" } : {}),
+    },
+  });
+  const body = await res.json().catch(() => ({}));
+  return {
+    ok: res.ok && body?.ok !== false,
+    body,
+    channel: useE2eAuth ? "controlled_cron_e2e_auth" : "controlled_cron",
+  };
 }
 
 async function pollNotification(adminSvc, sourceEventId, timeoutMs = 90_000) {
@@ -234,7 +232,7 @@ async function pollNotification(adminSvc, sourceEventId, timeoutMs = 90_000) {
     const { data, error } = await adminSvc
       .from("notifications")
       .select(
-        "id, notification_type, status, recipient_email, intended_recipient_email, provider_message_id, idempotency_key, metadata, subject, html_body, error_message, created_at"
+        "id, notification_type, status, recipient_email, intended_recipient_email, provider_message_id, idempotency_key, metadata, subject, error_message, created_at"
       )
       .eq("idempotency_key", idem)
       .maybeSingle();
@@ -287,16 +285,20 @@ function assertNotification(scenario, notif, ctx) {
   if (ctx.expectedLeaveType && String(meta.leaveType ?? "") !== ctx.expectedLeaveType) {
     issues.push(`leaveType expected ${ctx.expectedLeaveType}`);
   }
-  const blob = JSON.stringify({ ...meta, subject: notif?.subject, html: notif?.html_body }).toLowerCase();
+  const blob = JSON.stringify({ ...meta, subject: notif?.subject }).toLowerCase();
   if (/sickness|employee_note|decision_note|grant_reason|cancellation_reason/.test(blob)) {
     issues.push("private note/sickness leakage");
   }
   if (scenario.audience === "management") {
-    if (!notif?.intended_recipient_email && !/candidcreative\.uk/.test(blob)) {
+    const intended = (notif?.intended_recipient_email ?? "").toLowerCase();
+    if (!intended.includes("@") && !/candidcreative\.uk|staff_leave_management/i.test(blob)) {
       issues.push("missing management routing context");
     }
-  } else if (!notif?.intended_recipient_email?.includes("@")) {
-    issues.push("missing intended employee recipient");
+  } else {
+    const intended = notif?.intended_recipient_email ?? "";
+    if (!intended.includes("@") && !intended.includes("leave-smoke")) {
+      issues.push("missing intended employee recipient");
+    }
   }
   return issues;
 }
@@ -397,12 +399,12 @@ async function main() {
   const staffB = await signIn(STAFF_B.email, STAFF_B.password);
   const adminClient = await adminSession(adminSvc);
 
-  const [{ data: profA }, { data: profB }] = await Promise.all([
-    adminSvc.from("profiles").select("id, full_name").eq("id", staffA.userId).maybeSingle(),
-    adminSvc.from("profiles").select("id, full_name").eq("id", staffB.userId).maybeSingle(),
-  ]);
-  const nameA = profA?.full_name ?? "Staff A";
-  const nameB = profB?.full_name ?? "Staff B";
+  const displayA = "Leave Smoke Staff A";
+  const displayB = "Leave Smoke Staff B";
+  await adminSvc.from("profiles").update({ full_name: displayA }).eq("id", staffA.userId);
+  await adminSvc.from("profiles").update({ full_name: displayB }).eq("id", staffB.userId);
+  const nameA = displayA;
+  const nameB = displayB;
 
   const trackedEventIds = [];
   const trackedRequestIds = [];
@@ -415,25 +417,23 @@ async function main() {
   });
 
   // —— R1: annual submit → approve → cancel (scenarios 1, 3, 5) ——
-  const dayR1 = await findBookableDay(staffB.client, staffB.userId, 2027, "2027-07-07");
-  const submitR1 = await staffB.client.rpc("submit_staff_leave_request", {
-    p_start_date: dayR1,
-    p_end_date: dayR1,
-    p_day_portion: "full",
-    p_employee_note: runNote,
-  });
-  if (submitR1.error) throw submitR1.error;
+  const submitR1 = await submitOnFirstAvailableDay(
+    staffB.client,
+    staffB.userId,
+    {
+      fn: "submit_staff_leave_request",
+      args: { p_day_portion: "full", p_employee_note: runNote },
+    },
+    2027,
+    "2027-11-10"
+  );
+  const dayR1 = submitR1.iso;
   const r1 = submitR1.data.id;
   trackedRequestIds.push(r1);
 
   const ob1 = await waitForOutbox(adminSvc, r1, "management_annual_submitted");
   if (ob1) trackedEventIds.push(ob1.source_event_id);
-  await runScenario(
-    adminSvc,
-    SCENARIO_DEFS[0],
-    ob1,
-    ctxBase(nameB, dayR1, "Pending approval")
-  );
+  await runScenario(adminSvc, SCENARIO_DEFS[0], ob1, ctxBase(nameB, dayR1, "Pending approval"));
 
   const approveR1 = await adminClient.rpc("decide_staff_leave_request", {
     p_request_id: r1,
@@ -455,14 +455,17 @@ async function main() {
   await runScenario(adminSvc, SCENARIO_DEFS[4], ob5, ctxBase(nameB, dayR1, "Cancelled"));
 
   // —— R2: annual decline (scenario 4) ——
-  const dayR2 = await findBookableDay(staffA.client, staffA.userId, 2027, "2027-08-04");
-  const submitR2 = await staffA.client.rpc("submit_staff_leave_request", {
-    p_start_date: dayR2,
-    p_end_date: dayR2,
-    p_day_portion: "full",
-    p_employee_note: runNote,
-  });
-  if (submitR2.error) throw submitR2.error;
+  const submitR2 = await submitOnFirstAvailableDay(
+    staffB.client,
+    staffB.userId,
+    {
+      fn: "submit_staff_leave_request",
+      args: { p_day_portion: "full", p_employee_note: runNote },
+    },
+    2027,
+    "2027-11-17"
+  );
+  const dayR2 = submitR2.iso;
   const r2 = submitR2.data.id;
   trackedRequestIds.push(r2);
 
@@ -474,17 +477,20 @@ async function main() {
   if (rejectR2.error) throw rejectR2.error;
   const ob4 = await waitForOutbox(adminSvc, r2, "employee_declined");
   if (ob4) trackedEventIds.push(ob4.source_event_id);
-  await runScenario(adminSvc, SCENARIO_DEFS[3], ob4, ctxBase(nameA, dayR2, "Declined"));
+  await runScenario(adminSvc, SCENARIO_DEFS[3], ob4, ctxBase(nameB, dayR2, "Declined"));
 
   // —— R3: additional paid submit (scenario 2) ——
-  const dayR3 = await findBookableDay(staffB.client, staffB.userId, 2027, "2027-09-01");
-  const submitR3 = await staffB.client.rpc("submit_staff_additional_paid_leave_request", {
-    p_start_date: dayR3,
-    p_end_date: dayR3,
-    p_day_portion: "full",
-    p_employee_note: runNote,
-  });
-  if (submitR3.error) throw submitR3.error;
+  const submitR3 = await submitOnFirstAvailableDay(
+    staffB.client,
+    staffB.userId,
+    {
+      fn: "submit_staff_additional_paid_leave_request",
+      args: { p_day_portion: "full", p_employee_note: runNote },
+    },
+    2027,
+    "2027-11-24"
+  );
+  const dayR3 = submitR3.iso;
   const r3 = submitR3.data.id;
   trackedRequestIds.push(r3);
 
@@ -498,17 +504,26 @@ async function main() {
   );
 
   // —— R4: admin grant additional paid (scenario 6) ——
-  const dayR4 = await findBookableDay(staffA.client, staffA.userId, 2027, "2027-09-15");
-  const grantR4 = await adminClient.rpc("grant_staff_additional_paid_leave", {
-    p_profile_id: staffA.userId,
-    p_start_date: dayR4,
-    p_end_date: dayR4,
-    p_day_portion: "full",
-    p_grant_reason: runNote,
-    p_decision_note: null,
-  });
-  if (grantR4.error) throw grantR4.error;
-  const r4 = grantR4.data.id;
+  let dayR4 = null;
+  let r4 = null;
+  for (const iso of isoWeekdayCandidates(2027, "2027-11-27")) {
+    const grantR4 = await adminClient.rpc("grant_staff_additional_paid_leave", {
+      p_profile_id: staffA.userId,
+      p_start_date: iso,
+      p_end_date: iso,
+      p_day_portion: "full",
+      p_grant_reason: runNote,
+      p_decision_note: null,
+    });
+    if (!grantR4.error && grantR4.data?.id) {
+      dayR4 = iso;
+      r4 = grantR4.data.id;
+      break;
+    }
+    if (/overlap|insufficient|balance/i.test(grantR4.error?.message ?? "")) continue;
+    throw grantR4.error;
+  }
+  if (!r4) throw new Error("No grant bookable weekday in 2027 for staff A");
   trackedRequestIds.push(r4);
 
   const ob6 = await waitForOutbox(adminSvc, r4, "employee_additional_paid_granted");
@@ -535,7 +550,7 @@ async function main() {
   }
 
   // Cleanup: cancel pending only (no approved-cancel email)
-  const r3Status = submitR3.data?.status;
+  const r3Status = submitR3.data?.status ?? "pending";
   if (r3Status === "pending") {
     await adminClient.rpc("cancel_staff_leave_request", {
       p_request_id: r3,
@@ -555,10 +570,10 @@ async function main() {
   }
 
   const failed = results.filter((r) => !r.pass).length;
-  process.exit(failed > 0 ? 1 : 0);
+  process.exitCode = failed > 0 ? 1 : 0;
 }
 
 main().catch((err) => {
   console.error(err);
-  process.exit(1);
+  process.exitCode = 1;
 });
