@@ -40,11 +40,30 @@ const { error: grantProbe } = await admin
   .select("id")
   .eq("id", REQUEST_ID)
   .maybeSingle();
+const grantsOk = !grantProbe;
 record(
   "service_role can SELECT staff_leave_requests (migration 156000)",
-  !grantProbe,
+  grantsOk,
   grantProbe?.code === "42501" ? "permission denied — apply 156000 first" : grantProbe?.message ?? "ok"
 );
+
+if (!grantsOk) {
+  process.exit(1);
+}
+
+const { data: outboxBefore } = await admin
+  .from("staff_leave_notification_outbox")
+  .select("status")
+  .eq("id", OUTBOX_ID)
+  .maybeSingle();
+
+if (outboxBefore?.status === "processing" || outboxBefore?.status === "failed") {
+  await admin
+    .from("staff_leave_notification_outbox")
+    .update({ status: "pending", locked_at: null, last_error: null })
+    .eq("id", OUTBOX_ID);
+  record("Outbox reset to pending for single retry", true, `was ${outboxBefore.status}`);
+}
 
 const { data: settings } = await admin
   .from("notification_settings")
