@@ -176,11 +176,15 @@ async function main() {
     balanceA.error?.message
   );
 
-  const ent = balanceA.data?.[0]?.entitlement_days;
+  const balanceB = await rpc(staffB.client, "staff_leave_balance", {
+    target_profile: staffB.userId,
+    p_holiday_year: 2027,
+  });
+  const ent = balanceB.data?.[0]?.entitlement_days;
   record(
     "Full-time 2027 entitlement is 17 bookable days",
-    Number(ent) === 17,
-    `entitlement_days=${ent}`
+    !balanceB.error && Number(ent) === 17,
+    `staff B entitlement_days=${ent} (staff A=${balanceA.data?.[0]?.entitlement_days} — reference only)`
   );
 
   const cross = await rpc(staffA.client, "staff_leave_balance", {
