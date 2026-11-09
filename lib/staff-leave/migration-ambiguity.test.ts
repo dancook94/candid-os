@@ -17,47 +17,44 @@ const PHASE1_AMBIGUOUS_HELPERS = new URL(
   import.meta.url
 );
 
-test("reserved_pool_days keeps holiday_year argument and uses v_holiday_year locally", async () => {
+test("reserved_pool_days uses p_holiday_year in phase 1", async () => {
   const sql = await readFile(MAIN, "utf8");
   const block = sql.match(
     /CREATE OR REPLACE FUNCTION public\.staff_leave_reserved_pool_days\([\s\S]*?\$\$;/
   )?.[0];
 
   assert.ok(block);
-  assert.match(block, /holiday_year integer/);
-  assert.match(block, /v_holiday_year integer := holiday_year/);
-  assert.match(block, /bh\.holiday_year = v_holiday_year/);
-  assert.match(block, /cc\.holiday_year = v_holiday_year/);
-  assert.doesNotMatch(block, /bh\.holiday_year = holiday_year[^;]/);
+  assert.match(block, /p_holiday_year integer/);
+  assert.match(block, /bh\.holiday_year = p_holiday_year/);
+  assert.match(block, /cc\.holiday_year = p_holiday_year/);
+  assert.doesNotMatch(block, /bh\.holiday_year = holiday_year[^_;]/);
 });
 
-test("entitlement_days keeps holiday_year argument and uses v_holiday_year locally", async () => {
+test("entitlement_days uses p_holiday_year in phase 1", async () => {
   const sql = await readFile(MAIN, "utf8");
   const block = sql.match(
     /CREATE OR REPLACE FUNCTION public\.staff_leave_entitlement_days\([\s\S]*?\$\$;/
   )?.[0];
 
   assert.ok(block);
-  assert.match(block, /holiday_year integer/);
-  assert.match(block, /v_holiday_year integer := holiday_year/);
-  assert.match(block, /py\.holiday_year = v_holiday_year/);
-  assert.doesNotMatch(block, /py\.holiday_year = holiday_year/);
+  assert.match(block, /p_holiday_year integer/);
+  assert.match(block, /py\.holiday_year = p_holiday_year/);
+  assert.doesNotMatch(block, /py\.holiday_year = holiday_year[^_;]/);
 });
 
-test("hotfix does not rename function parameters", async () => {
+test("holiday year hotfix preserves p_holiday_year signatures", async () => {
   const sql = await readFile(HOTFIX, "utf8");
 
   assert.match(sql, /staff_leave_reserved_pool_days/);
   assert.match(sql, /staff_leave_entitlement_days/);
   assert.match(
     sql,
-    /staff_leave_reserved_pool_days\(\s*target_profile uuid,\s*holiday_year integer\s*\)/
+    /staff_leave_reserved_pool_days\(\s*target_profile uuid,\s*p_holiday_year integer\s*\)/
   );
   assert.match(
     sql,
-    /staff_leave_entitlement_days\(\s*target_profile uuid,\s*holiday_year integer/
+    /staff_leave_entitlement_days\(\s*target_profile uuid,\s*p_holiday_year integer/
   );
-  assert.doesNotMatch(sql, /p_holiday_year integer/);
   assert.doesNotMatch(sql, /DROP FUNCTION/i);
 });
 
