@@ -15,6 +15,12 @@ When `STAFF_LEAVE_GCAL_ENABLED=false`, the worker **does not claim or mutate** o
 
 Set `STAFF_LEAVE_GCAL_CRON_PAUSED=true` on **candid-os-test** during controlled E2E so the five-minute Vercel cron does not compete with scoped runs. Staff leave **notification** cron is unaffected.
 
+## Controlled reconciliation (scan / dry-run)
+
+`GET /api/cron/staff-leave-calendar-sync/reconcile-controlled?dryRun=1&includeGoogleRefresh=1`
+
+Test-only; same auth as controlled outbox cron (`CRON_SECRET` or calendar E2E bearer). Uses **service role** server-side — use this for automated E2E instead of the admin UI reconcile route (admin session cookies are not available to harness `fetch` with bearer-only calls).
+
 ## Controlled cron (single outbox)
 
 `GET /api/cron/staff-leave-calendar-sync/controlled?outboxId=<uuid>`

@@ -25,6 +25,20 @@ test("mock mappings are flagged for later Google resync", () => {
   );
 });
 
+test("reconcile enqueue migration defines partial uniques for pending reconcile rows", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const sql = await readFile(
+    new URL(
+      "../../../supabase/migrations/20270110159000_staff_leave_calendar_sync_worker.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+
+  assert.match(sql, /staff_leave_calendar_sync_outbox_reconcile_leave_pending_idx/);
+  assert.match(sql, /staff_leave_calendar_sync_outbox_reconcile_sickness_pending_idx/);
+});
+
 test("fingerprint changes when leave dates change", () => {
   const base = buildTeamLeaveCalendarEvent({
     request: {

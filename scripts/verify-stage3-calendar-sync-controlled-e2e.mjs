@@ -197,17 +197,28 @@ async function countMappings() {
   return count ?? 0;
 }
 
-async function reconcileDryRun() {
-  const res = await fetch(`${APP_BASE}/api/admin/leave/calendar-sync/reconcile`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${adminAccessToken}`,
-    },
-    body: JSON.stringify({ dryRun: true, includeGoogleRefresh: true }),
+async function reconcileControlledScan({ includeGoogleRefresh = false } = {}) {
+  const useE2eAuth = !cronSecret;
+  const bearer = cronSecret || (useE2eAuth ? e2eControlledBearer(serviceKey) : "");
+  if (!bearer) {
+    return { ok: false, status: 503, body: { error: "no_reconcile_credentials" } };
+  }
+  const qs = new URLSearchParams({
+    dryRun: "1",
+    ...(includeGoogleRefresh ? { includeGoogleRefresh: "1" } : {}),
+    ...(useE2eAuth ? { e2eAuth: "1" } : {}),
   });
+  const res = await fetch(
+    `${APP_BASE}/api/cron/staff-leave-calendar-sync/reconcile-controlled?${qs}`,
+    {
+      headers: {
+        Authorization: `Bearer ${bearer}`,
+        ...(useE2eAuth ? { "X-Staff-Leave-E2E": "1" } : {}),
+      },
+    }
+  );
   const body = await res.json().catch(() => ({}));
-  return { ok: res.ok, status: res.status, body };
+  return { ok: res.ok && body?.ok !== false, status: res.status, body };
 }
 
 async function main() {
@@ -229,7 +240,7 @@ async function main() {
     staffB.userId,
     { fn: "submit_staff_leave_request", args: { p_day_portion: "full", p_employee_note: runNote } },
     2027,
-    "2027-07-19"
+    "2027-08-16"
   );
   const r1 = s1.data.id;
   await adminClient.rpc("decide_staff_leave_request", {
@@ -278,7 +289,7 @@ async function main() {
 
   // —— 3. Grant additional paid → mock upsert ——
   let r3 = null;
-  for (const iso of isoWeekdayCandidates(2027, "2027-07-20")) {
+  for (const iso of isoWeekdayCandidates(2027, "2027-08-17")) {
     const grant = await adminClient.rpc("grant_staff_additional_paid_leave", {
       p_profile_id: staffA.userId,
       p_start_date: iso,
@@ -312,7 +323,7 @@ async function main() {
 
   // —— 4. Sickness → sickness_management only ——
   let sicknessId = null;
-  for (const iso of isoWeekdayCandidates(2027, "2027-07-21")) {
+  for (const iso of isoWeekdayCandidates(2027, "2027-08-18")) {
     const sick = await adminClient.rpc("record_staff_absence_sickness", {
       p_profile_id: staffB.userId,
       p_start_date: iso,
@@ -353,7 +364,7 @@ async function main() {
     staffB.userId,
     { fn: "submit_staff_leave_request", args: { p_day_portion: "am", p_employee_note: runNote } },
     2027,
-    "2027-07-22"
+    "2027-08-19"
   );
   await adminClient.rpc("decide_staff_leave_request", {
     p_request_id: am.data.id,
@@ -373,7 +384,7 @@ async function main() {
     staffB.userId,
     { fn: "submit_staff_leave_request", args: { p_day_portion: "pm", p_employee_note: runNote } },
     2027,
-    "2027-07-23"
+    "2027-08-20"
   );
   await adminClient.rpc("decide_staff_leave_request", {
     p_request_id: pm.data.id,
@@ -420,7 +431,7 @@ async function main() {
     staffB.userId,
     { fn: "submit_staff_leave_request", args: { p_day_portion: "full", p_employee_note: runNote } },
     2027,
-    "2027-07-26"
+    "2027-08-23"
   );
   await adminClient.rpc("decide_staff_leave_request", {
     p_request_id: s7.data.id,
@@ -459,7 +470,7 @@ async function main() {
       .update({ content_fingerprint: "stale-fingerprint-stage3-e2e" })
       .eq("id", m3.id);
   }
-  const recon = await reconcileDryRun();
+  const recon = await reconcileControlledScan({ includeGoogleRefresh: true });
   const findings = recon.body?.scan?.findings ?? [];
   const outdated = findings.some((f) => f.kind === "outdated_team_leave_mapping" && f.entityId === r3);
   record(
@@ -475,7 +486,7 @@ async function main() {
     staffB.userId,
     { fn: "submit_staff_leave_request", args: { p_day_portion: "full", p_employee_note: runNote } },
     2027,
-    "2027-07-27"
+    "2027-08-24"
   );
   await adminClient.rpc("decide_staff_leave_request", {
     p_request_id: s9.data.id,
@@ -492,19 +503,27 @@ async function main() {
     .eq("leave_request_id", s9.data.id)
     .eq("status", "pending");
   const ids9 = (pending9.data ?? []).map((r) => r.id);
+  const entityIds9 = new Set(ids9);
   const claimA = await adminSvc.rpc("staff_leave_calendar_claim_outbox_batch", {
     p_limit: 2,
     p_stale_before: new Date().toISOString(),
   });
-  const claimedSet = new Set(claimA.data ?? []);
-  const bothClaimed =
-    ids9.length >= 2 && ids9.every((id) => claimedSet.has(id)) && claimedSet.size >= 2;
+  const claimed = claimA.data ?? [];
+  const claimedFromScenario = claimed.filter((id) => entityIds9.has(id));
   record(
     9,
     "Concurrent processing guard on same entity",
-    Boolean(!bothClaimed && (claimA.data?.length ?? 0) <= 1),
-    `pending=${ids9.length} claimed=${claimA.data?.length ?? 0}`
+    Boolean(
+      ids9.length >= 2 && claimA.error == null && claimedFromScenario.length <= 1
+    ),
+    `pending=${ids9.length} claimed_from_entity=${claimedFromScenario.length} (requires migration 162000)`
   );
+  if (claimedFromScenario.length > 0) {
+    await adminSvc
+      .from("staff_leave_calendar_sync_outbox")
+      .update({ status: "pending", locked_at: null })
+      .in("id", claimedFromScenario);
+  }
 
   // —— 10. Mock → Google transition detection ——
   const mockFinding = findings.some((f) => f.kind === "mock_needs_google_sync");

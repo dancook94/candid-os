@@ -13,6 +13,11 @@ const WORKER_MIGRATION = new URL(
   import.meta.url
 );
 
+const CLAIM_ONE_PER_ENTITY_MIGRATION = new URL(
+  "../../../supabase/migrations/20270110162000_staff_leave_calendar_claim_one_per_entity.sql",
+  import.meta.url
+);
+
 test("worker migration defines atomic claim RPC and reconcile source kinds", async () => {
   const sql = await readFile(WORKER_MIGRATION, "utf8");
 
@@ -34,6 +39,15 @@ test("claim filter supports stale processing reclaim", () => {
 test("stale processing locks are reclaimable", () => {
   const now = Date.parse("2026-01-01T12:00:00.000Z");
   assert.equal(isStaleStaffLeaveCalendarOutboxLock("2026-01-01T11:54:00.000Z", now), true);
+});
+
+test("162000 claim migration allows only one row per entity per batch", async () => {
+  const sql = await readFile(CLAIM_ONE_PER_ENTITY_MIGRATION, "utf8");
+
+  assert.match(sql, /ROW_NUMBER\(\) OVER/);
+  assert.match(sql, /PARTITION BY COALESCE\(e\.leave_request_id, e\.sickness_id\)/);
+  assert.match(sql, /entity_row = 1/);
+  assert.match(sql, /FOR UPDATE OF o SKIP LOCKED/);
 });
 
 test("processor orders sibling rows chronologically", () => {
