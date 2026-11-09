@@ -9,6 +9,8 @@ const MIGRATION = new URL(
 
 const PUBLIC_RPCS = [
   "submit_staff_leave_request",
+  "submit_staff_leave_request_for_profile",
+  "preview_staff_leave_request_days",
   "decide_staff_leave_request",
   "cancel_staff_leave_request",
   "set_staff_working_pattern",
@@ -103,10 +105,18 @@ test("only expected RPCs are granted to authenticated", async () => {
     ),
     "utf8"
   );
+  const adminBookingSql = await readFile(
+    new URL(
+      "../../supabase/migrations/20270110154000_staff_leave_admin_booking.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
   const grants = [
     ...sql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)/g),
     ...cancelSql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)/g),
     ...patternsSql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)/g),
+    ...adminBookingSql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)/g),
   ].map((m) => m[1]);
 
   for (const rpc of PUBLIC_RPCS) {
@@ -148,6 +158,17 @@ test("mutation RPCs enforce role checks in SQL", async () => {
   );
 
   assert.match(sql, /submit_staff_leave_request[\s\S]*is_approved_staff\(\)/);
+  const adminBookingSql = await readFile(
+    new URL(
+      "../../supabase/migrations/20270110154000_staff_leave_admin_booking.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  assert.match(
+    adminBookingSql,
+    /submit_staff_leave_request_for_profile[\s\S]*is_approved_candid_admin\(\)/
+  );
   assert.match(sql, /decide_staff_leave_request[\s\S]*is_approved_candid_admin\(\)/);
   assert.match(cancelSql, /cancel_staff_leave_request[\s\S]*is_approved_staff\(\)/);
   assert.match(cancelSql, /cancel_staff_leave_request[\s\S]*is_approved_candid_admin\(\)/);

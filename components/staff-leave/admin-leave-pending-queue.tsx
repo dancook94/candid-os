@@ -19,8 +19,10 @@ function formatRange(request: LeaveRequestWithProfile) {
 
 export function AdminLeavePendingQueue({
   requests,
+  submittedBy = {},
 }: {
   requests: LeaveRequestWithProfile[];
+  submittedBy?: Record<string, string>;
 }) {
   const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -84,6 +86,11 @@ export function AdminLeavePendingQueue({
             </p>
             {request.employee_note ? (
               <p className="text-sm text-muted-foreground">{request.employee_note}</p>
+            ) : null}
+            {submittedBy[request.id] ? (
+              <p className="text-sm text-muted-foreground">
+                Submitted by {submittedBy[request.id]}
+              </p>
             ) : null}
             <LeaveStatusBadge status={request.status} />
           </div>

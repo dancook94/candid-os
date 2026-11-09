@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/app-shell";
+import { AdminLeaveBooking } from "@/components/staff-leave/admin-leave-booking";
 import { AdminEmployeeLeaveSettings } from "@/components/staff-leave/admin-employee-leave-settings";
 import { AdminLeavePendingQueue } from "@/components/staff-leave/admin-leave-pending-queue";
 import { LeaveRequestsHistory } from "@/components/staff-leave/leave-requests-history";
@@ -39,8 +40,10 @@ import {
 import {
   fetchApprovedTeamLeave,
   fetchEntitlementAdjustment,
+  fetchLeaveBalance,
   fetchLeaveReferenceData,
   fetchLeaveRequestsForAdmin,
+  fetchSubmittedByLabelsForRequests,
   fetchStaffLeaveBalances,
   fetchStaffMembersForLeaveAdmin,
   fetchWhoIsOffToday,
@@ -86,6 +89,7 @@ export default async function AdminLeavePage({ searchParams }: PageProps) {
     membersResult,
     whoOff,
     allRequests,
+    viewerBalanceResult,
   ] = await Promise.all([
     fetchLeaveRequestsForAdmin(supabase, { holidayYear, status: "pending" }),
     fetchApprovedTeamLeave(supabase, holidayYear),
@@ -93,9 +97,17 @@ export default async function AdminLeavePage({ searchParams }: PageProps) {
     fetchStaffMembersForLeaveAdmin(supabase),
     fetchWhoIsOffToday(supabase, todayIso),
     fetchLeaveRequestsForAdmin(supabase, { holidayYear }),
+    fetchLeaveBalance(supabase, user!.id, holidayYear),
   ]);
 
   const members = membersResult.members;
+  const pendingSubmittedBy = await fetchSubmittedByLabelsForRequests(
+    supabase,
+    pendingResult.requests.map((request) => ({
+      id: request.id,
+      profile_id: request.profile_id,
+    }))
+  );
   const memberIds = members.map((member) => member.id);
   const { rows: balanceRows } = await fetchStaffLeaveBalances(
     supabase,
@@ -201,6 +213,7 @@ export default async function AdminLeavePage({ searchParams }: PageProps) {
   const cells = buildMonthGrid(calendarYear, calendarMonth, markers);
 
   const shellProps = await buildAdminAppShellProps(supabase, shellProfile!);
+  const viewerBalance = viewerBalanceResult.balance;
 
   const prevHref = buildLeaveCalendarHref(ADMIN_LEAVE_PATH, nav.prev.year, nav.prev.month);
   const nextHref = buildLeaveCalendarHref(ADMIN_LEAVE_PATH, nav.next.year, nav.next.month);
@@ -226,6 +239,23 @@ export default async function AdminLeavePage({ searchParams }: PageProps) {
           </Link>
         </div>
 
+        <AdminLeaveBooking
+          holidayYear={holidayYear}
+          viewerProfileId={user!.id}
+          viewerName={shellProfile?.full_name ?? null}
+          members={members}
+          initialViewerBalance={
+            viewerBalance
+              ? {
+                  entitlement_days: Number(viewerBalance.entitlement_days),
+                  approved_days: Number(viewerBalance.approved_days),
+                  pending_days: Number(viewerBalance.pending_days),
+                  remaining_days: Number(viewerBalance.remaining_days),
+                }
+              : null
+          }
+        />
+
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <StatCard
             label="Pending approvals"
@@ -250,7 +280,10 @@ export default async function AdminLeavePage({ searchParams }: PageProps) {
             <CardDescription>Approve or decline with an optional note.</CardDescription>
           </CardHeader>
           <CardContent className="p-0">
-            <AdminLeavePendingQueue requests={pendingResult.requests} />
+            <AdminLeavePendingQueue
+              requests={pendingResult.requests}
+              submittedBy={pendingSubmittedBy}
+            />
           </CardContent>
         </Card>
 
