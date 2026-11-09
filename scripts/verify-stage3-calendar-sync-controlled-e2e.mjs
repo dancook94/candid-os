@@ -228,8 +228,8 @@ async function main() {
     staffB.client,
     staffB.userId,
     { fn: "submit_staff_leave_request", args: { p_day_portion: "full", p_employee_note: runNote } },
-    2028,
-    "2028-09-04"
+    2027,
+    "2027-06-07"
   );
   const r1 = s1.data.id;
   await adminClient.rpc("decide_staff_leave_request", {
@@ -278,7 +278,7 @@ async function main() {
 
   // —— 3. Grant additional paid → mock upsert ——
   let r3 = null;
-  for (const iso of isoWeekdayCandidates(2028, "2028-09-11")) {
+  for (const iso of isoWeekdayCandidates(2027, "2027-06-14")) {
     const grant = await adminClient.rpc("grant_staff_additional_paid_leave", {
       p_profile_id: staffA.userId,
       p_start_date: iso,
@@ -312,7 +312,7 @@ async function main() {
 
   // —— 4. Sickness → sickness_management only ——
   let sicknessId = null;
-  for (const iso of isoWeekdayCandidates(2028, "2028-09-18")) {
+  for (const iso of isoWeekdayCandidates(2027, "2027-06-15")) {
     const sick = await adminClient.rpc("record_staff_absence_sickness", {
       p_profile_id: staffB.userId,
       p_start_date: iso,
@@ -352,8 +352,8 @@ async function main() {
     staffB.client,
     staffB.userId,
     { fn: "submit_staff_leave_request", args: { p_day_portion: "am", p_employee_note: runNote } },
-    2028,
-    "2028-09-25"
+    2027,
+    "2027-06-08"
   );
   await adminClient.rpc("decide_staff_leave_request", {
     p_request_id: am.data.id,
@@ -372,8 +372,8 @@ async function main() {
     staffB.client,
     staffB.userId,
     { fn: "submit_staff_leave_request", args: { p_day_portion: "pm", p_employee_note: runNote } },
-    2028,
-    "2028-10-02"
+    2027,
+    "2027-06-09"
   );
   await adminClient.rpc("decide_staff_leave_request", {
     p_request_id: pm.data.id,
@@ -419,8 +419,8 @@ async function main() {
     staffB.client,
     staffB.userId,
     { fn: "submit_staff_leave_request", args: { p_day_portion: "full", p_employee_note: runNote } },
-    2028,
-    "2028-10-09"
+    2027,
+    "2027-06-16"
   );
   await adminClient.rpc("decide_staff_leave_request", {
     p_request_id: s7.data.id,
@@ -474,8 +474,8 @@ async function main() {
     staffB.client,
     staffB.userId,
     { fn: "submit_staff_leave_request", args: { p_day_portion: "full", p_employee_note: runNote } },
-    2028,
-    "2028-10-16"
+    2027,
+    "2027-06-17"
   );
   await adminClient.rpc("decide_staff_leave_request", {
     p_request_id: s9.data.id,
