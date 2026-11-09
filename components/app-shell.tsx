@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Building2,
   CheckSquare,
+  CalendarDays,
   ClipboardList,
   Factory,
   FileText,
@@ -46,7 +47,9 @@ type AppShellProps = {
   showCrmNav?: boolean;
   showPurchasingNav?: boolean;
   showGlobalSearch?: boolean;
+  showStaffLeaveNav?: boolean;
   updatesUnreadCount?: number;
+  leavePendingCount?: number;
   userName?: string;
   companyName?: string;
   companyLogoUrl?: string | null;
@@ -139,6 +142,11 @@ const adminLinks: NavLink[] = [
     icon: ClipboardList,
   },
   {
+    href: "/admin/leave",
+    label: "Holiday & absence",
+    icon: CalendarDays,
+  },
+  {
     href: "/admin/settings",
     label: "Settings",
     icon: Settings,
@@ -190,12 +198,19 @@ const purchasingLink: NavLink = {
   icon: ShoppingBag,
 };
 
+const staffLeaveLink: NavLink = {
+  href: "/staff/leave",
+  label: "Holiday & absence",
+  icon: CalendarDays,
+};
+
 const staffLinks: NavLink[] = [
   {
     href: "/staff",
     label: "Workspace",
     icon: Gauge,
   },
+  staffLeaveLink,
   updatesLink,
 ];
 
@@ -274,6 +289,15 @@ function NavLinksList({
   );
 }
 
+function CandidOsWordmark({ className }: { className: string }) {
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <p className={className}>Candid OS</p>
+      <TestEnvironmentBadge />
+    </div>
+  );
+}
+
 function SidebarAccountFooter({
   displayName,
   displaySubtitle,
@@ -342,8 +366,10 @@ export function AppShell({
   showStaffNav = false,
   showCrmNav = false,
   showPurchasingNav = false,
+  showStaffLeaveNav = false,
   showGlobalSearch,
   updatesUnreadCount = 0,
+  leavePendingCount = 0,
   userName,
   companyName,
   accountStatusSubtitle,
@@ -374,17 +400,22 @@ export function AppShell({
       : userRole === "staff"
         ? [
             ...staffLinks.slice(0, 1),
+            ...(showStaffLeaveNav ? [staffLeaveLink] : []),
             ...(showPurchasingNav ? [purchasingLink] : []),
-            ...staffLinks.slice(1),
+            ...staffLinks.slice(2),
             ...(showCrmNav ? crmLinks : []),
           ]
         : customerLinks;
 
-  const linksWithBadges = links.map((link) =>
-    link.href === "/updates" && updatesUnreadCount > 0
-      ? { ...link, badgeCount: updatesUnreadCount }
-      : link
-  );
+  const linksWithBadges = links.map((link) => {
+    if (link.href === "/updates" && updatesUnreadCount > 0) {
+      return { ...link, badgeCount: updatesUnreadCount };
+    }
+    if (link.href === "/admin/leave" && leavePendingCount > 0) {
+      return { ...link, badgeCount: leavePendingCount };
+    }
+    return link;
+  });
 
   assertUniqueNavHrefs(
     linksWithBadges,
@@ -463,10 +494,7 @@ export function AppShell({
             />
 
             <div className="min-w-0">
-              <p className="flex min-w-0 items-center gap-2 truncate text-sm font-semibold tracking-tight text-foreground">
-                Candid OS
-                <TestEnvironmentBadge />
-              </p>
+              <CandidOsWordmark className="truncate text-sm font-semibold tracking-tight text-foreground" />
               <p className="truncate text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                 {portalLabel}
               </p>
@@ -525,10 +553,7 @@ export function AppShell({
                 />
 
                 <div className="min-w-0">
-                  <p className="flex min-w-0 items-center gap-2 truncate text-sm font-semibold tracking-tight text-foreground">
-                    Candid OS
-                    <TestEnvironmentBadge />
-                  </p>
+                  <CandidOsWordmark className="truncate text-sm font-semibold tracking-tight text-foreground" />
                   <p className="truncate text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                     {portalLabel}
                   </p>
@@ -587,10 +612,7 @@ export function AppShell({
               className="h-auto w-20 shrink-0"
             />
             <div className="min-w-0 flex-1">
-              <p className="flex min-w-0 items-center gap-2 truncate text-sm font-semibold text-foreground">
-                Candid OS
-                <TestEnvironmentBadge />
-              </p>
+              <CandidOsWordmark className="truncate text-sm font-semibold text-foreground" />
               <p className="truncate text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
                 {portalLabel}
               </p>

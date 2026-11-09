@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadCanIssuePurchaseOrders } from "@/lib/purchasing/access";
 import { loadStaffAvatarSignedUrl } from "@/lib/staff-avatar-server";
 import { isAdminRole, isCrmRole, isSuperAdminRole } from "@/lib/staff-roles";
+import { fetchPendingLeaveCount } from "@/lib/staff-leave/queries";
 import { fetchUnreadProductUpdateCount } from "@/lib/updates/queries";
 
 export type AdminShellProfile = {
@@ -64,7 +65,7 @@ export async function buildAdminAppShellProps(
   options?: AppShellPropsOptions
 ) {
   const resolvedUserId = await resolveUserId(supabase, options?.userId);
-  const [updatesUnreadCount, showPurchasingNav, userAvatarUrl] =
+  const [updatesUnreadCount, leavePendingCount, showPurchasingNav, userAvatarUrl] =
     await Promise.all([
       resolvedUserId
         ? fetchUnreadProductUpdateCount(
@@ -72,6 +73,9 @@ export async function buildAdminAppShellProps(
             resolvedUserId,
             profile.user_role
           ).then((result) => result.count)
+        : Promise.resolve(0),
+      isAdminRole(profile.user_role)
+        ? fetchPendingLeaveCount(supabase).then((result) => result.count)
         : Promise.resolve(0),
       resolveShowPurchasingNav(supabase, options),
       resolveAvatarSignedUrl(supabase, profile, options?.avatarSignedUrl),
@@ -85,6 +89,7 @@ export async function buildAdminAppShellProps(
     userName: profile.full_name || "Candid administrator",
     companyName: "Candid Creative",
     updatesUnreadCount,
+    leavePendingCount,
     userAvatarUrl,
   };
 }
@@ -111,6 +116,7 @@ export async function buildStaffAppShellProps(
   return {
     userRole: "staff" as const,
     showPurchasingNav,
+    showStaffLeaveNav: true,
     userName: profile.full_name || "Candid team member",
     companyName: "Candid Creative",
     updatesUnreadCount,

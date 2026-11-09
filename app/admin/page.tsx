@@ -24,6 +24,9 @@ import { requireAdminPageAccess } from "@/lib/admin-page-access";
 import { buildAdminAppShellProps } from "@/lib/admin-shell-props";
 import { fetchAdminDashboardCrm } from "@/lib/crm/admin-dashboard";
 import { canApproveCustomers } from "@/lib/admin-auth";
+import { canDecideLeaveRequests } from "@/lib/staff-leave/auth";
+import { fetchPendingLeaveCount } from "@/lib/staff-leave/queries";
+import { ADMIN_LEAVE_PATH } from "@/lib/staff-leave/page-access";
 import { fetchApprovedCustomerPortalProfiles } from "@/lib/admin/customer-portal-profile";
 import { isCrmRole } from "@/lib/staff-roles";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -44,7 +47,13 @@ export default async function AdminPage() {
   } = await supabase.auth.getUser();
   const currentUserId = user?.id ?? "";
 
-  const [quoteMetrics, jobMetrics, crmDashboard, { data: pendingUsers }, { data: companies }] =
+  const showLeaveApprovals = canDecideLeaveRequests({
+    id: currentUserId,
+    user_role: profile.user_role,
+    account_status: profile.account_status,
+  });
+
+  const [quoteMetrics, jobMetrics, crmDashboard, { data: pendingUsers }, { data: companies }, leavePending] =
     await Promise.all([
       fetchAdminQuoteMetrics(supabase),
       fetchAdminJobMetrics(supabase),
@@ -63,6 +72,9 @@ export default async function AdminPage() {
         .select("id, company_name")
         .eq("is_active", true)
         .order("company_name"),
+      showLeaveApprovals
+        ? fetchPendingLeaveCount(supabase)
+        : Promise.resolve({ count: 0, error: null }),
     ]);
 
   const shellProps = await buildAdminAppShellProps(supabase, profile);
@@ -140,6 +152,15 @@ export default async function AdminPage() {
             href="/admin/quotes?status=declined"
             accentClassName="bg-red-400/45"
           />
+
+          {showLeaveApprovals ? (
+            <StatCard
+              label="Pending holiday approvals"
+              value={String(leavePending.count)}
+              description="Awaiting management decision"
+              href={ADMIN_LEAVE_PATH}
+            />
+          ) : null}
         </div>
 
         {showCrmOverview && crmDashboard ? (

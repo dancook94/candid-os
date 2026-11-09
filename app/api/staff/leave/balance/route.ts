@@ -5,12 +5,12 @@ import {
   loadStaffLeaveAuthProfile,
 } from "@/lib/staff-leave/auth";
 import { STAFF_LEAVE_FIRST_POLICY_YEAR } from "@/lib/staff-leave/types";
-import { createClient } from "@/lib/supabase/server";
+import { createLeaveApiClient } from "@/lib/supabase/leave-api-client";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const supabase = await createClient();
+  const supabase = await createLeaveApiClient(request);
   const auth = await loadStaffLeaveAuthProfile(supabase);
 
   if (!auth.ok) {

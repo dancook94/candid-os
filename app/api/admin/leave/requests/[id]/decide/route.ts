@@ -4,7 +4,7 @@ import {
   canDecideLeaveRequests,
   loadStaffLeaveAuthProfile,
 } from "@/lib/staff-leave/auth";
-import { createClient } from "@/lib/supabase/server";
+import { createLeaveApiClient } from "@/lib/supabase/leave-api-client";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +19,7 @@ type DecideBody = {
 
 export async function POST(request: Request, context: RouteContext) {
   const { id } = await context.params;
-  const supabase = await createClient();
+  const supabase = await createLeaveApiClient(request);
   const auth = await loadStaffLeaveAuthProfile(supabase);
 
   if (!auth.ok) {
