@@ -51,15 +51,26 @@ export const INTERNAL_NOTIFICATION_TYPES = [
   "additional_billable_work",
   "job_ready_for_invoice",
   "invoice_xero_error",
+  "internal_staff_leave_annual_request",
+  "internal_staff_leave_additional_paid_request",
+  "internal_staff_leave_cancelled_approved",
+] as const;
+
+export const STAFF_NOTIFICATION_TYPES = [
+  "staff_leave_request_approved",
+  "staff_leave_request_declined",
+  "staff_leave_additional_paid_granted",
 ] as const;
 
 export const NOTIFICATION_TYPES = [
   ...CUSTOMER_NOTIFICATION_TYPES,
   ...INTERNAL_NOTIFICATION_TYPES,
+  ...STAFF_NOTIFICATION_TYPES,
 ] as const;
 
 export type CustomerNotificationType = (typeof CUSTOMER_NOTIFICATION_TYPES)[number];
 export type InternalNotificationType = (typeof INTERNAL_NOTIFICATION_TYPES)[number];
+export type StaffNotificationType = (typeof STAFF_NOTIFICATION_TYPES)[number];
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
 export const INTERNAL_RECIPIENT_GROUPS = [
@@ -68,6 +79,7 @@ export const INTERNAL_RECIPIENT_GROUPS = [
   "production",
   "accounts",
   "admin",
+  "staff_leave_management",
 ] as const;
 
 export type InternalRecipientGroup = (typeof INTERNAL_RECIPIENT_GROUPS)[number];
@@ -89,6 +101,9 @@ export const DEFAULT_INTERNAL_ROUTING: Record<
   additional_billable_work: ["accounts"],
   job_ready_for_invoice: ["accounts"],
   invoice_xero_error: ["accounts", "admin"],
+  internal_staff_leave_annual_request: ["staff_leave_management"],
+  internal_staff_leave_additional_paid_request: ["staff_leave_management"],
+  internal_staff_leave_cancelled_approved: ["staff_leave_management"],
 };
 
 /** Maps customer notification types to contact preference keys (Phase 1). */

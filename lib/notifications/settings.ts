@@ -3,14 +3,17 @@ import {
   DEFAULT_INTERNAL_ROUTING,
   INTERNAL_NOTIFICATION_TYPES,
   INTERNAL_RECIPIENT_GROUPS,
+  STAFF_NOTIFICATION_TYPES,
   type CustomerNotificationType,
   type InternalNotificationType,
   type InternalRecipientGroup,
+  type StaffNotificationType,
 } from "@/lib/notifications/notification-types";
 
 export type NotificationSettingsPayload = {
   customer: Record<CustomerNotificationType, boolean>;
   internal: Record<InternalNotificationType, boolean>;
+  staff: Record<StaffNotificationType, boolean>;
   recipientGroups: Record<InternalRecipientGroup, string[]>;
   routing: Record<InternalNotificationType, InternalRecipientGroup[]>;
 };
@@ -53,6 +56,17 @@ function defaultInternalToggles(): Record<InternalNotificationType, boolean> {
     additional_billable_work: true,
     job_ready_for_invoice: true,
     invoice_xero_error: true,
+    internal_staff_leave_annual_request: true,
+    internal_staff_leave_additional_paid_request: true,
+    internal_staff_leave_cancelled_approved: true,
+  };
+}
+
+function defaultStaffToggles(): Record<StaffNotificationType, boolean> {
+  return {
+    staff_leave_request_approved: true,
+    staff_leave_request_declined: true,
+    staff_leave_additional_paid_granted: true,
   };
 }
 
@@ -63,6 +77,7 @@ function defaultRecipientGroups(): Record<InternalRecipientGroup, string[]> {
     production: [],
     accounts: [],
     admin: [],
+    staff_leave_management: [],
   };
 }
 
@@ -70,6 +85,7 @@ export function getDefaultNotificationSettings(): NotificationSettingsPayload {
   return {
     customer: defaultCustomerToggles(),
     internal: defaultInternalToggles(),
+    staff: defaultStaffToggles(),
     recipientGroups: defaultRecipientGroups(),
     routing: { ...DEFAULT_INTERNAL_ROUTING },
   };
@@ -145,9 +161,15 @@ export function normalizeNotificationSettings(
     internal.proof_approved_internal = Boolean(record.internal.proof_approved);
   }
 
+  const staff = {
+    ...defaults.staff,
+    ...(isRecord(record.staff) ? (record.staff as typeof defaults.staff) : {}),
+  };
+
   return {
     customer,
     internal,
+    staff,
     recipientGroups: {
       ...defaults.recipientGroups,
       ...normalizeRecipientGroups(record.recipientGroups),
@@ -195,6 +217,13 @@ export function isInternalNotificationEnabled(
   type: InternalNotificationType
 ) {
   return settings.internal[type] !== false;
+}
+
+export function isStaffNotificationEnabled(
+  settings: NotificationSettingsPayload,
+  type: StaffNotificationType
+) {
+  return settings.staff[type] !== false;
 }
 
 export function resolveInternalRecipientEmails(

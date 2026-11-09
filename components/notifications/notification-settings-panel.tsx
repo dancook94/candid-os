@@ -34,6 +34,10 @@ type NotificationSettingsPanelProps = {
 };
 
 function groupLabel(group: InternalRecipientGroup) {
+  if (group === "staff_leave_management") {
+    return "Staff leave management";
+  }
+
   return group.charAt(0).toUpperCase() + group.slice(1);
 }
 

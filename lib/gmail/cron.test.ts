@@ -159,9 +159,13 @@ test("the cron schedule is every 15 minutes and the worker does not start a sync
   const worker = await readFile(new URL("./cron.ts", import.meta.url), "utf8");
   const schedule = JSON.parse(config) as { crons: Array<{ path: string; schedule: string }> };
 
-  assert.deepEqual(schedule.crons, [
-    { path: "/api/cron/gmail-discovery", schedule: "*/15 * * * *" },
-  ]);
+  const gmailCron = schedule.crons.find((cron) => cron.path === "/api/cron/gmail-discovery");
+  assert.deepEqual(gmailCron, { path: "/api/cron/gmail-discovery", schedule: "*/15 * * * *" });
+  const staffLeaveCron = schedule.crons.find(
+    (cron) => cron.path === "/api/cron/staff-leave-notifications"
+  );
+  assert.ok(staffLeaveCron, "staff leave notifications cron should be configured");
+  assert.match(staffLeaveCron!.schedule, /^\*/);
   assert.doesNotMatch(worker, /startGmailDiscovery/);
   assert.doesNotMatch(worker, /from\("(supplier_invoices|material_prices|materials|supplier_products)"\)/);
 });

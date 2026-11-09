@@ -4,6 +4,7 @@ import {
   canDecideLeaveRequests,
   loadStaffLeaveAuthProfile,
 } from "@/lib/staff-leave/auth";
+import { flushStaffLeaveNotifications } from "@/lib/staff-leave/notifications/flush";
 import { createLeaveApiClient } from "@/lib/supabase/leave-api-client";
 
 export const dynamic = "force-dynamic";
@@ -54,6 +55,8 @@ export async function POST(request: Request, context: RouteContext) {
     const status = /not awaiting approval|already decided/i.test(error.message) ? 409 : 400;
     return NextResponse.json({ error: error.message, code: error.code }, { status });
   }
+
+  await flushStaffLeaveNotifications({ requestId: (data as { id: string }).id });
 
   return NextResponse.json({ request: data });
 }

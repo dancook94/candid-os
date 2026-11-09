@@ -16,12 +16,14 @@ import {
   audienceForType,
   isCustomerType,
   isInternalType,
+  isStaffType,
   resolveCustomerRecipient,
   resolveInternalRecipients,
 } from "@/lib/notifications/recipient-resolution";
 import {
   isCustomerNotificationEnabled,
   isInternalNotificationEnabled,
+  isStaffNotificationEnabled,
   resolveInternalRecipientEmails,
 } from "@/lib/notifications/settings";
 import { loadNotificationSettings } from "@/lib/notifications/settings-store";
@@ -504,6 +506,53 @@ export async function sendNotification(
         input,
         recipient.email
       );
+
+      return {
+        ok: result.status !== "failed",
+        notificationIds: [result.notificationId],
+        results: [result],
+        duplicate: result.duplicate,
+        skippedReason: result.status === "failed" ? result.errorCode ?? "resend_failed" : null,
+        failureReason: result.status === "failed" ? result.errorCode ?? "resend_failed" : null,
+        adminMessage:
+          result.status === "failed"
+            ? result.error ?? getSkippedReasonLabel(result.errorCode ?? "resend_failed")
+            : null,
+      };
+    }
+
+    if (isStaffType(input.type)) {
+      if (!isStaffNotificationEnabled(settings, input.type)) {
+        const notificationId = await recordNotificationIssue(adminClient, input, {
+          status: "suppressed",
+          reason: "suppressed_by_admin_setting",
+        });
+
+        return buildSkippedResult({
+          ok: true,
+          skippedReason: "suppressed_by_admin_setting",
+          notificationIds: notificationId ? [notificationId] : [],
+        });
+      }
+
+      const recipient = await resolveCustomerRecipient(adminClient, {
+        profileId: input.profileId,
+      });
+
+      if (!recipient) {
+        const notificationId = await recordNotificationIssue(adminClient, input, {
+          status: "failed",
+          reason: "missing_recipient",
+        });
+
+        return buildSkippedResult({
+          ok: false,
+          skippedReason: "missing_recipient",
+          notificationIds: notificationId ? [notificationId] : [],
+        });
+      }
+
+      const result = await deliverEmailNotification(adminClient, input, recipient.email);
 
       return {
         ok: result.status !== "failed",

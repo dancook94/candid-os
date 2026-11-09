@@ -6,6 +6,7 @@ import {
 } from "@/lib/staff-leave/auth";
 import { fetchLeaveRequestsForAdmin } from "@/lib/staff-leave/queries";
 import { STAFF_LEAVE_FIRST_POLICY_YEAR } from "@/lib/staff-leave/types";
+import { flushStaffLeaveNotifications } from "@/lib/staff-leave/notifications/flush";
 import { createLeaveApiClient } from "@/lib/supabase/leave-api-client";
 
 export const dynamic = "force-dynamic";
@@ -101,6 +102,8 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+
+  await flushStaffLeaveNotifications({ requestId: (data as { id: string }).id });
 
   return NextResponse.json({ request: data });
 }

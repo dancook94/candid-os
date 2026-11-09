@@ -6,10 +6,12 @@ import {
 } from "@/lib/notifications/profile-recipient";
 import {
   INTERNAL_NOTIFICATION_TYPES,
+  STAFF_NOTIFICATION_TYPES,
   type CustomerNotificationType,
   type InternalNotificationType,
   type NotificationAudience,
   type NotificationType,
+  type StaffNotificationType,
 } from "@/lib/notifications/notification-types";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -93,6 +95,10 @@ export function audienceForType(type: NotificationType): NotificationAudience {
     return "internal";
   }
 
+  if ((STAFF_NOTIFICATION_TYPES as readonly string[]).includes(type)) {
+    return "staff";
+  }
+
   return "customer";
 }
 
@@ -106,4 +112,8 @@ export function isInternalType(
   type: NotificationType
 ): type is InternalNotificationType {
   return audienceForType(type) === "internal";
+}
+
+export function isStaffType(type: NotificationType): type is StaffNotificationType {
+  return audienceForType(type) === "staff";
 }

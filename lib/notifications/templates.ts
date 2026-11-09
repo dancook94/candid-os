@@ -680,6 +680,99 @@ export function renderNotificationEmail(
         }),
       };
 
+    case "internal_staff_leave_annual_request":
+      return {
+        subject: `Annual leave request — ${String(metadata.employeeName ?? "Staff")}`,
+        html: renderEmailShell({
+          headline: "New annual leave request",
+          statusLabel: String(metadata.statusLabel ?? "Pending approval"),
+          bodyParagraphs: [
+            `${String(metadata.employeeName ?? "A team member")} submitted an annual leave request.`,
+          ],
+          detailRows: staffLeaveDetailRows(metadata),
+          ctaLabel: "Review in Candid OS",
+          ctaHref: buildAbsoluteUrl(String(metadata.adminLeaveUrl ?? "/admin/leave")),
+        }),
+      };
+
+    case "internal_staff_leave_additional_paid_request":
+      return {
+        subject: `Additional paid leave request — ${String(metadata.employeeName ?? "Staff")}`,
+        html: renderEmailShell({
+          headline: "New additional paid leave request",
+          statusLabel: String(metadata.statusLabel ?? "Pending approval"),
+          bodyParagraphs: [
+            `${String(metadata.employeeName ?? "A team member")} submitted an additional paid leave request.`,
+          ],
+          detailRows: staffLeaveDetailRows(metadata),
+          ctaLabel: "Review in Candid OS",
+          ctaHref: buildAbsoluteUrl(String(metadata.adminLeaveUrl ?? "/admin/leave")),
+        }),
+      };
+
+    case "internal_staff_leave_cancelled_approved":
+      return {
+        subject: `Approved leave cancelled — ${String(metadata.employeeName ?? "Staff")}`,
+        html: renderEmailShell({
+          headline: "Approved leave cancelled",
+          statusLabel: String(metadata.statusLabel ?? "Cancelled"),
+          bodyParagraphs: [
+            `Previously approved leave for ${String(metadata.employeeName ?? "a team member")} was cancelled.`,
+          ],
+          detailRows: staffLeaveDetailRows(metadata),
+          ctaLabel: "View leave in Candid OS",
+          ctaHref: buildAbsoluteUrl(String(metadata.adminLeaveUrl ?? "/admin/leave")),
+        }),
+      };
+
+    case "staff_leave_request_approved":
+      return {
+        subject: "Your leave request was approved",
+        html: renderEmailShell({
+          headline: "Leave approved",
+          statusLabel: String(metadata.statusLabel ?? "Approved"),
+          bodyParagraphs: [
+            `Hi ${String(metadata.employeeName ?? "there")},`,
+            "Your leave request was approved.",
+          ],
+          detailRows: staffLeaveDetailRows(metadata),
+          ctaLabel: "View your leave",
+          ctaHref: buildAbsoluteUrl(String(metadata.staffLeaveUrl ?? "/staff/leave")),
+        }),
+      };
+
+    case "staff_leave_request_declined":
+      return {
+        subject: "Your leave request was declined",
+        html: renderEmailShell({
+          headline: "Leave declined",
+          statusLabel: String(metadata.statusLabel ?? "Declined"),
+          bodyParagraphs: [
+            `Hi ${String(metadata.employeeName ?? "there")},`,
+            "Your leave request was not approved.",
+          ],
+          detailRows: staffLeaveDetailRows(metadata),
+          ctaLabel: "View your leave",
+          ctaHref: buildAbsoluteUrl(String(metadata.staffLeaveUrl ?? "/staff/leave")),
+        }),
+      };
+
+    case "staff_leave_additional_paid_granted":
+      return {
+        subject: "Additional paid leave granted",
+        html: renderEmailShell({
+          headline: "Additional paid leave granted",
+          statusLabel: String(metadata.statusLabel ?? "Approved"),
+          bodyParagraphs: [
+            `Hi ${String(metadata.employeeName ?? "there")},`,
+            "Management granted you additional paid leave for the dates below.",
+          ],
+          detailRows: staffLeaveDetailRows(metadata),
+          ctaLabel: "View your leave",
+          ctaHref: buildAbsoluteUrl(String(metadata.staffLeaveUrl ?? "/staff/leave")),
+        }),
+      };
+
     default:
       return {
         subject: `Candid Creative notification — ${type}`,
@@ -692,6 +785,18 @@ export function renderNotificationEmail(
         }),
       };
   }
+}
+
+function staffLeaveDetailRows(metadata: Record<string, unknown>) {
+  return [
+    { label: "Employee", value: String(metadata.employeeName ?? "") },
+    { label: "Leave type", value: String(metadata.leaveType ?? "") },
+    { label: "Dates", value: String(metadata.dates ?? "") },
+    { label: "Days", value: String(metadata.daysRequested ?? "") },
+    ...(metadata.statusLabel
+      ? [{ label: "Status", value: String(metadata.statusLabel) }]
+      : []),
+  ];
 }
 
 export function renderSystemTestEmailHtml() {
