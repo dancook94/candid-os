@@ -44,3 +44,16 @@ node scripts/staff-leave-notification-backlog.mjs discard --outbox-id <uuid> --r
 ## Stage 2 retry script
 
 `scripts/retry-stage2-controlled-notification.mjs` calls the **controlled** cron URL (or local processor with `outboxId`), not the scheduled backlog cron.
+
+## Stage 2 all-scenarios E2E (single run)
+
+After migration `20270110157000` and deploy:
+
+```bash
+# Apply migration (direct Postgres, Test ref only)
+DATABASE_URL='postgresql://...' npx tsx scripts/apply-staff-leave-outbox-discard-migration.mts
+
+CRON_SECRET='…' npm run verify:stage2-leave-notifications-e2e
+```
+
+Runs six scenarios via RPC (no API flush), delivers each outbox through the controlled cron, and prints a PASS/FAIL table. Requires an empty claimable outbox queue when possible; scheduled cron may still deliver unrelated mail concurrently.
