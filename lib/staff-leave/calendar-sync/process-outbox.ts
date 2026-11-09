@@ -89,8 +89,6 @@ export async function processStaffLeaveCalendarSyncOutbox(
     input?.outboxId != null && input.outboxId !== ""
       ? 1
       : input?.limit ?? STAFF_LEAVE_CALENDAR_OUTBOX_DEFAULT_BATCH_LIMIT;
-  const staleCutoff = staleStaffLeaveCalendarOutboxLockCutoff();
-  const claimFilter = buildStaffLeaveCalendarOutboxClaimFilter(staleCutoff);
   const deliveryGate = getStaffLeaveCalendarDeliveryGate();
 
   const result: ProcessStaffLeaveCalendarOutboxResult = {
@@ -103,6 +101,14 @@ export async function processStaffLeaveCalendarSyncOutbox(
     errors: [],
   };
 
+  if (!deliveryGate.allowed) {
+    result.errors.push(deliveryGate.reason);
+    return result;
+  }
+
+  const staleCutoff = staleStaffLeaveCalendarOutboxLockCutoff();
+  const claimFilter = buildStaffLeaveCalendarOutboxClaimFilter(staleCutoff);
+
   const orderedRows = await loadClaimedCalendarOutboxRows(adminClient, {
     outboxId: input?.outboxId,
     limit,
@@ -112,22 +118,6 @@ export async function processStaffLeaveCalendarSyncOutbox(
   });
 
   if (result.errors.includes("staff_leave_calendar_sync_outbox_missing")) {
-    return result;
-  }
-
-  if (!deliveryGate.allowed) {
-    for (const row of orderedRows) {
-      result.processed += 1;
-
-      try {
-        await markCalendarOutboxFailed(adminClient, row, deliveryGate.reason);
-        result.failed += 1;
-        result.errors.push(deliveryGate.reason);
-      } catch (markError) {
-        result.errors.push(toErrorMessage(markError));
-      }
-    }
-
     return result;
   }
 

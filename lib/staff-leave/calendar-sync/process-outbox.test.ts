@@ -53,6 +53,17 @@ test("outbox rows for one leave request are processed in created_at order", () =
   );
 });
 
+test("disabled delivery gate returns before claiming or mutating outbox rows", async () => {
+  const source = await readFile(new URL("./process-outbox.ts", import.meta.url), "utf8");
+  const gateIdx = source.indexOf("if (!deliveryGate.allowed)");
+  const loadIdx = source.indexOf("loadClaimedCalendarOutboxRows");
+  assert.ok(gateIdx > 0 && loadIdx > gateIdx, "gate must precede claim/load");
+  assert.doesNotMatch(
+    source,
+    /markCalendarOutboxFailed\(adminClient, row, deliveryGate\.reason\)/
+  );
+});
+
 test("processor validates source state, marks sync_provider, and tracks mock delivery", async () => {
   const source = await readFile(new URL("./process-outbox.ts", import.meta.url), "utf8");
 

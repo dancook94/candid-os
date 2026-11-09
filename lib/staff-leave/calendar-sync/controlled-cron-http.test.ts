@@ -28,4 +28,6 @@ test("scheduled calendar cron uses shared cron auth", async () => {
   assert.match(source, /cronAuthorizationMatches/);
   assert.match(source, /CRON_SECRET/);
   assert.match(source, /processStaffLeaveCalendarSyncOutbox/);
+  assert.match(source, /STAFF_LEAVE_GCAL_CRON_PAUSED/);
+  assert.match(source, /calendar_cron_paused/);
 });

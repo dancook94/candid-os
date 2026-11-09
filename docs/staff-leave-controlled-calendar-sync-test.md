@@ -9,6 +9,12 @@
 
 Requires `STAFF_LEAVE_GCAL_ENABLED=true` and `STAFF_LEAVE_GCAL_PROVIDER=mock` for mock delivery on Test.
 
+When `STAFF_LEAVE_GCAL_ENABLED=false`, the worker **does not claim or mutate** outbox rows (no-op).
+
+### Pausing scheduled drain (Test only)
+
+Set `STAFF_LEAVE_GCAL_CRON_PAUSED=true` on **candid-os-test** during controlled E2E so the five-minute Vercel cron does not compete with scoped runs. Staff leave **notification** cron is unaffected.
+
 ## Controlled cron (single outbox)
 
 `GET /api/cron/staff-leave-calendar-sync/controlled?outboxId=<uuid>`
