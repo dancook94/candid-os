@@ -124,6 +124,56 @@ async function cleanupSickness(adminClient, sicknessId) {
   await adminClient.from("staff_absence_sickness").delete().eq("id", sicknessId);
 }
 
+function isoDateUtc(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+function eachCalendarDay(startIso, endIso) {
+  const days = [];
+  const cursor = new Date(`${startIso}T12:00:00.000Z`);
+  const end = new Date(`${endIso}T12:00:00.000Z`);
+  while (cursor <= end) {
+    days.push(isoDateUtc(cursor));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return days;
+}
+
+function weekdayCandidates(year, preferredIso) {
+  const candidates = [preferredIso];
+  const start = new Date(`${year}-06-01T12:00:00.000Z`);
+  const end = new Date(`${year}-10-31T12:00:00.000Z`);
+  for (let cursor = new Date(start); cursor <= end; cursor.setUTCDate(cursor.getUTCDate() + 1)) {
+    const iso = isoDateUtc(cursor);
+    const dow = cursor.getUTCDay();
+    if (dow === 0 || dow === 6) continue;
+    if (!candidates.includes(iso)) candidates.push(iso);
+  }
+  return candidates;
+}
+
+async function submitSmokeHoliday(client, iso) {
+  return rpc(client, "submit_staff_leave_request", {
+    p_start_date: iso,
+    p_end_date: iso,
+    p_day_portion: "full",
+    p_employee_note: "Smoke test request — safe to delete",
+  });
+}
+
+async function findAndSubmitHoliday(client, year, preferredIso) {
+  for (const iso of weekdayCandidates(year, preferredIso)) {
+    const submit = await submitSmokeHoliday(client, iso);
+    if (!submit.error && submit.data?.id) {
+      return { iso, requestId: submit.data.id, submit };
+    }
+    if (!/overlap/i.test(submit.error?.message ?? "")) {
+      return { iso, requestId: null, submit };
+    }
+  }
+  throw new Error(`No free weekday for smoke leave submit in ${year}`);
+}
+
 async function main() {
   record(
     "Test Supabase project ref",
@@ -211,15 +261,11 @@ async function main() {
     `HTTP ${apiRequests.status} ${apiRequests.body?.error ?? ""}`
   );
 
-  const smokeIso = "2027-06-07";
-
-  const submit = await rpc(staffB.client, "submit_staff_leave_request", {
-    p_start_date: smokeIso,
-    p_end_date: smokeIso,
-    p_day_portion: "full",
-    p_employee_note: "Smoke test request — safe to delete",
-  });
-  const requestId = submit.data?.id;
+  const { iso: smokeIso, requestId, submit } = await findAndSubmitHoliday(
+    staffB.client,
+    2027,
+    "2027-06-07"
+  );
   record(
     "Staff can submit a holiday request",
     !submit.error && requestId,
@@ -263,6 +309,8 @@ async function main() {
       !decide.error && decide.data?.status === "approved",
       decide.error?.message
     );
+  } else if (adminSession) {
+    record("Admin can approve a request", false, submit.error?.message ?? "submit did not return id");
   } else if (requestId) {
     record("Admin can approve a request", false, "Could not obtain admin session");
   }
