@@ -211,10 +211,9 @@ async function main() {
     `HTTP ${apiRequests.status} ${apiRequests.body?.error ?? ""}`
   );
 
-  const smokeDay = (Date.now() % 28) + 1;
-  const smokeIso = `2027-10-${String(smokeDay).padStart(2, "0")}`;
+  const smokeIso = "2027-06-07";
 
-  const submit = await rpc(staffA.client, "submit_staff_leave_request", {
+  const submit = await rpc(staffB.client, "submit_staff_leave_request", {
     p_start_date: smokeIso,
     p_end_date: smokeIso,
     p_day_portion: "full",
