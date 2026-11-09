@@ -11,6 +11,11 @@ const PUBLIC_RPCS = [
   "submit_staff_leave_request",
   "decide_staff_leave_request",
   "cancel_staff_leave_request",
+  "set_staff_working_pattern",
+  "set_staff_leave_entitlement",
+  "staff_leave_entitlement_breakdown",
+  "submit_staff_additional_paid_leave_request",
+  "grant_staff_additional_paid_leave",
   "record_staff_absence_sickness",
   "list_staff_absence_sickness_own",
   "list_staff_absence_sickness_admin",
@@ -28,6 +33,10 @@ const INTERNAL_RPCS = [
   "staff_leave_count_request_days",
   "staff_leave_reserved_pool_days",
   "staff_leave_block_direct_client_write",
+  "staff_leave_has_blocking_overlap",
+  "staff_leave_pattern_for_profile_on_date",
+  "staff_leave_lock_profile",
+  "staff_leave_annual_approval_headroom",
 ] as const;
 
 test("staff_leave_balance input arg name does not shadow RETURNS TABLE columns", async () => {
@@ -64,7 +73,14 @@ test("entitlement_days is not directly callable by authenticated clients", async
 });
 
 test("internal helpers are not granted to authenticated", async () => {
-  const sql = await readFile(MIGRATION, "utf8");
+  const patternsSql = await readFile(
+    new URL(
+      "../../supabase/migrations/20270110150000_staff_leave_patterns_additional_paid.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  const sql = (await readFile(MIGRATION, "utf8")) + patternsSql;
 
   for (const name of INTERNAL_RPCS) {
     assert.match(sql, new RegExp(`REVOKE ALL ON FUNCTION public\\.${name}`));
@@ -80,9 +96,17 @@ test("only expected RPCs are granted to authenticated", async () => {
     ),
     "utf8"
   );
+  const patternsSql = await readFile(
+    new URL(
+      "../../supabase/migrations/20270110150000_staff_leave_patterns_additional_paid.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
   const grants = [
     ...sql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)/g),
     ...cancelSql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)/g),
+    ...patternsSql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)/g),
   ].map((m) => m[1]);
 
   for (const rpc of PUBLIC_RPCS) {

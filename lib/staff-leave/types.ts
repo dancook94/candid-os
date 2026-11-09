@@ -1,6 +1,9 @@
 export const LEAVE_DAY_PORTIONS = ["full", "am", "pm"] as const;
 export type LeaveDayPortion = (typeof LEAVE_DAY_PORTIONS)[number];
 
+export const LEAVE_KINDS = ["annual", "additional_paid"] as const;
+export type LeaveKind = (typeof LEAVE_KINDS)[number];
+
 export const LEAVE_REQUEST_STATUSES = [
   "pending",
   "approved",

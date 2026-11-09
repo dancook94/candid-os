@@ -6,6 +6,7 @@ type LeaveSpan = {
   start_date: string;
   end_date: string;
   status: string;
+  leave_kind?: string;
   label: string;
 };
 
@@ -43,7 +44,13 @@ export function buildCalendarMarkers(input: {
     for (const isoDate of input.monthDates) {
       if (!dateInLeaveRange(isoDate, span.start_date, span.end_date)) continue;
       const cell = markers.get(isoDate)!;
-      if (span.status === "approved") {
+      if (span.leave_kind === "additional_paid") {
+        if (span.status === "approved") {
+          cell.kinds.push("additional_paid_approved");
+        } else if (span.status === "pending") {
+          cell.kinds.push("additional_paid_pending");
+        }
+      } else if (span.status === "approved") {
         cell.kinds.push("approved_leave");
       } else if (span.status === "pending") {
         cell.kinds.push("pending_leave");

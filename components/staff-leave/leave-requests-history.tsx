@@ -160,6 +160,7 @@ export function LeaveRequestsHistory({
                         <p className="text-sm font-medium text-foreground">{employeeName}</p>
                       ) : null}
                       <p className="text-sm font-medium text-foreground">
+                        {request.leave_kind === "additional_paid" ? "Additional paid · " : null}
                         {formatRange(request)} · {request.days_requested} day
                         {request.days_requested === 1 ? "" : "s"} ({request.day_portion})
                       </p>

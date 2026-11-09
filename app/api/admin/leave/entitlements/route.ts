@@ -14,6 +14,7 @@ type EntitlementBody = {
   holidayYear?: number;
   adjustmentDays?: number;
   prorataStartDate?: string | null;
+  adjustmentReason?: string | null;
 };
 
 export async function POST(request: Request) {
@@ -46,32 +47,16 @@ export async function POST(request: Request) {
     );
   }
 
-  if (
-    !Number.isInteger(holidayYear) ||
-    holidayYear < STAFF_LEAVE_FIRST_POLICY_YEAR ||
-    adjustmentDays < -50 ||
-    adjustmentDays > 50
-  ) {
-    return NextResponse.json({ error: "Invalid entitlement values." }, { status: 400 });
-  }
-
-  const { data, error } = await supabase
-    .from("staff_leave_entitlements")
-    .upsert(
-      {
-        profile_id: profileId,
-        holiday_year: holidayYear,
-        adjustment_days: adjustmentDays,
-        prorata_start_date: body.prorataStartDate ?? null,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "profile_id,holiday_year" }
-    )
-    .select("id, adjustment_days, prorata_start_date")
-    .single();
+  const { data, error } = await supabase.rpc("set_staff_leave_entitlement", {
+    p_profile_id: profileId,
+    p_holiday_year: holidayYear,
+    p_adjustment_days: adjustmentDays,
+    p_prorata_start_date: body.prorataStartDate ?? null,
+    p_adjustment_reason: body.adjustmentReason ?? null,
+  });
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 400 });
+    return NextResponse.json({ error: error.message, code: error.code }, { status: 400 });
   }
 
   return NextResponse.json({ entitlement: data });

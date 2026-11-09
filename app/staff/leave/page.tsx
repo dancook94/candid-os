@@ -2,6 +2,7 @@ import { AppShell } from "@/components/app-shell";
 import { LeaveBalanceCards } from "@/components/staff-leave/leave-balance-cards";
 import { LeaveCalendar } from "@/components/staff-leave/leave-calendar";
 import { LeaveLegend } from "@/components/staff-leave/leave-legend";
+import { AdditionalPaidLeaveForm } from "@/components/staff-leave/additional-paid-leave-form";
 import { LeaveRequestForm } from "@/components/staff-leave/leave-request-form";
 import { LeaveRequestsHistory } from "@/components/staff-leave/leave-requests-history";
 import { PageHeader } from "@/components/page-header";
@@ -87,7 +88,15 @@ export default async function StaffLeavePage({ searchParams }: PageProps) {
       start_date: request.start_date,
       end_date: request.end_date,
       status: request.status,
-      label: request.status === "pending" ? "Your pending leave" : "Your approved leave",
+      leave_kind: request.leave_kind,
+      label:
+        request.leave_kind === "additional_paid"
+          ? request.status === "pending"
+            ? "Your pending additional paid leave"
+            : "Your additional paid leave"
+          : request.status === "pending"
+            ? "Your pending leave"
+            : "Your approved leave",
     }));
 
   const teamApprovedSpans = teamLeave.requests
@@ -105,7 +114,15 @@ export default async function StaffLeavePage({ searchParams }: PageProps) {
         start_date: request.start_date,
         end_date: request.end_date,
         status: request.status,
-        label: name ? `${name} (approved)` : "Colleague (approved)",
+        leave_kind: request.leave_kind,
+        label:
+          request.leave_kind === "additional_paid"
+            ? name
+              ? `${name} (additional paid)`
+              : "Colleague (additional paid)"
+            : name
+              ? `${name} (approved)`
+              : "Colleague (approved)",
       };
     });
 
@@ -177,14 +194,24 @@ export default async function StaffLeavePage({ searchParams }: PageProps) {
         </Card>
 
         <div className="grid gap-6 lg:grid-cols-2">
-          <Card className="portal-surface rounded-2xl shadow-sm ring-0">
-            <CardHeader className="border-b border-border">
-              <CardTitle>Request holiday</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-6">
-              <LeaveRequestForm holidayYear={holidayYear} />
-            </CardContent>
-          </Card>
+          <div className="space-y-6">
+            <Card className="portal-surface rounded-2xl shadow-sm ring-0">
+              <CardHeader className="border-b border-border">
+                <CardTitle>Request holiday</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <LeaveRequestForm holidayYear={holidayYear} />
+              </CardContent>
+            </Card>
+            <Card className="portal-surface rounded-2xl shadow-sm ring-0">
+              <CardHeader className="border-b border-border">
+                <CardTitle>Additional paid leave</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-6">
+                <AdditionalPaidLeaveForm />
+              </CardContent>
+            </Card>
+          </div>
 
           <LeaveRequestsHistory
             title="Your requests"

@@ -17,6 +17,8 @@ export type LeaveRequestRow = {
   cancelled_at: string | null;
   cancelled_by: string | null;
   cancellation_reason: string | null;
+  leave_kind: string;
+  grant_reason: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -93,7 +95,7 @@ export async function fetchOwnLeaveRequests(
   const { data, error } = await supabase
     .from("staff_leave_requests")
     .select(
-      "id, profile_id, holiday_year, status, start_date, end_date, day_portion, days_requested, employee_note, decision_note, cancelled_at, cancelled_by, cancellation_reason, created_at, updated_at"
+      "id, profile_id, holiday_year, leave_kind, status, start_date, end_date, day_portion, days_requested, employee_note, decision_note, grant_reason, cancelled_at, cancelled_by, cancellation_reason, created_at, updated_at"
     )
     .eq("profile_id", profileId)
     .eq("holiday_year", holidayYear)
@@ -109,7 +111,7 @@ export async function fetchLeaveRequestsForAdmin(
   let query = supabase
     .from("staff_leave_requests")
     .select(
-      "id, profile_id, holiday_year, status, start_date, end_date, day_portion, days_requested, employee_note, decision_note, cancelled_at, cancelled_by, cancellation_reason, created_at, updated_at, profiles(full_name, user_role)"
+      "id, profile_id, holiday_year, leave_kind, status, start_date, end_date, day_portion, days_requested, employee_note, decision_note, grant_reason, cancelled_at, cancelled_by, cancellation_reason, created_at, updated_at, profiles(full_name, user_role)"
     )
     .eq("holiday_year", input.holidayYear)
     .order("created_at", { ascending: false });
@@ -129,7 +131,7 @@ export async function fetchApprovedTeamLeave(
   const { data, error } = await supabase
     .from("staff_leave_requests")
     .select(
-      "id, profile_id, start_date, end_date, day_portion, days_requested, status, profiles(full_name)"
+      "id, profile_id, start_date, end_date, day_portion, days_requested, status, leave_kind, profiles(full_name)"
     )
     .eq("holiday_year", holidayYear)
     .in("status", ["approved", "pending"])
@@ -193,7 +195,7 @@ export async function fetchEntitlementAdjustment(
 ) {
   const { data, error } = await supabase
     .from("staff_leave_entitlements")
-    .select("id, adjustment_days, prorata_start_date")
+    .select("id, adjustment_days, prorata_start_date, adjustment_reason")
     .eq("profile_id", profileId)
     .eq("holiday_year", holidayYear)
     .maybeSingle();
@@ -235,4 +237,19 @@ export async function fetchWorkingPattern(
     .maybeSingle();
 
   return { pattern: data, error: error?.message ?? null };
+}
+
+export async function fetchWorkingPatternHistory(
+  supabase: SupabaseClient,
+  profileId: string
+) {
+  const { data, error } = await supabase
+    .from("staff_working_patterns")
+    .select(
+      "id, effective_from, works_mon, works_tue, works_wed, works_thu, works_fri, works_sat, works_sun, fte_ratio, created_at"
+    )
+    .eq("profile_id", profileId)
+    .order("effective_from", { ascending: false });
+
+  return { patterns: data ?? [], error: error?.message ?? null };
 }

@@ -13,6 +13,7 @@ test("staff leave phase 1 migration enforces RPC-only mutations and duplicate-sa
   assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.staff_leave_request_events/);
   assert.match(sql, /submit_staff_leave_request/);
   assert.match(sql, /decide_staff_leave_request/);
+  assert.match(sql, /'cancelled'/);
   assert.match(sql, /record_staff_absence_sickness/);
   assert.match(sql, /AND r\.status = 'pending'/);
   assert.match(sql, /staff_leave_block_direct_client_write/);

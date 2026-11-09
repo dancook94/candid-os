@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { AppShell } from "@/components/app-shell";
-import { AdminEntitlementForm } from "@/components/staff-leave/admin-entitlement-form";
+import { AdminEmployeeLeaveSettings } from "@/components/staff-leave/admin-employee-leave-settings";
 import { AdminLeavePendingQueue } from "@/components/staff-leave/admin-leave-pending-queue";
 import { LeaveRequestsHistory } from "@/components/staff-leave/leave-requests-history";
 import { AdminOverlapWarnings } from "@/components/staff-leave/admin-overlap-warnings";
@@ -44,6 +44,8 @@ import {
   fetchStaffLeaveBalances,
   fetchStaffMembersForLeaveAdmin,
   fetchWhoIsOffToday,
+  fetchWorkingPattern,
+  fetchWorkingPatternHistory,
   leaveRequestProfileName,
 } from "@/lib/staff-leave/queries";
 import { STAFF_LEAVE_FIRST_POLICY_YEAR } from "@/lib/staff-leave/types";
@@ -101,22 +103,64 @@ export default async function AdminLeavePage({ searchParams }: PageProps) {
     holidayYear
   );
 
-  const entitlementSeeds = await Promise.all(
+  const memberSettings = await Promise.all(
     members.map(async (member) => {
-      const { entitlement } = await fetchEntitlementAdjustment(
-        supabase,
-        member.id,
-        holidayYear
-      );
+      const [{ entitlement }, { pattern }, { patterns: history }] = await Promise.all([
+        fetchEntitlementAdjustment(supabase, member.id, holidayYear),
+        fetchWorkingPattern(supabase, member.id),
+        fetchWorkingPatternHistory(supabase, member.id),
+      ]);
+
       return {
-        profileId: member.id,
-        adjustmentDays: Number(entitlement?.adjustment_days ?? 0),
-        prorataStartDate: entitlement?.prorata_start_date ?? null,
+        memberId: member.id,
+        entitlement: {
+          adjustmentDays: Number(entitlement?.adjustment_days ?? 0),
+          prorataStartDate: entitlement?.prorata_start_date ?? null,
+          adjustmentReason:
+            (entitlement as { adjustment_reason?: string | null } | null)?.adjustment_reason ??
+            null,
+        },
+        pattern: pattern
+          ? {
+              effectiveFrom: pattern.effective_from,
+              worksMon: pattern.works_mon,
+              worksTue: pattern.works_tue,
+              worksWed: pattern.works_wed,
+              worksThu: pattern.works_thu,
+              worksFri: pattern.works_fri,
+              worksSat: pattern.works_sat,
+              worksSun: pattern.works_sun,
+              fteRatio: Number(pattern.fte_ratio),
+            }
+          : {
+              effectiveFrom: `${holidayYear}-01-01`,
+              worksMon: true,
+              worksTue: true,
+              worksWed: true,
+              worksThu: true,
+              worksFri: true,
+              worksSat: false,
+              worksSun: false,
+              fteRatio: 1,
+            },
+        patternHistory: history.map((row) => ({ effective_from: row.effective_from })),
       };
     })
   );
 
-  const overlapInput = (allRequests.requests ?? []).map((request) => ({
+  const patternSeeds = Object.fromEntries(
+    memberSettings.map((row) => [row.memberId, row.pattern])
+  );
+  const entitlementSeeds = Object.fromEntries(
+    memberSettings.map((row) => [row.memberId, row.entitlement])
+  );
+  const patternHistory = Object.fromEntries(
+    memberSettings.map((row) => [row.memberId, row.patternHistory])
+  );
+
+  const overlapInput = (allRequests.requests ?? [])
+    .filter((request) => request.leave_kind === "annual" || !request.leave_kind)
+    .map((request) => ({
     id: request.id,
     profileId: request.profile_id,
     fullName: leaveRequestProfileName(request.profiles),
@@ -135,11 +179,15 @@ export default async function AdminLeavePage({ searchParams }: PageProps) {
         ? (profile as { full_name: string | null }).full_name
         : null;
 
+    const kindLabel =
+      request.leave_kind === "additional_paid" ? "additional paid" : request.status;
+
     return {
       start_date: request.start_date,
       end_date: request.end_date,
       status: request.status,
-      label: name ? `${name} (${request.status})` : `Team member (${request.status})`,
+      leave_kind: request.leave_kind,
+      label: name ? `${name} (${kindLabel})` : `Team member (${kindLabel})`,
     };
   });
 
@@ -323,13 +371,19 @@ export default async function AdminLeavePage({ searchParams }: PageProps) {
 
         <Card className="portal-surface rounded-2xl shadow-sm ring-0">
           <CardHeader className="border-b border-border">
-            <CardTitle>Annual allowance adjustments</CardTitle>
+            <CardTitle>Employee holiday settings</CardTitle>
+            <CardDescription>
+              Working patterns, allowance breakdown, pro-rata, documented adjustments, and
+              additional paid leave grants.
+            </CardDescription>
           </CardHeader>
           <CardContent className="pt-6">
-            <AdminEntitlementForm
+            <AdminEmployeeLeaveSettings
               members={members}
               holidayYear={holidayYear}
-              seeds={entitlementSeeds}
+              patternSeeds={patternSeeds}
+              entitlementSeeds={entitlementSeeds}
+              patternHistory={patternHistory}
             />
           </CardContent>
         </Card>

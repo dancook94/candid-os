@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 /**
@@ -16,6 +17,21 @@ function decidePendingRequest(
   store.status = decision;
   return { ok: true as const, status: store.status };
 }
+
+test("profile-scoped operations serialize via transactional advisory lock contract", async () => {
+  const sql = await readFile(
+    new URL(
+      "../../supabase/migrations/20270110150000_staff_leave_patterns_additional_paid.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+
+  assert.match(sql, /pg_advisory_xact_lock\(hashtext\(p_profile_id::text\)\)/);
+  assert.match(sql, /submit_staff_leave_request[\s\S]*staff_leave_lock_profile\(actor\)/);
+  assert.match(sql, /grant_staff_additional_paid_leave[\s\S]*staff_leave_lock_profile\(p_profile_id\)/);
+  assert.match(sql, /decide_staff_leave_request[\s\S]*FOR UPDATE/);
+});
 
 test("duplicate concurrent approvals only apply once", () => {
   const request = { id: "req-1", status: "pending" as const };

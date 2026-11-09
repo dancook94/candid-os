@@ -15,6 +15,12 @@ type LeaveCalendarProps = {
 };
 
 function cellClassNames(kinds: CalendarDayCell["kinds"]) {
+  if (kinds.includes("additional_paid_approved")) {
+    return "bg-cyan-50 ring-1 ring-cyan-600/25";
+  }
+  if (kinds.includes("additional_paid_pending")) {
+    return "bg-cyan-50/70 ring-1 ring-cyan-500/20";
+  }
   if (kinds.includes("approved_leave")) {
     return "bg-emerald-50 ring-1 ring-emerald-600/20";
   }

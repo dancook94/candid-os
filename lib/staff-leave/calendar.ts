@@ -69,7 +69,9 @@ export type CalendarDayKind =
   | "compulsory_closure"
   | "paid_gift"
   | "approved_leave"
-  | "pending_leave";
+  | "pending_leave"
+  | "additional_paid_approved"
+  | "additional_paid_pending";
 
 export type CalendarDayCell = {
   isoDate: string | null;

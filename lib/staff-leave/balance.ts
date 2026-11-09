@@ -16,6 +16,7 @@ export type LeaveRequestDayRow = {
   endDate: string;
   daysRequested: number;
   status: "pending" | "approved" | "rejected" | "cancelled";
+  leaveKind?: "annual" | "additional_paid";
 };
 
 export function roundLeaveDays(value: number) {
@@ -100,6 +101,10 @@ export function calculateLeaveBalance(input: {
       continue;
     }
 
+    if (request.leaveKind === "additional_paid") {
+      continue;
+    }
+
     if (request.status === "approved") {
       usedApprovedDays += request.daysRequested;
     }
@@ -126,4 +131,52 @@ export function calculateLeaveBalance(input: {
     grossPolicyDays: input.grossPolicyDays,
     reservedPoolDays,
   };
+}
+
+/**
+ * Headroom for approving one pending annual request: excludes that request's pending
+ * days so they are not double-counted against the allowance.
+ */
+export function annualApprovalHeadroom(input: {
+  holidayYear: number;
+  entitlementDays: number;
+  requests: LeaveRequestDayRow[];
+  excludeRequestId: string;
+}) {
+  let approvedDays = 0;
+  let otherPendingDays = 0;
+
+  for (const request of input.requests) {
+    if (holidayYearForStartDate(request.startDate) !== input.holidayYear) {
+      continue;
+    }
+    if (request.leaveKind === "additional_paid") {
+      continue;
+    }
+    if (request.status === "approved") {
+      approvedDays += request.daysRequested;
+    } else if (request.status === "pending" && request.id !== input.excludeRequestId) {
+      otherPendingDays += request.daysRequested;
+    }
+  }
+
+  return roundLeaveDays(
+    input.entitlementDays - roundLeaveDays(approvedDays) - roundLeaveDays(otherPendingDays)
+  );
+}
+
+export function canApproveAnnualRequest(input: {
+  holidayYear: number;
+  entitlementDays: number;
+  requests: LeaveRequestDayRow[];
+  requestId: string;
+  requestDays: number;
+}) {
+  const headroom = annualApprovalHeadroom({
+    holidayYear: input.holidayYear,
+    entitlementDays: input.entitlementDays,
+    requests: input.requests,
+    excludeRequestId: input.requestId,
+  });
+  return { headroom, canApprove: input.requestDays <= headroom };
 }

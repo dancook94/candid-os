@@ -78,6 +78,7 @@ export function AdminLeavePendingQueue({
                 : request.profiles?.full_name) ?? "Team member"}
             </p>
             <p className="text-sm text-muted-foreground">
+              {request.leave_kind === "additional_paid" ? "Additional paid · " : null}
               {formatRange(request)} · {request.days_requested} day
               {request.days_requested === 1 ? "" : "s"} ({request.day_portion})
             </p>
