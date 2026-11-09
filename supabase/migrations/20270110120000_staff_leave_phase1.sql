@@ -339,7 +339,7 @@ BEGIN
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.staff_leave_reserved_pool_days(target_profile uuid, holiday_year integer)
+CREATE OR REPLACE FUNCTION public.staff_leave_reserved_pool_days(target_profile uuid, p_holiday_year integer)
 RETURNS numeric
 LANGUAGE plpgsql
 STABLE
@@ -353,7 +353,7 @@ BEGIN
   FOR rec IN
     SELECT bh.holiday_date AS on_date
     FROM public.staff_bank_holidays bh
-    WHERE bh.holiday_year = holiday_year
+    WHERE bh.holiday_year = p_holiday_year
       AND bh.region = 'england_wales'
   LOOP
     IF public.staff_leave_is_working_day(target_profile, rec.on_date) THEN
@@ -364,7 +364,7 @@ BEGIN
   FOR rec IN
     SELECT cc.closure_date AS on_date
     FROM public.staff_leave_company_closures cc
-    WHERE cc.holiday_year = holiday_year
+    WHERE cc.holiday_year = p_holiday_year
       AND cc.closure_kind = 'compulsory_leave'
       AND NOT EXISTS (
         SELECT 1
@@ -388,7 +388,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION public.staff_leave_entitlement_days(
   target_profile uuid,
-  holiday_year integer,
+  p_holiday_year integer,
   skip_access_check boolean DEFAULT false
 )
 RETURNS numeric
@@ -412,10 +412,10 @@ BEGIN
 
   SELECT * INTO policy
   FROM public.staff_leave_policy_years py
-  WHERE py.holiday_year = holiday_year;
+  WHERE py.holiday_year = p_holiday_year;
 
   IF policy.holiday_year IS NULL THEN
-    RAISE EXCEPTION 'Leave policy year % is not configured.', holiday_year;
+    RAISE EXCEPTION 'Leave policy year % is not configured.', p_holiday_year;
   END IF;
 
   pattern := public.staff_leave_pattern_for_profile(target_profile);
@@ -426,9 +426,9 @@ BEGIN
   SELECT * INTO entitlement
   FROM public.staff_leave_entitlements e
   WHERE e.profile_id = target_profile
-    AND e.holiday_year = holiday_year;
+    AND e.holiday_year = p_holiday_year;
 
-  reserved_pool := public.staff_leave_reserved_pool_days(target_profile, holiday_year);
+  reserved_pool := public.staff_leave_reserved_pool_days(target_profile, p_holiday_year);
   bookable := GREATEST(0, policy.gross_allowance_days - reserved_pool) * pattern.fte_ratio;
 
   IF entitlement.id IS NOT NULL THEN
@@ -436,10 +436,10 @@ BEGIN
     prorata := entitlement.prorata_start_date;
   END IF;
 
-  IF prorata IS NOT NULL AND EXTRACT(YEAR FROM prorata)::integer = holiday_year THEN
+  IF prorata IS NOT NULL AND EXTRACT(YEAR FROM prorata)::integer = p_holiday_year THEN
     fraction := (
-      (DATE (holiday_year || '-12-31')::date - prorata + 1)::numeric
-      / (DATE (holiday_year || '-12-31')::date - DATE (holiday_year || '-01-01')::date + 1)::numeric
+      (DATE (p_holiday_year || '-12-31')::date - prorata + 1)::numeric
+      / (DATE (p_holiday_year || '-12-31')::date - DATE (p_holiday_year || '-01-01')::date + 1)::numeric
     );
     fraction := LEAST(1, GREATEST(0, fraction));
     bookable := bookable * fraction;
