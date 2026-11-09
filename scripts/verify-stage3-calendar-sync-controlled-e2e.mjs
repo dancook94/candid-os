@@ -6,7 +6,7 @@
 import { createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
-const E2E_SALT = "staff-leave-controlled-e2e-v1";
+const E2E_SALT = "staff-leave-calendar-controlled-e2e-v1";
 const TEST_REF = "axhkdwgmwhlbsstumndh";
 const RUN_NOTE_PREFIX = "Stage3 E2E calendar";
 const APP_BASE = (process.env.SMOKE_APP_URL ?? "https://candid-os-test.vercel.app").replace(
@@ -229,7 +229,7 @@ async function main() {
     staffB.userId,
     { fn: "submit_staff_leave_request", args: { p_day_portion: "full", p_employee_note: runNote } },
     2027,
-    "2027-06-07"
+    "2027-07-19"
   );
   const r1 = s1.data.id;
   await adminClient.rpc("decide_staff_leave_request", {
@@ -278,7 +278,7 @@ async function main() {
 
   // —— 3. Grant additional paid → mock upsert ——
   let r3 = null;
-  for (const iso of isoWeekdayCandidates(2027, "2027-06-14")) {
+  for (const iso of isoWeekdayCandidates(2027, "2027-07-20")) {
     const grant = await adminClient.rpc("grant_staff_additional_paid_leave", {
       p_profile_id: staffA.userId,
       p_start_date: iso,
@@ -312,7 +312,7 @@ async function main() {
 
   // —— 4. Sickness → sickness_management only ——
   let sicknessId = null;
-  for (const iso of isoWeekdayCandidates(2027, "2027-06-15")) {
+  for (const iso of isoWeekdayCandidates(2027, "2027-07-21")) {
     const sick = await adminClient.rpc("record_staff_absence_sickness", {
       p_profile_id: staffB.userId,
       p_start_date: iso,
@@ -353,7 +353,7 @@ async function main() {
     staffB.userId,
     { fn: "submit_staff_leave_request", args: { p_day_portion: "am", p_employee_note: runNote } },
     2027,
-    "2027-06-08"
+    "2027-07-22"
   );
   await adminClient.rpc("decide_staff_leave_request", {
     p_request_id: am.data.id,
@@ -373,7 +373,7 @@ async function main() {
     staffB.userId,
     { fn: "submit_staff_leave_request", args: { p_day_portion: "pm", p_employee_note: runNote } },
     2027,
-    "2027-06-09"
+    "2027-07-23"
   );
   await adminClient.rpc("decide_staff_leave_request", {
     p_request_id: pm.data.id,
@@ -420,7 +420,7 @@ async function main() {
     staffB.userId,
     { fn: "submit_staff_leave_request", args: { p_day_portion: "full", p_employee_note: runNote } },
     2027,
-    "2027-06-16"
+    "2027-07-26"
   );
   await adminClient.rpc("decide_staff_leave_request", {
     p_request_id: s7.data.id,
@@ -475,7 +475,7 @@ async function main() {
     staffB.userId,
     { fn: "submit_staff_leave_request", args: { p_day_portion: "full", p_employee_note: runNote } },
     2027,
-    "2027-06-17"
+    "2027-07-27"
   );
   await adminClient.rpc("decide_staff_leave_request", {
     p_request_id: s9.data.id,
