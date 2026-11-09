@@ -392,7 +392,10 @@ test("marks the connection when the refresh grant has been revoked", async () =>
     },
   };
 
-  await assert.rejects(stepGmailDiscovery({ admin: memory.admin, client }), /expired or revoked/);
+  await assert.rejects(
+    stepGmailDiscovery({ admin: memory.admin, client }),
+    /authorization grant|authorization failed/i
+  );
   assert.equal(memory.tables.gmail_connections[0]?.status, "error");
   assert.equal(memory.tables.gmail_import_runs[0]?.page_token ?? null, null);
   assert.equal(memory.tables.gmail_import_items.length, 0);
