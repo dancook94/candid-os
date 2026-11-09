@@ -166,6 +166,11 @@ test("the cron schedule is every 15 minutes and the worker does not start a sync
   );
   assert.ok(staffLeaveCron, "staff leave notifications cron should be configured");
   assert.match(staffLeaveCron!.schedule, /^\*/);
+  const staffLeaveCalendarCron = schedule.crons.find(
+    (cron) => cron.path === "/api/cron/staff-leave-calendar-sync"
+  );
+  assert.ok(staffLeaveCalendarCron, "staff leave calendar sync cron should be configured");
+  assert.match(staffLeaveCalendarCron!.schedule, /^\*/);
   assert.doesNotMatch(worker, /startGmailDiscovery/);
   assert.doesNotMatch(worker, /from\("(supplier_invoices|material_prices|materials|supplier_products)"\)/);
 });

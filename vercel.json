@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/staff-leave-notifications",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/staff-leave-calendar-sync",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

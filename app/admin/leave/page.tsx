@@ -3,6 +3,7 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { AdminLeaveBooking } from "@/components/staff-leave/admin-leave-booking";
 import { AdminEmployeeLeaveSettings } from "@/components/staff-leave/admin-employee-leave-settings";
+import { AdminCalendarSyncPanel } from "@/components/staff-leave/admin-calendar-sync-panel";
 import { AdminLeavePendingQueue } from "@/components/staff-leave/admin-leave-pending-queue";
 import { LeaveRequestsHistory } from "@/components/staff-leave/leave-requests-history";
 import { AdminOverlapWarnings } from "@/components/staff-leave/admin-overlap-warnings";
@@ -255,6 +256,8 @@ export default async function AdminLeavePage({ searchParams }: PageProps) {
               : null
           }
         />
+
+        <AdminCalendarSyncPanel />
 
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <StatCard
