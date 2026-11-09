@@ -19,6 +19,7 @@ import {
   monthDateRange,
 } from "@/lib/staff-leave/build-calendar-markers";
 import {
+  buildLeaveCalendarHref,
   buildMonthGrid,
   formatMonthHeading,
   monthNavigation,
@@ -66,16 +67,13 @@ export default async function StaffLeavePage({ searchParams }: PageProps) {
   const staffProfile = requireStaffLeavePageAccess(profile, profileError, STAFF_LEAVE_PATH);
 
   const holidayYear = STAFF_LEAVE_FIRST_POLICY_YEAR;
-  const { year, month } = parseYearMonth({
-    ...params,
-    year: params.year ?? String(holidayYear),
-  });
-  const nav = monthNavigation(year, month);
+  const { year: calendarYear, month: calendarMonth } = parseYearMonth(params);
+  const nav = monthNavigation(calendarYear, calendarMonth);
 
   const [balanceResult, ownRequests, reference, teamLeave] = await Promise.all([
     fetchLeaveBalance(supabase, user.id, holidayYear),
     fetchOwnLeaveRequests(supabase, user.id, holidayYear),
-    fetchLeaveReferenceData(supabase, holidayYear),
+    fetchLeaveReferenceData(supabase, calendarYear),
     fetchApprovedTeamLeave(supabase, holidayYear),
   ]);
 
@@ -107,7 +105,7 @@ export default async function StaffLeavePage({ searchParams }: PageProps) {
       };
     });
 
-  const monthDates = monthDateRange(year, month);
+  const monthDates = monthDateRange(calendarYear, calendarMonth);
   const markers = buildCalendarMarkers({
     bankHolidays: reference.bankHolidays,
     closures: reference.closures,
@@ -115,7 +113,7 @@ export default async function StaffLeavePage({ searchParams }: PageProps) {
     monthDates,
   });
 
-  const cells = buildMonthGrid(year, month, markers);
+  const cells = buildMonthGrid(calendarYear, calendarMonth, markers);
 
   const shellProps = isAdminRole(staffProfile.user_role)
     ? await buildAdminAppShellProps(supabase, {
@@ -129,8 +127,8 @@ export default async function StaffLeavePage({ searchParams }: PageProps) {
         avatar_storage_path: profile!.avatar_storage_path,
       });
 
-  const prevHref = `${STAFF_LEAVE_PATH}?year=${nav.prev.year}&month=${nav.prev.month}`;
-  const nextHref = `${STAFF_LEAVE_PATH}?year=${nav.next.year}&month=${nav.next.month}`;
+  const prevHref = buildLeaveCalendarHref(STAFF_LEAVE_PATH, nav.prev.year, nav.prev.month);
+  const nextHref = buildLeaveCalendarHref(STAFF_LEAVE_PATH, nav.next.year, nav.next.month);
 
   return (
     <AppShell {...shellProps}>
@@ -163,7 +161,10 @@ export default async function StaffLeavePage({ searchParams }: PageProps) {
           <CardContent className="space-y-4 pt-6">
             <LeaveLegend />
             <LeaveCalendar
-              heading={formatMonthHeading(year, month)}
+              basePath={STAFF_LEAVE_PATH}
+              year={calendarYear}
+              month={calendarMonth}
+              heading={formatMonthHeading(calendarYear, calendarMonth)}
               cells={cells}
               prevHref={prevHref}
               nextHref={nextHref}

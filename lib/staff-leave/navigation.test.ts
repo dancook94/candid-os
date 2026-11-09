@@ -22,4 +22,14 @@ describe("staff leave navigation", () => {
     assert.match(source, /ADMIN_LEAVE_PATH = "\/admin\/leave"/);
     assert.match(source, /ADMIN_LEAVE_SICKNESS_PATH/);
   });
+
+  it("includes month/year calendar navigation controls", async () => {
+    const nav = await readRepoFile("components/staff-leave/leave-calendar-nav.tsx");
+    const calendar = await readRepoFile("lib/staff-leave/calendar.ts");
+
+    assert.match(nav, /LEAVE_CALENDAR_MONTH_NAMES/);
+    assert.match(nav, /Today/);
+    assert.match(calendar, /Europe\/London/);
+    assert.match(calendar, /londonYearMonthNow/);
+  });
 });

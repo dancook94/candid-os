@@ -22,6 +22,7 @@ import {
   monthDateRange,
 } from "@/lib/staff-leave/build-calendar-markers";
 import {
+  buildLeaveCalendarHref,
   buildMonthGrid,
   formatMonthHeading,
   monthNavigation,
@@ -69,11 +70,8 @@ export default async function AdminLeavePage({ searchParams }: PageProps) {
     .single();
 
   const holidayYear = STAFF_LEAVE_FIRST_POLICY_YEAR;
-  const { year, month } = parseYearMonth({
-    ...params,
-    year: params.year ?? String(holidayYear),
-  });
-  const nav = monthNavigation(year, month);
+  const { year: calendarYear, month: calendarMonth } = parseYearMonth(params);
+  const nav = monthNavigation(calendarYear, calendarMonth);
   const todayIso = formatIsoDateLocal(new Date());
 
   const [
@@ -86,7 +84,7 @@ export default async function AdminLeavePage({ searchParams }: PageProps) {
   ] = await Promise.all([
     fetchLeaveRequestsForAdmin(supabase, { holidayYear, status: "pending" }),
     fetchApprovedTeamLeave(supabase, holidayYear),
-    fetchLeaveReferenceData(supabase, holidayYear),
+    fetchLeaveReferenceData(supabase, calendarYear),
     fetchStaffMembersForLeaveAdmin(supabase),
     fetchWhoIsOffToday(supabase, todayIso),
     fetchLeaveRequestsForAdmin(supabase, { holidayYear }),
@@ -142,19 +140,19 @@ export default async function AdminLeavePage({ searchParams }: PageProps) {
     };
   });
 
-  const monthDates = monthDateRange(year, month);
+  const monthDates = monthDateRange(calendarYear, calendarMonth);
   const markers = buildCalendarMarkers({
     bankHolidays: reference.bankHolidays,
     closures: reference.closures,
     leaveSpans: teamSpans,
     monthDates,
   });
-  const cells = buildMonthGrid(year, month, markers);
+  const cells = buildMonthGrid(calendarYear, calendarMonth, markers);
 
   const shellProps = await buildAdminAppShellProps(supabase, shellProfile!);
 
-  const prevHref = `${ADMIN_LEAVE_PATH}?year=${nav.prev.year}&month=${nav.prev.month}`;
-  const nextHref = `${ADMIN_LEAVE_PATH}?year=${nav.next.year}&month=${nav.next.month}`;
+  const prevHref = buildLeaveCalendarHref(ADMIN_LEAVE_PATH, nav.prev.year, nav.prev.month);
+  const nextHref = buildLeaveCalendarHref(ADMIN_LEAVE_PATH, nav.next.year, nav.next.month);
 
   const balanceByProfile = new Map(
     balanceRows.map((row) => [row.profileId, row.balance])
@@ -261,7 +259,10 @@ export default async function AdminLeavePage({ searchParams }: PageProps) {
           <CardContent className="space-y-4 pt-6">
             <LeaveLegend />
             <LeaveCalendar
-              heading={formatMonthHeading(year, month)}
+              basePath={ADMIN_LEAVE_PATH}
+              year={calendarYear}
+              month={calendarMonth}
+              heading={formatMonthHeading(calendarYear, calendarMonth)}
               cells={cells}
               prevHref={prevHref}
               nextHref={nextHref}

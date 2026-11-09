@@ -1,5 +1,58 @@
 import { formatIsoDateLocal, parseIsoDateLocal } from "@/lib/staff-leave/working-days";
 
+export const LEAVE_CALENDAR_TIME_ZONE = "Europe/London";
+
+export const LEAVE_CALENDAR_MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+] as const;
+
+export function londonYearMonthNow(reference = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: LEAVE_CALENDAR_TIME_ZONE,
+    year: "numeric",
+    month: "numeric",
+  }).formatToParts(reference);
+
+  const year = Number(parts.find((part) => part.type === "year")?.value);
+  const month = Number(parts.find((part) => part.type === "month")?.value);
+
+  if (!Number.isInteger(year) || !Number.isInteger(month)) {
+    return {
+      year: reference.getFullYear(),
+      month: reference.getMonth() + 1,
+    };
+  }
+
+  return { year, month };
+}
+
+export function leaveCalendarYearOptions(anchorYear = londonYearMonthNow().year) {
+  const years: number[] = [];
+  for (let year = anchorYear - 2; year <= anchorYear + 5; year += 1) {
+    years.push(year);
+  }
+  return years;
+}
+
+export function buildLeaveCalendarHref(basePath: string, year: number, month: number) {
+  const params = new URLSearchParams({
+    year: String(year),
+    month: String(month),
+  });
+  return `${basePath}?${params.toString()}`;
+}
+
 export type CalendarDayKind =
   | "empty"
   | "day"
@@ -21,12 +74,12 @@ export function parseYearMonth(searchParams: {
   year?: string;
   month?: string;
 }) {
-  const now = new Date();
-  const year = searchParams.year ? Number(searchParams.year) : now.getFullYear();
-  const month = searchParams.month ? Number(searchParams.month) : now.getMonth() + 1;
+  const now = londonYearMonthNow();
+  const year = searchParams.year ? Number(searchParams.year) : now.year;
+  const month = searchParams.month ? Number(searchParams.month) : now.month;
 
   if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
-    return { year: now.getFullYear(), month: now.getMonth() + 1 };
+    return { year: now.year, month: now.month };
   }
 
   return { year, month };
@@ -93,5 +146,6 @@ export function formatMonthHeading(year: number, month: number) {
   return new Date(year, month - 1, 1).toLocaleDateString("en-GB", {
     month: "long",
     year: "numeric",
+    timeZone: LEAVE_CALENDAR_TIME_ZONE,
   });
 }

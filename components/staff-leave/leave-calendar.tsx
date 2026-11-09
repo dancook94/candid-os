@@ -1,11 +1,13 @@
-import Link from "next/link";
-
+import { LeaveCalendarNav } from "@/components/staff-leave/leave-calendar-nav";
 import type { CalendarDayCell } from "@/lib/staff-leave/calendar";
 import { cn } from "@/lib/utils";
 
 const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 type LeaveCalendarProps = {
+  basePath: string;
+  year: number;
+  month: number;
   heading: string;
   cells: CalendarDayCell[];
   prevHref: string;
@@ -33,6 +35,9 @@ function cellClassNames(kinds: CalendarDayCell["kinds"]) {
 }
 
 export function LeaveCalendar({
+  basePath,
+  year,
+  month,
   heading,
   cells,
   prevHref,
@@ -40,23 +45,14 @@ export function LeaveCalendar({
 }: LeaveCalendarProps) {
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold text-foreground">{heading}</h2>
-        <div className="flex items-center gap-2">
-          <Link
-            href={prevHref}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted/60"
-          >
-            Previous
-          </Link>
-          <Link
-            href={nextHref}
-            className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium hover:bg-muted/60"
-          >
-            Next
-          </Link>
-        </div>
-      </div>
+      <LeaveCalendarNav
+        basePath={basePath}
+        year={year}
+        month={month}
+        heading={heading}
+        prevHref={prevHref}
+        nextHref={nextHref}
+      />
 
       <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-muted-foreground">
         {WEEKDAY_LABELS.map((label) => (
