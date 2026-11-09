@@ -10,9 +10,11 @@ import {
   mapOutboxKindToNotificationType,
   staffLeaveNotificationIdempotencyKey,
 } from "@/lib/staff-leave/notifications/map-kind";
-
-const DEFAULT_BATCH_LIMIT = 15;
-const MAX_ATTEMPTS = 5;
+import {
+  STAFF_LEAVE_OUTBOX_DEFAULT_BATCH_LIMIT,
+  STAFF_LEAVE_OUTBOX_MAX_ATTEMPTS,
+  STAFF_LEAVE_OUTBOX_STALE_LOCK_MS,
+} from "@/lib/staff-leave/notifications/outbox-constants";
 
 type OutboxRow = {
   id: string;
@@ -22,6 +24,7 @@ type OutboxRow = {
   employee_profile_id: string;
   status: string;
   attempts: number;
+  locked_at?: string | null;
 };
 
 type LeaveRequestRow = {
@@ -41,11 +44,45 @@ export type ProcessStaffLeaveOutboxResult = {
   errors: string[];
 };
 
+export { STAFF_LEAVE_OUTBOX_MAX_ATTEMPTS, STAFF_LEAVE_OUTBOX_STALE_LOCK_MS };
+
+export function staleStaffLeaveOutboxLockCutoff(nowMs = Date.now()) {
+  return new Date(nowMs - STAFF_LEAVE_OUTBOX_STALE_LOCK_MS).toISOString();
+}
+
+export function isStaleStaffLeaveOutboxLock(
+  lockedAt: string | null | undefined,
+  nowMs = Date.now()
+) {
+  if (!lockedAt) {
+    return true;
+  }
+
+  const lockedMs = Date.parse(lockedAt);
+
+  if (!Number.isFinite(lockedMs)) {
+    return true;
+  }
+
+  return nowMs - lockedMs >= STAFF_LEAVE_OUTBOX_STALE_LOCK_MS;
+}
+
+export function buildStaffLeaveOutboxClaimFilter(staleCutoffIso: string) {
+  return [
+    "status.in.(pending,failed)",
+    `and(status.eq.processing,locked_at.lt.${staleCutoffIso})`,
+    "and(status.eq.processing,locked_at.is.null)",
+  ].join(",");
+}
+
 export async function processStaffLeaveNotificationOutbox(
   adminClient: SupabaseClient,
   input?: { requestId?: string; limit?: number }
 ): Promise<ProcessStaffLeaveOutboxResult> {
-  const limit = input?.limit ?? DEFAULT_BATCH_LIMIT;
+  const limit = input?.limit ?? STAFF_LEAVE_OUTBOX_DEFAULT_BATCH_LIMIT;
+  const staleCutoff = staleStaffLeaveOutboxLockCutoff();
+  const claimFilter = buildStaffLeaveOutboxClaimFilter(staleCutoff);
+
   const result: ProcessStaffLeaveOutboxResult = {
     processed: 0,
     sent: 0,
@@ -57,10 +94,10 @@ export async function processStaffLeaveNotificationOutbox(
   let query = adminClient
     .from("staff_leave_notification_outbox")
     .select(
-      "id, source_event_id, notification_kind, request_id, employee_profile_id, status, attempts"
+      "id, source_event_id, notification_kind, request_id, employee_profile_id, status, attempts, locked_at"
     )
-    .in("status", ["pending", "failed"])
-    .lt("attempts", MAX_ATTEMPTS)
+    .or(claimFilter)
+    .lt("attempts", STAFF_LEAVE_OUTBOX_MAX_ATTEMPTS)
     .order("created_at", { ascending: true })
     .limit(limit);
 
@@ -85,14 +122,20 @@ export async function processStaffLeaveNotificationOutbox(
   if (!deliveryGate.allowed) {
     for (const row of (pendingRows ?? []) as OutboxRow[]) {
       result.processed += 1;
-      const claimed = await claimOutboxRow(adminClient, row);
+      const claimed = await claimOutboxRow(adminClient, row, claimFilter);
+
       if (!claimed) {
         result.skipped += 1;
         continue;
       }
-      await markOutboxFailed(adminClient, row, deliveryGate.reason);
-      result.failed += 1;
-      result.errors.push(deliveryGate.reason);
+
+      try {
+        await markOutboxFailed(adminClient, row, deliveryGate.reason);
+        result.failed += 1;
+        result.errors.push(deliveryGate.reason);
+      } catch (markError) {
+        result.errors.push(toErrorMessage(markError));
+      }
     }
 
     return result;
@@ -101,38 +144,67 @@ export async function processStaffLeaveNotificationOutbox(
   for (const row of (pendingRows ?? []) as OutboxRow[]) {
     result.processed += 1;
 
-    const claimed = await claimOutboxRow(adminClient, row);
+    const claimed = await claimOutboxRow(adminClient, row, claimFilter);
 
     if (!claimed) {
       result.skipped += 1;
       continue;
     }
 
-    const delivery = await deliverOutboxRow(adminClient, row, deliveryGate);
+    try {
+      const alreadySent = await notificationAlreadyDelivered(adminClient, row.source_event_id);
 
-    if (delivery.ok) {
-      await markOutboxSent(adminClient, row.id);
-      result.sent += 1;
-    } else {
-      await markOutboxFailed(adminClient, row, delivery.errorMessage);
-      result.failed += 1;
-      if (delivery.errorMessage) {
-        result.errors.push(delivery.errorMessage);
+      if (alreadySent) {
+        await markOutboxSent(adminClient, row.id);
+        result.sent += 1;
+        continue;
       }
+
+      const delivery = await deliverOutboxRow(adminClient, row, deliveryGate);
+
+      if (delivery.ok) {
+        await markOutboxSent(adminClient, row.id);
+        result.sent += 1;
+      } else {
+        await markOutboxFailed(adminClient, row, delivery.errorMessage);
+        result.failed += 1;
+        if (delivery.errorMessage) {
+          result.errors.push(delivery.errorMessage);
+        }
+      }
+    } catch (error) {
+      const message = toErrorMessage(error);
+
+      try {
+        await markOutboxFailed(adminClient, row, message);
+      } catch (markError) {
+        result.errors.push(toErrorMessage(markError));
+      }
+
+      result.failed += 1;
+      result.errors.push(message);
     }
   }
 
   return result;
 }
 
-async function claimOutboxRow(adminClient: SupabaseClient, row: OutboxRow) {
+function toErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function claimOutboxRow(
+  adminClient: SupabaseClient,
+  row: OutboxRow,
+  claimFilter: string
+) {
   const now = new Date().toISOString();
 
   const { data, error } = await adminClient
     .from("staff_leave_notification_outbox")
     .update({ status: "processing", locked_at: now })
     .eq("id", row.id)
-    .in("status", ["pending", "failed"])
+    .or(claimFilter)
     .select("id")
     .maybeSingle();
 
@@ -182,6 +254,34 @@ async function markOutboxFailed(
   }
 }
 
+async function notificationAlreadyDelivered(
+  adminClient: SupabaseClient,
+  sourceEventId: string
+) {
+  const idempotencyKey = staffLeaveNotificationIdempotencyKey(sourceEventId);
+
+  const { data, error } = await adminClient
+    .from("notifications")
+    .select("id, status")
+    .eq("idempotency_key", idempotencyKey)
+    .maybeSingle();
+
+  if (error) {
+    if (error.code === "42P01" || error.code === "PGRST205") {
+      return false;
+    }
+
+    throw error;
+  }
+
+  if (!data) {
+    return false;
+  }
+
+  const status = String(data.status);
+  return status === "sent" || status === "delivered";
+}
+
 async function deliverOutboxRow(
   adminClient: SupabaseClient,
   row: OutboxRow,
@@ -194,11 +294,17 @@ async function deliverOutboxRow(
     return { ok: false, errorMessage: "invalid_notification_kind" };
   }
 
-  const request = await loadLeaveRequest(adminClient, row.request_id);
+  const requestResult = await loadLeaveRequest(adminClient, row.request_id);
 
-  if (!request) {
+  if (requestResult.errorMessage) {
+    return { ok: false, errorMessage: requestResult.errorMessage };
+  }
+
+  if (!requestResult.request) {
     return { ok: false, errorMessage: "missing_leave_request" };
   }
+
+  const request = requestResult.request;
 
   const employee = await loadProfileNotificationContext(adminClient, row.employee_profile_id);
 
@@ -226,6 +332,10 @@ async function deliverOutboxRow(
     recipientEmailOverride: deliveryGate.recipientOverride,
   });
 
+  if (sendResult.duplicate) {
+    return { ok: true, errorMessage: null };
+  }
+
   if (!sendResult.ok) {
     const reason =
       sendResult.failureReason ??
@@ -252,7 +362,13 @@ async function deliverOutboxRow(
   return { ok: true, errorMessage: null };
 }
 
-async function loadLeaveRequest(adminClient: SupabaseClient, requestId: string) {
+async function loadLeaveRequest(
+  adminClient: SupabaseClient,
+  requestId: string
+): Promise<{
+  request: LeaveRequestRow | null;
+  errorMessage: string | null;
+}> {
   const { data, error } = await adminClient
     .from("staff_leave_requests")
     .select("id, leave_kind, status, start_date, end_date, days_requested")
@@ -260,8 +376,21 @@ async function loadLeaveRequest(adminClient: SupabaseClient, requestId: string) 
     .maybeSingle();
 
   if (error) {
-    throw error;
+    if (error.code === "42501") {
+      return {
+        request: null,
+        errorMessage: "staff_leave_requests_select_denied",
+      };
+    }
+
+    return {
+      request: null,
+      errorMessage: error.message || "staff_leave_request_load_failed",
+    };
   }
 
-  return data as LeaveRequestRow | null;
+  return {
+    request: (data as LeaveRequestRow | null) ?? null,
+    errorMessage: null,
+  };
 }

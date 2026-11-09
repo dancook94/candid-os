@@ -261,7 +261,8 @@ test("outbox claim uses conditional status update for worker races", async () =>
     new URL("./notifications/process-outbox.ts", import.meta.url),
     "utf8"
   );
-  assert.match(processor, /\.in\("status", \["pending", "failed"\]\)/);
+  assert.match(processor, /buildStaffLeaveOutboxClaimFilter/);
+  assert.match(processor, /\.or\(claimFilter\)/);
   assert.match(processor, /idempotencyKey: staffLeaveNotificationIdempotencyKey/);
 });
 
