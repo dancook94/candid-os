@@ -59,6 +59,16 @@ test("processor handles errors without leaving silent processing state", async (
   assert.match(source, /notificationAlreadyDelivered/);
   assert.match(source, /sendResult\.duplicate/);
   assert.match(source, /STAFF_LEAVE_OUTBOX_MAX_ATTEMPTS/);
+  assert.match(source, /input\?\.outboxId/);
+});
+
+test("scoped outboxId processing limits to a single row", async () => {
+  const source = await readFile(
+    new URL("./process-outbox.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(source, /\.eq\("id", input\.outboxId\)/);
+  assert.match(source, /input\?\.outboxId != null[\s\S]*\? 1/);
 });
 
 test("retry limit constant remains five attempts", () => {

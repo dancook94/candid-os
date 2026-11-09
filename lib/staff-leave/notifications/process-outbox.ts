@@ -77,9 +77,12 @@ export function buildStaffLeaveOutboxClaimFilter(staleCutoffIso: string) {
 
 export async function processStaffLeaveNotificationOutbox(
   adminClient: SupabaseClient,
-  input?: { requestId?: string; limit?: number }
+  input?: { outboxId?: string; requestId?: string; limit?: number }
 ): Promise<ProcessStaffLeaveOutboxResult> {
-  const limit = input?.limit ?? STAFF_LEAVE_OUTBOX_DEFAULT_BATCH_LIMIT;
+  const limit =
+    input?.outboxId != null && input.outboxId !== ""
+      ? 1
+      : input?.limit ?? STAFF_LEAVE_OUTBOX_DEFAULT_BATCH_LIMIT;
   const staleCutoff = staleStaffLeaveOutboxLockCutoff();
   const claimFilter = buildStaffLeaveOutboxClaimFilter(staleCutoff);
 
@@ -101,7 +104,9 @@ export async function processStaffLeaveNotificationOutbox(
     .order("created_at", { ascending: true })
     .limit(limit);
 
-  if (input?.requestId) {
+  if (input?.outboxId) {
+    query = query.eq("id", input.outboxId);
+  } else if (input?.requestId) {
     query = query.eq("request_id", input.requestId);
   }
 

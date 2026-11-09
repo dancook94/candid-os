@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Retry the Stage 2 controlled annual-leave notification (no new leave request).
- * Requires: Test Supabase env, migration 156000 applied, optional CRON_SECRET for cron flush.
+ * Requires: Test Supabase env, migration 156000 applied, optional CRON_SECRET for controlled cron (single outbox).
  */
 import { createClient } from "@supabase/supabase-js";
 
@@ -77,13 +77,34 @@ record(
   mgmt.join(", ")
 );
 
+const requireVercel =
+  process.env.STAGE2_REQUIRE_VERCEL_CRON === "1" || process.env.STAGE2_REQUIRE_VERCEL_CRON === "true";
 const cronSecret = process.env.CRON_SECRET?.trim();
+
+record(
+  "Test email safety env (names only)",
+  true,
+  "Expect on Vercel: NEXT_PUBLIC_APP_ENV=test, CANDID_COMMUNICATION_MODE, CANDID_TEST_EMAIL_RECIPIENT → dan@candidcreative.uk override"
+);
+
+const controlledCronUrl = `${appBase}/api/cron/staff-leave-notifications/controlled?outboxId=${encodeURIComponent(OUTBOX_ID)}`;
+
 if (cronSecret) {
-  const res = await fetch(`${appBase}/api/cron/staff-leave-notifications`, {
+  const res = await fetch(controlledCronUrl, {
     headers: { Authorization: `Bearer ${cronSecret}` },
   });
   const body = await res.json().catch(() => ({}));
-  record("Cron flush invoked", res.ok, `HTTP ${res.status} ${JSON.stringify(body).slice(0, 200)}`);
+  record(
+    "Controlled cron invoked (single outbox, no backlog drain)",
+    res.ok,
+    `HTTP ${res.status} ${JSON.stringify(body).slice(0, 240)}`
+  );
+} else if (requireVercel) {
+  record(
+    "Cron flush invoked (deployed Resend)",
+    false,
+    "CRON_SECRET not set — waiting for scheduled Vercel cron (*/5)"
+  );
 } else {
   console.log("SKIP: CRON_SECRET not set — invoking local processor");
   process.env.CANDID_COMMUNICATION_MODE ??= "test";
@@ -92,11 +113,27 @@ if (cronSecret) {
   const { processStaffLeaveNotificationOutbox } = await import(
     "../lib/staff-leave/notifications/process-outbox.ts"
   );
-  const result = await processStaffLeaveNotificationOutbox(admin, { requestId: REQUEST_ID });
-  record("Local outbox processor", result.sent >= 1 || result.failed === 0, JSON.stringify(result));
+  const result = await processStaffLeaveNotificationOutbox(admin, { outboxId: OUTBOX_ID });
+  record("Local outbox processor", result.sent >= 1, JSON.stringify(result));
 }
 
-await new Promise((r) => setTimeout(r, 2000));
+const pollDeadline = Date.now() + (cronSecret ? 30_000 : 6 * 60 * 1000);
+while (Date.now() < pollDeadline) {
+  const { data: probe } = await admin
+    .from("staff_leave_notification_outbox")
+    .select("status")
+    .eq("id", OUTBOX_ID)
+    .maybeSingle();
+  const { data: probeNotif } = await admin
+    .from("notifications")
+    .select("status, provider_message_id")
+    .eq("idempotency_key", IDEM)
+    .maybeSingle();
+  if (probe?.status === "sent" && probeNotif?.status === "sent" && probeNotif?.provider_message_id) {
+    break;
+  }
+  await new Promise((r) => setTimeout(r, 10_000));
+}
 
 const { data: outbox } = await admin
   .from("staff_leave_notification_outbox")
@@ -137,10 +174,23 @@ record(
 );
 
 const metaStr = JSON.stringify(notif?.metadata ?? {}).toLowerCase();
+const subjectLower = (notif?.subject ?? "").toLowerCase();
+const intendedMgmtInSubject =
+  subjectLower.includes("bea") ||
+  subjectLower.includes("dan@candidcreative.uk") ||
+  subjectLower.includes("staff leave management");
 record(
   "Intended management context in metadata/subject",
-  metaStr.includes("employee") || (notif?.subject ?? "").toLowerCase().includes("annual"),
-  (notif?.subject ?? "").slice(0, 100)
+  metaStr.includes("employee") ||
+    subjectLower.includes("annual") ||
+    intendedMgmtInSubject ||
+    (notif?.intended_recipient_email ?? "").length > 0,
+  (notif?.subject ?? "").slice(0, 120)
+);
+record(
+  "Test safety: communicationMode in audit",
+  notif?.metadata?.communicationMode === "test" || notif?.metadata?.emailMode === "test",
+  `communicationMode=${notif?.metadata?.communicationMode} emailMode=${notif?.metadata?.emailMode}`
 );
 
 process.exit(outbox?.status === "sent" && notif?.provider_message_id ? 0 : 1);

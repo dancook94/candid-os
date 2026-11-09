@@ -103,7 +103,31 @@ SELECT to_regprocedure('public.allocate_next_quote_number()') IS NOT NULL AS has
 ROLLBACK;
 ```
 
-## 6. Invoice confirm validation (already on Test)
+## 6. Staff leave outbox discard (`20270110157000_staff_leave_notification_outbox_discard.sql`)
+
+**Test only.** Apply after `20270110156000_staff_leave_notification_service_role_grants.sql`.
+
+Paste the full file:
+
+`supabase/migrations/20270110157000_staff_leave_notification_outbox_discard.sql`
+
+**Post-apply smoke:**
+
+```sql
+SELECT column_name
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = 'staff_leave_notification_outbox'
+  AND column_name IN ('discarded_at', 'discard_reason');
+
+SELECT pg_get_constraintdef(oid)
+FROM pg_constraint
+WHERE conname = 'staff_leave_notification_outbox_status_check';
+```
+
+Expect `discarded` in the status check. Controlled notification behaviour: `docs/staff-leave-controlled-notifications-test.md`.
+
+## 7. Invoice confirm validation (already on Test)
 
 Run rollback-only script (no commit):
 

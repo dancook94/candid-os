@@ -168,6 +168,14 @@ test("cron route exists for outbox retries", async () => {
   assert.match(cron, /handleStaffLeaveNotificationsCron/);
 });
 
+test("controlled cron route exists for Test-only scoped delivery", async () => {
+  const cron = await readFile(
+    new URL("../../app/api/cron/staff-leave-notifications/controlled/route.ts", import.meta.url),
+    "utf8"
+  );
+  assert.match(cron, /handleStaffLeaveControlledNotificationsCron/);
+});
+
 test("leave notification tests are registered in npm test script", async () => {
   const pkg = await readFile(new URL("../../package.json", import.meta.url), "utf8");
   assert.match(pkg, /lib\/staff-leave\/leave-notifications\.test\.ts/);
