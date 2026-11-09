@@ -67,6 +67,39 @@ test("bank holidays on non-working weekdays do not deduct from part-time pattern
   assert.equal(breakdown.bookableEntitlementDays, 28);
 });
 
+test("segmented entitlement migration defines in-range reserved pool", async () => {
+  const sql = await readFile(
+    new URL(
+      "../../supabase/migrations/20270110152000_staff_leave_reserved_pool_snapshot.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  assert.match(sql, /staff_leave_entitlement_days_segmented/);
+  assert.match(sql, /staff_leave_reserved_pool_in_range/);
+  assert.match(sql, /IF pat\.effective_from > as_of THEN/);
+  assert.match(sql, /staff_leave_reserved_pool_in_range_for_pattern/);
+  assert.match(sql, /next_eff <= as_of/);
+});
+
+test("hotfix migration fixes balance ambiguity and segmented closure counts", async () => {
+  const sql = await readFile(
+    new URL(
+      "../../supabase/migrations/20270110153000_staff_leave_balance_ambiguity_and_breakdown_counts.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  assert.match(sql, /py\.holiday_year = v_holiday_year/);
+  assert.match(sql, /staff_leave_entitlement_closure_counts/);
+  assert.doesNotMatch(sql, /\bALTER TABLE\b/i);
+  assert.doesNotMatch(sql, /BEGIN;/);
+  const dollarTags = sql.match(/AS \$fn_[a-z_]+\$/g) ?? [];
+  const dollarEnds = sql.match(/\$fn_[a-z_]+\$;/g) ?? [];
+  assert.equal(dollarTags.length, dollarEnds.length);
+  assert.equal(dollarTags.length, 3);
+});
+
 test("full-time Mon–Fri retains 17 bookable days after compulsory deductions", () => {
   const breakdown = buildEntitlementBreakdown({
     grossPolicyDays: 28,
