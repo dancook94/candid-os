@@ -14,6 +14,9 @@ export type LeaveRequestRow = {
   days_requested: number;
   employee_note: string | null;
   decision_note: string | null;
+  cancelled_at: string | null;
+  cancelled_by: string | null;
+  cancellation_reason: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -90,7 +93,7 @@ export async function fetchOwnLeaveRequests(
   const { data, error } = await supabase
     .from("staff_leave_requests")
     .select(
-      "id, profile_id, holiday_year, status, start_date, end_date, day_portion, days_requested, employee_note, decision_note, created_at, updated_at"
+      "id, profile_id, holiday_year, status, start_date, end_date, day_portion, days_requested, employee_note, decision_note, cancelled_at, cancelled_by, cancellation_reason, created_at, updated_at"
     )
     .eq("profile_id", profileId)
     .eq("holiday_year", holidayYear)
@@ -106,7 +109,7 @@ export async function fetchLeaveRequestsForAdmin(
   let query = supabase
     .from("staff_leave_requests")
     .select(
-      "id, profile_id, holiday_year, status, start_date, end_date, day_portion, days_requested, employee_note, decision_note, created_at, updated_at, profiles(full_name, user_role)"
+      "id, profile_id, holiday_year, status, start_date, end_date, day_portion, days_requested, employee_note, decision_note, cancelled_at, cancelled_by, cancellation_reason, created_at, updated_at, profiles(full_name, user_role)"
     )
     .eq("holiday_year", input.holidayYear)
     .order("created_at", { ascending: false });

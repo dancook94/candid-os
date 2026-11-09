@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   buildLeaveCalendarHref,
   leaveCalendarYearOptions,
+  londonTodayIso,
   londonYearMonthNow,
   parseYearMonth,
 } from "@/lib/staff-leave/calendar";
@@ -14,6 +15,11 @@ describe("leave calendar navigation", () => {
       year: 2026,
       month: 11,
     });
+  });
+
+  it("resolves London today as an ISO date for leave rules", () => {
+    assert.equal(londonTodayIso(new Date("2027-01-01T00:30:00Z")), "2027-01-01");
+    assert.equal(londonTodayIso(new Date("2027-06-30T23:30:00Z")), "2027-07-01");
   });
 
   it("falls back to London today when query params are invalid", () => {

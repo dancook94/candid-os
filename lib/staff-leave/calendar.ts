@@ -17,6 +17,15 @@ export const LEAVE_CALENDAR_MONTH_NAMES = [
   "December",
 ] as const;
 
+export function londonTodayIso(reference = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: LEAVE_CALENDAR_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(reference);
+}
+
 export function londonYearMonthNow(reference = new Date()) {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: LEAVE_CALENDAR_TIME_ZONE,

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { AppShell } from "@/components/app-shell";
 import { AdminEntitlementForm } from "@/components/staff-leave/admin-entitlement-form";
 import { AdminLeavePendingQueue } from "@/components/staff-leave/admin-leave-pending-queue";
+import { LeaveRequestsHistory } from "@/components/staff-leave/leave-requests-history";
 import { AdminOverlapWarnings } from "@/components/staff-leave/admin-overlap-warnings";
 import { LeaveCalendar } from "@/components/staff-leave/leave-calendar";
 import { LeaveLegend } from "@/components/staff-leave/leave-legend";
@@ -26,6 +27,7 @@ import {
   buildMonthGrid,
   formatMonthHeading,
   monthNavigation,
+  londonTodayIso,
   parseYearMonth,
 } from "@/lib/staff-leave/calendar";
 import { findOverlappingLeaveWarnings } from "@/lib/staff-leave/overlap";
@@ -70,6 +72,7 @@ export default async function AdminLeavePage({ searchParams }: PageProps) {
     .single();
 
   const holidayYear = STAFF_LEAVE_FIRST_POLICY_YEAR;
+  const londonToday = londonTodayIso();
   const { year: calendarYear, month: calendarMonth } = parseYearMonth(params);
   const nav = monthNavigation(calendarYear, calendarMonth);
   const todayIso = formatIsoDateLocal(new Date());
@@ -202,6 +205,17 @@ export default async function AdminLeavePage({ searchParams }: PageProps) {
             <AdminLeavePendingQueue requests={pendingResult.requests} />
           </CardContent>
         </Card>
+
+        <LeaveRequestsHistory
+          title="Team holiday history"
+          requests={allRequests.requests}
+          emptyMessage="No holiday requests recorded for this year yet."
+          cancelApiBase="/api/admin/leave/requests"
+          showEmployeeName
+          viewerProfileId={user!.id}
+          isApprovedAdmin
+          londonToday={londonToday}
+        />
 
         <div className="grid gap-6 lg:grid-cols-2">
           <Card className="portal-surface rounded-2xl shadow-sm ring-0">

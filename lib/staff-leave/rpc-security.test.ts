@@ -10,6 +10,7 @@ const MIGRATION = new URL(
 const PUBLIC_RPCS = [
   "submit_staff_leave_request",
   "decide_staff_leave_request",
+  "cancel_staff_leave_request",
   "record_staff_absence_sickness",
   "list_staff_absence_sickness_own",
   "list_staff_absence_sickness_admin",
@@ -72,7 +73,17 @@ test("internal helpers are not granted to authenticated", async () => {
 
 test("only expected RPCs are granted to authenticated", async () => {
   const sql = await readFile(MIGRATION, "utf8");
-  const grants = [...sql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)/g)].map((m) => m[1]);
+  const cancelSql = await readFile(
+    new URL(
+      "../../supabase/migrations/20270110140000_staff_leave_cancellation.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+  const grants = [
+    ...sql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)/g),
+    ...cancelSql.matchAll(/GRANT EXECUTE ON FUNCTION public\.(\w+)/g),
+  ].map((m) => m[1]);
 
   for (const rpc of PUBLIC_RPCS) {
     assert.ok(grants.includes(rpc), `missing grant for ${rpc}`);
@@ -87,11 +98,35 @@ test("only expected RPCs are granted to authenticated", async () => {
   }
 });
 
+test("cancel_staff_leave_request is granted only on the cancellation migration", async () => {
+  const phase1 = await readFile(MIGRATION, "utf8");
+  const cancelSql = await readFile(
+    new URL(
+      "../../supabase/migrations/20270110140000_staff_leave_cancellation.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
+
+  assert.doesNotMatch(phase1, /cancel_staff_leave_request/);
+  assert.match(cancelSql, /GRANT EXECUTE ON FUNCTION public\.cancel_staff_leave_request/);
+  assert.match(cancelSql, /REVOKE ALL ON FUNCTION public\.cancel_staff_leave_request/);
+});
+
 test("mutation RPCs enforce role checks in SQL", async () => {
   const sql = await readFile(MIGRATION, "utf8");
+  const cancelSql = await readFile(
+    new URL(
+      "../../supabase/migrations/20270110140000_staff_leave_cancellation.sql",
+      import.meta.url
+    ),
+    "utf8"
+  );
 
   assert.match(sql, /submit_staff_leave_request[\s\S]*is_approved_staff\(\)/);
   assert.match(sql, /decide_staff_leave_request[\s\S]*is_approved_candid_admin\(\)/);
+  assert.match(cancelSql, /cancel_staff_leave_request[\s\S]*is_approved_staff\(\)/);
+  assert.match(cancelSql, /cancel_staff_leave_request[\s\S]*is_approved_candid_admin\(\)/);
   assert.match(sql, /record_staff_absence_sickness[\s\S]*is_approved_candid_admin\(\)/);
   assert.match(sql, /list_staff_absence_sickness_admin[\s\S]*is_approved_candid_admin\(\)/);
   assert.match(sql, /list_staff_absence_sickness_own[\s\S]*is_approved_staff\(\)/);
@@ -132,6 +167,7 @@ test("admin balance API delegates access control to staff_leave_balance RPC", as
 
   assert.match(source, /canDecideLeaveRequests/);
   assert.match(source, /staff_leave_balance/);
+  assert.match(source, /p_holiday_year/);
 });
 
 test("staff balance API uses authenticated profile only", async () => {
@@ -142,4 +178,5 @@ test("staff balance API uses authenticated profile only", async () => {
 
   assert.match(source, /auth\.userId/);
   assert.match(source, /staff_leave_balance/);
+  assert.match(source, /p_holiday_year/);
 });

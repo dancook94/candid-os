@@ -3,7 +3,7 @@ import { LeaveBalanceCards } from "@/components/staff-leave/leave-balance-cards"
 import { LeaveCalendar } from "@/components/staff-leave/leave-calendar";
 import { LeaveLegend } from "@/components/staff-leave/leave-legend";
 import { LeaveRequestForm } from "@/components/staff-leave/leave-request-form";
-import { LeaveRequestsTable } from "@/components/staff-leave/leave-requests-table";
+import { LeaveRequestsHistory } from "@/components/staff-leave/leave-requests-history";
 import { PageHeader } from "@/components/page-header";
 import {
   Card,
@@ -23,6 +23,7 @@ import {
   buildMonthGrid,
   formatMonthHeading,
   monthNavigation,
+  londonTodayIso,
   parseYearMonth,
 } from "@/lib/staff-leave/calendar";
 import {
@@ -67,6 +68,7 @@ export default async function StaffLeavePage({ searchParams }: PageProps) {
   const staffProfile = requireStaffLeavePageAccess(profile, profileError, STAFF_LEAVE_PATH);
 
   const holidayYear = STAFF_LEAVE_FIRST_POLICY_YEAR;
+  const londonToday = londonTodayIso();
   const { year: calendarYear, month: calendarMonth } = parseYearMonth(params);
   const nav = monthNavigation(calendarYear, calendarMonth);
 
@@ -79,12 +81,14 @@ export default async function StaffLeavePage({ searchParams }: PageProps) {
 
   const balance = balanceResult.balance;
 
-  const ownSpans = ownRequests.requests.map((request) => ({
-    start_date: request.start_date,
-    end_date: request.end_date,
-    status: request.status,
-    label: request.status === "pending" ? "Your pending leave" : "Your approved leave",
-  }));
+  const ownSpans = ownRequests.requests
+    .filter((request) => request.status === "pending" || request.status === "approved")
+    .map((request) => ({
+      start_date: request.start_date,
+      end_date: request.end_date,
+      status: request.status,
+      label: request.status === "pending" ? "Your pending leave" : "Your approved leave",
+    }));
 
   const teamApprovedSpans = teamLeave.requests
     .filter((request) => request.profile_id !== user.id && request.status === "approved")
@@ -182,10 +186,14 @@ export default async function StaffLeavePage({ searchParams }: PageProps) {
             </CardContent>
           </Card>
 
-          <LeaveRequestsTable
+          <LeaveRequestsHistory
             title="Your requests"
             requests={ownRequests.requests}
             emptyMessage="You have not submitted any leave requests for this holiday year yet."
+            cancelApiBase="/api/staff/leave/requests"
+            viewerProfileId={user.id}
+            isApprovedAdmin={false}
+            londonToday={londonToday}
           />
         </div>
       </div>
