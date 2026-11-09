@@ -35,7 +35,9 @@ import {
   fetchOwnLeaveRequests,
 } from "@/lib/staff-leave/queries";
 import { STAFF_LEAVE_FIRST_POLICY_YEAR } from "@/lib/staff-leave/types";
+import { buildLoginUrl } from "@/lib/auth-redirect";
 import { createClient } from "@/lib/supabase/server";
+import { redirect } from "next/navigation";
 
 export const dynamic = "force-dynamic";
 
@@ -51,10 +53,14 @@ export default async function StaffLeavePage({ searchParams }: PageProps) {
     data: { user },
   } = await supabase.auth.getUser();
 
+  if (!user) {
+    redirect(buildLoginUrl(STAFF_LEAVE_PATH));
+  }
+
   const { data: profile, error: profileError } = await supabase
     .from("profiles")
     .select("full_name, user_role, account_status, avatar_storage_path")
-    .eq("id", user!.id)
+    .eq("id", user.id)
     .single();
 
   const staffProfile = requireStaffLeavePageAccess(profile, profileError, STAFF_LEAVE_PATH);
@@ -67,8 +73,8 @@ export default async function StaffLeavePage({ searchParams }: PageProps) {
   const nav = monthNavigation(year, month);
 
   const [balanceResult, ownRequests, reference, teamLeave] = await Promise.all([
-    fetchLeaveBalance(supabase, user!.id, holidayYear),
-    fetchOwnLeaveRequests(supabase, user!.id, holidayYear),
+    fetchLeaveBalance(supabase, user.id, holidayYear),
+    fetchOwnLeaveRequests(supabase, user.id, holidayYear),
     fetchLeaveReferenceData(supabase, holidayYear),
     fetchApprovedTeamLeave(supabase, holidayYear),
   ]);
@@ -83,7 +89,7 @@ export default async function StaffLeavePage({ searchParams }: PageProps) {
   }));
 
   const teamApprovedSpans = teamLeave.requests
-    .filter((request) => request.profile_id !== user!.id && request.status === "approved")
+    .filter((request) => request.profile_id !== user.id && request.status === "approved")
     .map((request) => {
       const teamProfile = Array.isArray(request.profiles)
         ? request.profiles[0]

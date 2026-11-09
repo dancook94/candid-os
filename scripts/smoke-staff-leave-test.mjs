@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Smoke tests for Staff Holiday Phase 1 on Candid OS Test only.
+ * Smoke tests for Staff Holiday Phase 1+2 on Candid OS Test only.
  * Uses ephemeral @leave-smoke.test users; does not send customer emails.
  */
 import { createClient } from "@supabase/supabase-js";
@@ -8,10 +8,15 @@ import { createClient } from "@supabase/supabase-js";
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const appBase = (process.env.SMOKE_APP_URL ?? "https://candid-os-test.vercel.app").replace(/\/$/, "");
+const appBase = (process.env.SMOKE_APP_URL ?? "https://candid-os-test.vercel.app").replace(
+  /\/$/,
+  ""
+);
 
 if (!url || !anonKey || !serviceKey) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, or SUPABASE_SERVICE_ROLE_KEY");
+  console.error(
+    "Missing NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, or SUPABASE_SERVICE_ROLE_KEY"
+  );
   process.exit(1);
 }
 
@@ -190,14 +195,24 @@ async function main() {
 
   const apiBalance = await apiGet("/api/staff/leave/balance?year=2027", staffA.session.access_token);
   record(
-    "Staff can view own balance (deployed API)",
+    "Staff balance API accepts Bearer session",
     apiBalance.status === 200 && apiBalance.body?.balance?.entitlement_days != null,
-  `HTTP ${apiBalance.status} ${apiBalance.body?.error ?? ""} (Bearer auth; cookie session may be required)`
+    `HTTP ${apiBalance.status} ${apiBalance.body?.error ?? ""}`
   );
 
+  const apiRequests = await apiGet("/api/staff/leave/requests?year=2027", staffA.session.access_token);
+  record(
+    "Staff requests API accepts Bearer session",
+    apiRequests.status === 200 && Array.isArray(apiRequests.body?.requests),
+    `HTTP ${apiRequests.status} ${apiRequests.body?.error ?? ""}`
+  );
+
+  const smokeDay = (Date.now() % 28) + 1;
+  const smokeIso = `2027-10-${String(smokeDay).padStart(2, "0")}`;
+
   const submit = await rpc(staffA.client, "submit_staff_leave_request", {
-    p_start_date: "2027-06-14",
-    p_end_date: "2027-06-14",
+    p_start_date: smokeIso,
+    p_end_date: smokeIso,
     p_day_portion: "full",
     p_employee_note: "Smoke test request — safe to delete",
   });
@@ -207,6 +222,32 @@ async function main() {
     !submit.error && requestId,
     submit.error?.message
   );
+
+  let declineRequestId = null;
+  if (adminSession) {
+    const declineSubmit = await rpc(staffB.client, "submit_staff_leave_request", {
+      p_start_date: "2027-08-11",
+      p_end_date: "2027-08-11",
+      p_day_portion: "full",
+      p_employee_note: "Smoke decline path",
+    });
+    declineRequestId = declineSubmit.data?.id;
+
+    if (declineRequestId) {
+      const declineApi = await apiPost(
+        `/api/admin/leave/requests/${declineRequestId}/decide`,
+        adminSession.session.access_token,
+        { decision: "rejected", decisionNote: "Smoke decline" }
+      );
+      record(
+        "Admin decline API accepts Bearer session",
+        declineApi.status === 200 && declineApi.body?.request?.status === "rejected",
+        `HTTP ${declineApi.status} ${declineApi.body?.error ?? ""}`
+      );
+    }
+  } else {
+    record("Admin decline API accepts Bearer session", false, "No admin session");
+  }
 
   if (adminSession && requestId) {
     const decide = await rpc(adminSession.client, "decide_staff_leave_request", {
@@ -311,13 +352,13 @@ async function main() {
   const balanceGift = giftedRpc.data?.[0];
   const reserved = Number(balanceGift?.reserved_pool_days ?? NaN);
   record(
-    "Gifted closure does not inflate reserved pool (3 compulsory slots)",
-    !giftedRpc.error && reserved === 3,
+    "Reserved pool is 11 days (8 bank holidays + 3 compulsory closures on working days)",
+    !giftedRpc.error && reserved === 11,
     giftedRpc.error?.message ?? `reserved_pool_days=${balanceGift?.reserved_pool_days}`
   );
   const gross = Number(balanceGift?.gross_allowance_days ?? NaN);
   record(
-    "2027 gross allowance remains 28 (gifted day does not reduce gross)",
+    "2027 gross allowance remains 28 (gifted 31 Dec does not reduce gross or bookable pool)",
     gross === 28,
     `gross_allowance_days=${balanceGift?.gross_allowance_days}`
   );
@@ -335,6 +376,7 @@ async function main() {
 
   await cleanupRequest(admin, requestId);
   await cleanupRequest(admin, selfRequestId);
+  await cleanupRequest(admin, declineRequestId);
   await cleanupSickness(admin, sicknessId);
 
   const failed = results.filter((r) => !r.pass);
