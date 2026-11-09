@@ -23,6 +23,7 @@ test("controlled cron handler is gated to Test app env", async () => {
   assert.match(source, /outboxId/);
   assert.doesNotMatch(source, /requestId/);
   assert.match(source, /cronAuthorizationMatches/);
+  assert.match(source, /staffLeaveControlledE2eAuthorized/);
   assert.match(source, /processStaffLeaveNotificationOutbox/);
   assert.match(source, /limit:\s*1,/);
   assert.match(source, /scheduled cron/i);

@@ -10,7 +10,11 @@
  * - Deploy d5fc96c+ with /api/cron/staff-leave-notifications/controlled
  * - CRON_SECRET (recommended) or local Resend + communication test env
  */
+import { createHash } from "node:crypto";
+import fs from "node:fs";
 import { createClient } from "@supabase/supabase-js";
+
+const E2E_SALT = "staff-leave-controlled-e2e-v1";
 
 const TEST_REF = "axhkdwgmwhlbsstumndh";
 const APP_BASE = (process.env.SMOKE_APP_URL ?? "https://candid-os-test.vercel.app").replace(
@@ -23,7 +27,19 @@ const RUN_NOTE_PREFIX = "Stage2 E2E notifications";
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const cronSecret = process.env.CRON_SECRET?.trim();
+function loadCronSecret() {
+  const direct = process.env.CRON_SECRET?.trim();
+  if (direct) return direct;
+  const file = process.env.CRON_SECRET_FILE?.trim();
+  if (!file) return "";
+  try {
+    return fs.readFileSync(file, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
+const cronSecret = loadCronSecret();
 
 const STAFF_A = {
   email: "leave-smoke-staff-a@leave-smoke.test",
@@ -177,14 +193,28 @@ async function waitForOutbox(adminSvc, requestId, kind, timeoutMs = 60_000) {
   return null;
 }
 
+function e2eControlledBearer(serviceRoleKey) {
+  return createHash("sha256").update(`${serviceRoleKey.trim()}:${E2E_SALT}`).digest("hex");
+}
+
 async function deliverOutbox(adminSvc, outboxId) {
-  if (cronSecret) {
-    const res = await fetch(
-      `${APP_BASE}/api/cron/staff-leave-notifications/controlled?outboxId=${encodeURIComponent(outboxId)}`,
-      { headers: { Authorization: `Bearer ${cronSecret}` } }
-    );
+  const useE2eAuth = !cronSecret && Boolean(serviceKey?.trim());
+  const bearer = cronSecret ?? (useE2eAuth ? e2eControlledBearer(serviceKey) : "");
+
+  if (bearer) {
+    const qs = new URLSearchParams({ outboxId, ...(useE2eAuth ? { e2eAuth: "1" } : {}) });
+    const res = await fetch(`${APP_BASE}/api/cron/staff-leave-notifications/controlled?${qs}`, {
+      headers: {
+        Authorization: `Bearer ${bearer}`,
+        ...(useE2eAuth ? { "X-Staff-Leave-E2E": "1" } : {}),
+      },
+    });
     const body = await res.json().catch(() => ({}));
-    return { ok: res.ok, body, channel: "controlled_cron" };
+    return {
+      ok: res.ok,
+      body,
+      channel: useE2eAuth ? "controlled_cron_e2e_auth" : "controlled_cron",
+    };
   }
 
   process.env.NEXT_PUBLIC_APP_ENV ??= "test";
@@ -294,9 +324,10 @@ async function preflight(adminSvc) {
     blockers.push(`Controlled cron unexpected status ${deployCheck.status}`);
   }
 
-  if (!cronSecret) {
+  const canUseE2eAuth = Boolean(serviceKey?.trim());
+  if (!cronSecret && !canUseE2eAuth) {
     blockers.push(
-      "CRON_SECRET not set — refusing to send (set CRON_SECRET to use controlled cron on candid-os-test)"
+      "CRON_SECRET or SUPABASE_SERVICE_ROLE_KEY required for controlled delivery on candid-os-test"
     );
   }
 

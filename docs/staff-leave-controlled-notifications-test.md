@@ -56,4 +56,6 @@ DATABASE_URL='postgresql://...' npx tsx scripts/apply-staff-leave-outbox-discard
 CRON_SECRET='…' npm run verify:stage2-leave-notifications-e2e
 ```
 
+When `CRON_SECRET` is not available locally, the E2E script may use **Test-only** `e2eAuth=1` with a bearer derived from `SUPABASE_SERVICE_ROLE_KEY` (same key as on candid-os-test; never sent on the wire as the raw key). Production schedulers still require `CRON_SECRET`.
+
 Runs six scenarios via RPC (no API flush), delivers each outbox through the controlled cron, and prints a PASS/FAIL table. Requires an empty claimable outbox queue when possible; scheduled cron may still deliver unrelated mail concurrently.

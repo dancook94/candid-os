@@ -1,5 +1,6 @@
 import { isTestAppEnvironment } from "@/lib/app-env";
 import { cronAuthorizationMatches } from "@/lib/gmail/cron-auth";
+import { staffLeaveControlledE2eAuthorized } from "@/lib/staff-leave/notifications/controlled-e2e-auth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { processStaffLeaveNotificationOutbox } from "@/lib/staff-leave/notifications/process-outbox";
 
@@ -20,7 +21,12 @@ export async function handleStaffLeaveControlledNotificationsCron(request: Reque
     return Response.json({ error: "CRON_SECRET is not configured." }, { status: 503 });
   }
 
-  if (!cronAuthorizationMatches(request.headers.get("authorization"), cronSecret)) {
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const authorized =
+    cronAuthorizationMatches(request.headers.get("authorization"), cronSecret) ||
+    staffLeaveControlledE2eAuthorized(request, serviceRoleKey);
+
+  if (!authorized) {
     return Response.json({ error: "Unauthorized." }, { status: 401 });
   }
 
