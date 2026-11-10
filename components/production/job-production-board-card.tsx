@@ -114,6 +114,9 @@ export function JobProductionBoardCardView({
         {card.priority_label ? <p>Priority: {card.priority_label}</p> : null}
         {card.assigned_staff_name ? <p>Assigned: {card.assigned_staff_name}</p> : null}
         <p>Artwork: {card.artwork_status_label}</p>
+        {card.installation_label ? (
+          <p className="font-medium text-sky-800">{card.installation_label}</p>
+        ) : null}
         <div className="flex items-center gap-2">
           <span>Proof:</span>
           <StatusBadge status={card.proof_status_badge} label={card.proof_status_label} />

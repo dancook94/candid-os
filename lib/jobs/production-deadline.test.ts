@@ -55,6 +55,7 @@ function buildBoardCard(
     preview_is_shared_print: false,
     preview_printfactory_job_guid: null,
     preview_output_page_count: 0,
+    installation_label: null,
     ...overrides,
   };
 }

@@ -32,6 +32,8 @@ import { loadProofSelectableManifestItems } from "@/lib/proofs/manifest-items";
 import { loadJobFileManifestLinks } from "@/lib/proofs/service";
 import { loadPrintfactoryPreviewsForJob } from "@/lib/printfactory/job-previews";
 import { isSlackEnabled } from "@/lib/slack/config";
+import { loadInstallationJobSignal } from "@/lib/installations/job-signal";
+import { canReadInstallations } from "@/lib/installations/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -90,6 +92,11 @@ export default async function AdminJobDetailPage({
   }
 
   const shellProps = await buildAdminAppShellProps(supabase, profile);
+  const installationSignal = await loadInstallationJobSignal(adminClient, {
+    jobId: detail.job.id,
+    quoteVersionId: detail.job.quote_version_id,
+    canReadInstallations: canReadInstallations(profile),
+  });
 
   let manifestResult = await loadManifestItemsForJob(adminClient, id);
 
@@ -180,6 +187,25 @@ export default async function AdminJobDetailPage({
                 {detail.job.artwork_required ? "Yes" : "No"}
               </p>
             </div>
+            {installationSignal.required ? (
+              <div>
+                <p className="text-muted-foreground">Installation</p>
+                <p className="mt-2 font-medium text-neutral-950">Requires Installation</p>
+                {installationSignal.showManagementLink && installationSignal.projectId ? (
+                  <Link
+                    href={`/admin/installations/${installationSignal.projectId}`}
+                    className="mt-1 inline-block text-sm underline-offset-4 hover:underline"
+                  >
+                    Open installation project
+                  </Link>
+                ) : null}
+                {installationSignal.missingProject ? (
+                  <p className="mt-1 text-sm text-amber-800">
+                    This accepted job requires installation, but its installation project has not been created.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
             <div>
               <p className="text-muted-foreground">Dropbox setup</p>
               <p className="mt-2 font-medium text-neutral-950">

@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { INSTALLATION_FILES_BUCKET } from "@/lib/installations/constants";
+import { isOutstandingInstallationSnag } from "@/lib/installations/job-signal";
 import { londonDateKey } from "@/lib/installations/labels";
 
 type NameRow = { full_name?: string | null };
@@ -17,6 +18,10 @@ export type InstallationSnag = {
   id: string;
   description: string;
   status: string;
+  assignedToProfileId: string | null;
+  resolutionNotes: string | null;
+  issuePhotos: InstallationFile[];
+  resolutionPhotos: InstallationFile[];
 };
 
 export type InstallationFile = {
@@ -54,6 +59,7 @@ export type InstallationVisitRecord = {
   photos: InstallationFile[];
   documents: InstallationFile[];
   signOffName: string | null;
+  signOffAt: string | null;
 };
 
 export type InstallationProjectRecord = {
@@ -68,7 +74,13 @@ export type InstallationProjectRecord = {
   jobName: string | null;
   quoteId: string | null;
   quoteNumber: number | null;
+  artwork: InstallationArtwork[];
   visits: InstallationVisitRecord[];
+};
+
+export type InstallationArtwork = {
+  id: string;
+  name: string;
 };
 
 export type InstallerOption = {
@@ -87,6 +99,20 @@ function one<T>(value: T | T[] | null | undefined): T | null {
 
 function text(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function toInstallationFile(photo: {
+  id: string;
+  name: string;
+  kind: string;
+  url: string | null;
+}): InstallationFile {
+  return {
+    id: photo.id,
+    name: photo.name,
+    kind: photo.kind,
+    url: photo.url,
+  };
 }
 
 async function signedUrl(supabase: SupabaseClient, path: string | null) {
@@ -112,7 +138,7 @@ const VISIT_SELECT = `
     profile_id,
     profiles!installation_visit_assignments_profile_id_fkey(full_name)
   ),
-  installation_snag_items(id, description, status)
+  installation_snag_items(id, description, status, assigned_to_profile_id, resolution_notes)
 `;
 
 const PROJECT_LIST_SELECT = `
@@ -130,7 +156,7 @@ const PROJECT_DETAIL_SELECT = `
   quotes(quote_number),
   installation_visits(
     ${VISIT_SELECT},
-    installation_visit_photos(id, phase, file_name, storage_path),
+    installation_visit_photos(id, phase, file_name, storage_path, snag_id, snag_photo_role),
     installation_visit_documents(id, document_kind, file_name, storage_path),
     installation_sign_offs(customer_name, signed_at)
   )
@@ -151,7 +177,32 @@ async function mapVisit(
   const documents = includeFiles && Array.isArray(row.installation_visit_documents)
     ? row.installation_visit_documents
     : [];
-  const signOff = one(row.installation_sign_offs as { customer_name?: string } | { customer_name?: string }[] | null);
+  const signOff = one(
+    row.installation_sign_offs as
+      | { customer_name?: string; signed_at?: string }
+      | { customer_name?: string; signed_at?: string }[]
+      | null
+  );
+  const mappedPhotos = await Promise.all(
+    photos.map(async (photo) => {
+      const record = photo as {
+        id?: string;
+        phase?: string;
+        file_name?: string;
+        storage_path?: string;
+        snag_id?: string | null;
+        snag_photo_role?: string | null;
+      };
+      return {
+        id: String(record.id),
+        name: record.file_name || "Photo",
+        kind: record.phase || "during",
+        url: await signedUrl(supabase, record.storage_path || null),
+        snagId: record.snag_id || null,
+        role: record.snag_photo_role || null,
+      };
+    })
+  );
 
   return {
     id: String(row.id),
@@ -183,26 +234,34 @@ async function mapVisit(
         name: profile?.full_name || "Installer",
       };
     }),
-    openSnagCount: snags.filter((snag) => (snag as { status?: string }).status === "open").length,
+    openSnagCount: snags.filter((snag) =>
+      isOutstandingInstallationSnag((snag as { status?: string }).status)
+    ).length,
     snags: snags.map((snag) => {
-      const record = snag as { id?: string; description?: string; status?: string };
+      const record = snag as {
+        id?: string;
+        description?: string;
+        status?: string;
+        assigned_to_profile_id?: string | null;
+        resolution_notes?: string | null;
+      };
+      const snagId = String(record.id);
+      const snagPhotos = mappedPhotos.filter((photo) => photo.snagId === snagId);
       return {
-        id: String(record.id),
+        id: snagId,
         description: record.description || "",
         status: record.status || "open",
+        assignedToProfileId: record.assigned_to_profile_id || null,
+        resolutionNotes: record.resolution_notes || null,
+        issuePhotos: snagPhotos
+          .filter((photo) => photo.role === "issue")
+          .map(toInstallationFile),
+        resolutionPhotos: snagPhotos
+          .filter((photo) => photo.role === "resolution")
+          .map(toInstallationFile),
       };
     }),
-    photos: await Promise.all(
-      photos.map(async (photo) => {
-        const record = photo as { id?: string; phase?: string; file_name?: string; storage_path?: string };
-        return {
-          id: String(record.id),
-          name: record.file_name || "Photo",
-          kind: record.phase || "during",
-          url: await signedUrl(supabase, record.storage_path || null),
-        };
-      })
-    ),
+    photos: mappedPhotos.filter((photo) => !photo.snagId).map(toInstallationFile),
     documents: await Promise.all(
       documents.map(async (document) => {
         const record = document as {
@@ -220,13 +279,15 @@ async function mapVisit(
       })
     ),
     signOffName: signOff?.customer_name || null,
+    signOffAt: text(signOff?.signed_at),
   };
 }
 
 async function mapProject(
   row: Record<string, unknown>,
   supabase: SupabaseClient,
-  includeFiles: boolean
+  includeFiles: boolean,
+  artwork: InstallationArtwork[] = []
 ): Promise<InstallationProjectRecord> {
   const company = one(row.companies as CompanyRow | CompanyRow[] | null);
   const job = one(row.jobs as JobRow | JobRow[] | null);
@@ -250,6 +311,7 @@ async function mapProject(
     jobName: job?.project_name || null,
     quoteId: text(row.quote_id),
     quoteNumber: typeof quote?.quote_number === "number" ? quote.quote_number : null,
+    artwork,
     visits: mappedVisits,
   };
 }
@@ -291,7 +353,25 @@ export async function loadInstallationProject(
     return null;
   }
 
-  return mapProject(data as Record<string, unknown>, reader, true);
+  const jobId = text((data as { job_id?: string | null }).job_id);
+  let artwork: InstallationArtwork[] = [];
+  if (jobId) {
+    const { data: files } = await admin
+      .from("job_files")
+      .select("id, original_file_name, file_name")
+      .eq("job_id", jobId)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false });
+    artwork = (files ?? []).map((file) => {
+      const row = file as { id?: string; original_file_name?: string | null; file_name?: string | null };
+      return {
+        id: String(row.id),
+        name: row.original_file_name || row.file_name || "Artwork",
+      };
+    });
+  }
+
+  return mapProject(data as Record<string, unknown>, reader, true, artwork);
 }
 
 export async function loadInstallerOptions(admin: SupabaseClient): Promise<InstallerOption[]> {

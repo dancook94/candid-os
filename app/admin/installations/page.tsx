@@ -172,7 +172,7 @@ export default async function InstallationsPage({
                       <dt className="text-xs text-neutral-500">Installers / snags</dt>
                       <dd>
                         {installersOnJob.join(", ") || "Unassigned"}
-                        {openSnags > 0 ? ` · ${openSnags} open snag${openSnags === 1 ? "" : "s"}` : ""}
+                        {openSnags > 0 ? ` · ${openSnags} outstanding snag${openSnags === 1 ? "" : "s"}` : ""}
                       </dd>
                     </div>
                   </dl>

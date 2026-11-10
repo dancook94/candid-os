@@ -32,6 +32,11 @@ const SERVICE_ROLE_SELECT = new URL(
   import.meta.url
 );
 
+const UX_PERMISSIONS = new URL(
+  "../../supabase/migrations/20270110171000_installation_ux_permissions.sql",
+  import.meta.url
+);
+
 const SQL_EDITOR_MIGRATIONS = [
   MIGRATION,
   HARDENING,
@@ -39,6 +44,7 @@ const SQL_EDITOR_MIGRATIONS = [
   PHASE2,
   PHASE3,
   SERVICE_ROLE_SELECT,
+  UX_PERMISSIONS,
 ];
 
 function assertSqlEditorCompatible(sql: string, label: string) {

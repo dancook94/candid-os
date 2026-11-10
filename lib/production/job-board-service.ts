@@ -21,6 +21,10 @@ import { loadPrintfactoryPreviewsForJobIds } from "@/lib/printfactory/job-previe
 import type { JobPrintfactoryPreviewBundle } from "@/lib/printfactory/job-previews";
 import { createCrmActivity } from "@/lib/crm/create-crm-activity";
 import {
+  installationCardText,
+  loadInstallationBoardSignals,
+} from "@/lib/installations/job-signal";
+import {
   JOB_BILLING_TYPE_LABELS,
   type JobBillingType,
 } from "@/lib/jobs/billing-types";
@@ -70,6 +74,7 @@ export type JobProductionBoardCard = {
   preview_is_shared_print: boolean;
   preview_printfactory_job_guid: string | null;
   preview_output_page_count: number;
+  installation_label: string | null;
 };
 
 export type ArchivedProductionBoardJob = {
@@ -279,6 +284,15 @@ export async function fetchJobProductionBoard(
     previewBundles = new Map();
   }
 
+  const installationSignals = await loadInstallationBoardSignals(
+    adminClient,
+    jobRows.map((job) => ({
+      id: job.id as string,
+      quoteVersionId: (job.quote_version_id as string | null) ?? null,
+    })),
+    true
+  );
+
   const cards: JobProductionBoardCard[] = jobRows
     .map((job) => {
       const items = itemsByJob.get(job.id as string) ?? [];
@@ -395,6 +409,15 @@ export async function fetchJobProductionBoard(
         preview_is_shared_print: preview?.isSharedPrint ?? false,
         preview_printfactory_job_guid: preview?.jobGuid ?? null,
         preview_output_page_count: preview?.outputPageCount ?? 1,
+        installation_label: installationCardText(
+          installationSignals.get(job.id as string) ?? {
+            required: false,
+            projectId: null,
+            scheduleLabel: null,
+            missingProject: false,
+            showManagementLink: false,
+          }
+        ),
         _items: items,
         _artwork_source: job.artwork_source as string,
       };

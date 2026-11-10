@@ -107,6 +107,11 @@ export function JobProductionBoardMobileCard({ card }: JobProductionBoardMobileC
                 {card.priority_label}
               </span>
             ) : null}
+            {card.installation_label ? (
+              <span className="inline-flex rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-sky-800 ring-1 ring-sky-600/15">
+                {card.installation_label}
+              </span>
+            ) : null}
           </div>
 
           <div className="mt-2 space-y-1">
