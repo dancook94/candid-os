@@ -3,6 +3,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { loadCanIssuePurchaseOrders } from "@/lib/purchasing/access";
 import { loadStaffAvatarSignedUrl } from "@/lib/staff-avatar-server";
 import { isAdminRole, isCrmRole, isSuperAdminRole } from "@/lib/staff-roles";
+
+function showInstallationNavFor(role: string) {
+  return isAdminRole(role) || role === "sales" || role === "production";
+}
 import { fetchPendingLeaveCount } from "@/lib/staff-leave/queries";
 import { fetchUnreadProductUpdateCount } from "@/lib/updates/queries";
 
@@ -85,6 +89,7 @@ export async function buildAdminAppShellProps(
     userRole: "admin" as const,
     showStaffNav: isSuperAdminRole(profile.user_role),
     showCrmNav: isAdminRole(profile.user_role),
+    showInstallationNav: showInstallationNavFor(profile.user_role),
     showPurchasingNav,
     userName: profile.full_name || "Candid administrator",
     companyName: "Candid Creative",
@@ -117,6 +122,7 @@ export async function buildStaffAppShellProps(
     userRole: "staff" as const,
     showPurchasingNav,
     showStaffLeaveNav: true,
+    showInstallationNav: showInstallationNavFor(profile.user_role),
     userName: profile.full_name || "Candid team member",
     companyName: "Candid Creative",
     updatesUnreadCount,
@@ -161,6 +167,7 @@ export async function buildCrmAppShellProps(
       userRole: "staff" as const,
       showStaffNav: false,
       showCrmNav: true,
+      showInstallationNav: showInstallationNavFor(profile.user_role),
       userName: profile.full_name || "Candid team member",
       companyName: "Candid Creative",
       updatesUnreadCount,

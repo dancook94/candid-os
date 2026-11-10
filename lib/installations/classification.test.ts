@@ -3,11 +3,15 @@ import test from "node:test";
 
 import {
   acceptanceBlockedMessage,
+  compatibilityWorkClass,
   effectiveWorkClass,
+  effectiveWorkRequirements,
   installationReconcileIsRetryable,
   lineIsIncludedInAcceptance,
+  normalizeWorkRequirements,
   quoteRequiresInstallation,
   suggestWorkClass,
+  suggestWorkRequirements,
   unclassifiedIncludedLineTitles,
 } from "@/lib/installations/classification";
 
@@ -117,6 +121,70 @@ test("historical null lines do not qualify and block a new acceptance until clas
       },
     ]),
     []
+  );
+});
+
+test("a line can require any combination and staff overrides stay put", () => {
+  assert.deepEqual(suggestWorkRequirements(["printing", "delivery", "installation"]), {
+    printSupply: true,
+    delivery: true,
+    installation: true,
+  });
+  assert.deepEqual(suggestWorkRequirements(["materials"]), {
+    printSupply: false,
+    delivery: false,
+    installation: false,
+  });
+  assert.deepEqual(
+    effectiveWorkRequirements({
+      overridden: true,
+      current: { printSupply: true, delivery: true, installation: false },
+      componentTypes: ["installation"],
+    }),
+    { printSupply: true, delivery: true, installation: false }
+  );
+  assert.deepEqual(
+    normalizeWorkRequirements({ workClass: "delivery" }),
+    { printSupply: false, delivery: true, installation: false }
+  );
+  assert.equal(
+    compatibilityWorkClass({ printSupply: true, delivery: true, installation: true }),
+    "installation"
+  );
+  assert.equal(
+    compatibilityWorkClass({ printSupply: true, delivery: true, installation: false }),
+    null
+  );
+
+  const mixed = {
+    isOptional: false,
+    isSelected: true,
+    requirements: { printSupply: true, delivery: true, installation: false },
+  };
+  assert.equal(quoteRequiresInstallation([mixed]), false);
+  assert.deepEqual(
+    unclassifiedIncludedLineTitles([{ title: "Signs", ...mixed }]),
+    []
+  );
+  assert.equal(
+    quoteRequiresInstallation([
+      {
+        isOptional: false,
+        isSelected: true,
+        requirements: { printSupply: true, delivery: false, installation: true },
+      },
+    ]),
+    true
+  );
+  assert.equal(
+    quoteRequiresInstallation([
+      {
+        isOptional: true,
+        isSelected: false,
+        requirements: { printSupply: false, delivery: false, installation: true },
+      },
+    ]),
+    false
   );
 });
 

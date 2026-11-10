@@ -22,8 +22,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  suggestWorkClass,
-  type WorkClass,
+  compatibilityWorkClass,
+  normalizeWorkRequirements,
+  suggestWorkRequirements,
 } from "@/lib/installations/classification";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -63,7 +64,9 @@ type LineItemFormState = {
   unitPrice: string;
   isOptional: boolean;
   isSelected: boolean;
-  workClass: WorkClass | null;
+  requiresPrintSupply: boolean;
+  requiresDelivery: boolean;
+  requiresInstallation: boolean;
   workClassOverridden: boolean;
   imageStoragePath: string | null;
   imageFileName: string | null;
@@ -84,7 +87,10 @@ export type QuoteBuilderLineItem = {
   unitPrice: number;
   isOptional: boolean;
   isSelected?: boolean;
-  workClass?: WorkClass | null;
+  requiresPrintSupply?: boolean;
+  requiresDelivery?: boolean;
+  requiresInstallation?: boolean;
+  workClass?: string | null;
   workClassOverridden?: boolean;
   imageStoragePath?: string | null;
   imageFileName?: string | null;
@@ -237,7 +243,9 @@ function createEmptyLineItem(clientKey: string): LineItemFormState {
     unitPrice: "0.00",
     isOptional: false,
     isSelected: true,
-    workClass: null,
+    requiresPrintSupply: false,
+    requiresDelivery: false,
+    requiresInstallation: false,
     workClassOverridden: false,
     imageStoragePath: null,
     imageFileName: null,
@@ -264,7 +272,19 @@ function toLineItemFormState(
     unitPrice: item.unitPrice.toFixed(2),
     isOptional: item.isOptional,
     isSelected: item.isSelected ?? true,
-    workClass: item.workClass ?? null,
+    ...(() => {
+      const requirements = normalizeWorkRequirements({
+        printSupply: item.requiresPrintSupply,
+        delivery: item.requiresDelivery,
+        installation: item.requiresInstallation,
+        workClass: item.workClass,
+      });
+      return {
+        requiresPrintSupply: requirements.printSupply,
+        requiresDelivery: requirements.delivery,
+        requiresInstallation: requirements.installation,
+      };
+    })(),
     workClassOverridden: item.workClassOverridden ?? false,
     imageStoragePath: item.imageStoragePath ?? null,
     imageFileName: item.imageFileName ?? null,
@@ -601,7 +621,9 @@ export function QuoteBuilderForm({
         unitPrice: source.unitPrice,
         isOptional: source.isOptional,
         isSelected: source.isSelected,
-        workClass: source.workClass,
+        requiresPrintSupply: source.requiresPrintSupply,
+        requiresDelivery: source.requiresDelivery,
+        requiresInstallation: source.requiresInstallation,
         workClassOverridden: source.workClassOverridden,
         imageStoragePath: source.imageStoragePath,
         imageFileName: source.imageFileName,
@@ -910,10 +932,18 @@ export function QuoteBuilderForm({
               return;
             }
 
+            const requirements = {
+              printSupply: item.requiresPrintSupply,
+              delivery: item.requiresDelivery,
+              installation: item.requiresInstallation,
+            };
             const { error: classificationError } = await supabase
               .from("quote_items")
               .update({
-                work_class: item.workClass,
+                requires_print_supply: requirements.printSupply,
+                requires_delivery: requirements.delivery,
+                requires_installation: requirements.installation,
+                work_class: compatibilityWorkClass(requirements),
                 work_class_overridden: item.workClassOverridden,
                 is_selected: item.isOptional ? item.isSelected : true,
               })
@@ -1565,14 +1595,19 @@ export function QuoteBuilderForm({
                     isOptional={item.isOptional}
                     materials={materialCatalog}
                     disabled={isBusy || isReadOnly}
-                    onChange={(cost) =>
+                    onChange={(cost) => {
+                      const suggested = suggestWorkRequirements(componentTypesFromCost(cost));
                       updateLineItem(item.clientKey, {
                         cost,
                         ...(item.workClassOverridden
                           ? {}
-                          : { workClass: suggestWorkClass(componentTypesFromCost(cost)) }),
-                      })
-                    }
+                          : {
+                              requiresPrintSupply: suggested.printSupply,
+                              requiresDelivery: suggested.delivery,
+                              requiresInstallation: suggested.installation,
+                            }),
+                      });
+                    }}
                   />
                 ) : null}
               </QuoteBuilderLineItemCard>

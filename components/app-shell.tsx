@@ -25,6 +25,7 @@ import {
   Target,
   UserCog,
   Users,
+  Wrench,
   X,
 } from "lucide-react";
 
@@ -48,6 +49,7 @@ type AppShellProps = {
   showPurchasingNav?: boolean;
   showGlobalSearch?: boolean;
   showStaffLeaveNav?: boolean;
+  showInstallationNav?: boolean;
   updatesUnreadCount?: number;
   leavePendingCount?: number;
   userName?: string;
@@ -203,6 +205,29 @@ const staffLeaveLink: NavLink = {
   label: "Holiday & absence",
   icon: CalendarDays,
 };
+
+const installationLink: NavLink = {
+  href: "/admin/installations",
+  label: "Installations",
+  icon: Wrench,
+};
+
+function withInstallationNav(links: NavLink[], show: boolean) {
+  if (!show || links.some((link) => link.href === installationLink.href)) {
+    return links;
+  }
+
+  const jobsIndex = links.findIndex((link) => link.href === "/admin/jobs");
+  if (jobsIndex >= 0) {
+    return [
+      ...links.slice(0, jobsIndex + 1),
+      installationLink,
+      ...links.slice(jobsIndex + 1),
+    ];
+  }
+
+  return [links[0], installationLink, ...links.slice(1)].filter(Boolean);
+}
 
 const staffLinks: NavLink[] = [
   {
@@ -367,6 +392,7 @@ export function AppShell({
   showCrmNav = false,
   showPurchasingNav = false,
   showStaffLeaveNav = false,
+  showInstallationNav = false,
   showGlobalSearch,
   updatesUnreadCount = 0,
   leavePendingCount = 0,
@@ -387,7 +413,7 @@ export function AppShell({
 
   useGlobalSearchShortcut(openSearch);
 
-  const links =
+  const links = withInstallationNav(
     userRole === "admin"
       ? [
           ...adminLinks.slice(0, 5),
@@ -405,7 +431,9 @@ export function AppShell({
             ...staffLinks.slice(2),
             ...(showCrmNav ? crmLinks : []),
           ]
-        : customerLinks;
+        : customerLinks,
+    showInstallationNav
+  );
 
   const linksWithBadges = links.map((link) => {
     if (link.href === "/updates" && updatesUnreadCount > 0) {

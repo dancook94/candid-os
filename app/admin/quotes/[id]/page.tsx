@@ -198,7 +198,7 @@ export default async function QuoteDetailPage({
     ? await supabase
         .from("quote_items")
         .select(
-          "id, title, description, quantity, unit_price, is_optional, is_selected, work_class, work_class_overridden, line_total, sort_order, image_storage_path, image_file_name, image_file_type, image_file_size"
+          "id, title, description, quantity, unit_price, is_optional, is_selected, work_class, work_class_overridden, requires_print_supply, requires_delivery, requires_installation, line_total, sort_order, image_storage_path, image_file_name, image_file_type, image_file_size"
         )
         .eq("quote_version_id", quoteVersion.id)
         .order("sort_order", { ascending: true })
@@ -226,6 +226,9 @@ export default async function QuoteDetailPage({
         item.work_class === "installation"
           ? item.work_class
           : null,
+      requiresPrintSupply: item.requires_print_supply === true,
+      requiresDelivery: item.requires_delivery === true,
+      requiresInstallation: item.requires_installation === true,
       workClassOverridden: item.work_class_overridden === true,
       imageStoragePath: item.image_storage_path,
       imageFileName: item.image_file_name,

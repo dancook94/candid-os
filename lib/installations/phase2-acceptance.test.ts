@@ -115,15 +115,19 @@ test("every quote line shows the three work classes before costing", async () =>
     new URL("../../components/quote-line-costing-panel.tsx", import.meta.url),
     "utf8"
   );
-  const controlAt = line.indexOf('role="radiogroup"');
+  const controlAt = line.indexOf('role="group"');
   const gridAt = line.indexOf("lg:grid-cols-");
 
   assert.ok(controlAt > 0 && controlAt < gridAt);
+  assert.match(line, /aria-pressed=\{selected\}/);
   assert.match(line, /WORK_CLASS_LABELS\[workClass\]/);
   assert.match(line, /workClassOverridden: true/);
   assert.doesNotMatch(line, /<select/);
+  assert.doesNotMatch(line, /role="radiogroup"/);
   assert.doesNotMatch(costing, /workClass/);
-  assert.match(form, /work_class: item\.workClass/);
+  assert.match(form, /requires_print_supply: requirements\.printSupply/);
+  assert.match(form, /requires_installation: requirements\.installation/);
+  assert.match(form, /work_class: compatibilityWorkClass\(requirements\)/);
   assert.match(form, /work_class_overridden: item\.workClassOverridden/);
   assert.match(form, /item\.workClassOverridden\s*\?\s*\{\}/);
 });

@@ -14,8 +14,13 @@ import { Label } from "@/components/ui/label";
 import {
   WORK_CLASS_LABELS,
   WORK_CLASSES,
-  type WorkClass,
 } from "@/lib/installations/classification";
+
+const REQUIREMENT_FIELD = {
+  print_supply: "requiresPrintSupply",
+  delivery: "requiresDelivery",
+  installation: "requiresInstallation",
+} as const;
 
 export type QuoteBuilderLineItemState = {
   clientKey: string;
@@ -26,7 +31,9 @@ export type QuoteBuilderLineItemState = {
   unitPrice: string;
   isOptional: boolean;
   isSelected: boolean;
-  workClass: WorkClass | null;
+  requiresPrintSupply: boolean;
+  requiresDelivery: boolean;
+  requiresInstallation: boolean;
   workClassOverridden: boolean;
   imageFileName: string | null;
   previewUrl: string | null;
@@ -199,20 +206,20 @@ export function QuoteBuilderLineItemCard({
       </header>
 
       <fieldset className="mb-3 space-y-1.5">
-        <legend className="text-xs font-medium text-neutral-950">Work type</legend>
-        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Work type">
+        <legend className="text-xs font-medium text-neutral-950">Work required</legend>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Work required">
           {WORK_CLASSES.map((workClass) => {
-            const selected = item.workClass === workClass;
+            const field = REQUIREMENT_FIELD[workClass];
+            const selected = item[field];
             return (
               <button
                 key={workClass}
                 type="button"
-                role="radio"
-                aria-checked={selected}
+                aria-pressed={selected}
                 disabled={fieldDisabled}
                 onClick={() =>
                   onUpdate(item.clientKey, {
-                    workClass,
+                    [field]: !selected,
                     workClassOverridden: true,
                   })
                 }
@@ -230,9 +237,9 @@ export function QuoteBuilderLineItemCard({
         <p className="text-xs text-neutral-500">
           {item.workClassOverridden
             ? "Staff classification"
-            : item.workClass
+            : item.requiresPrintSupply || item.requiresDelivery || item.requiresInstallation
               ? "Suggested from costing"
-              : "Required for every included line before acceptance."}
+              : "Choose at least one for every included line before acceptance."}
         </p>
       </fieldset>
 
