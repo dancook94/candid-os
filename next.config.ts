@@ -23,6 +23,17 @@ const proofGenerateTracingIncludes = [
   "./public/LOGO_YELLOW.png",
 ];
 
+const completionReportTracingIncludes = [
+  "./node_modules/sharp/**",
+  "./node_modules/@img/sharp-linux-x64/**",
+  "./node_modules/@img/sharp-libvips-linux-x64/**",
+  "./node_modules/@img/sharp-libvips-linux-x64/lib/libvips-cpp.so.8.18.3",
+  "./node_modules/@img/sharp-linuxmusl-x64/**",
+  "./node_modules/@img/sharp-libvips-linuxmusl-x64/**",
+  "./node_modules/@img/sharp-libvips-linuxmusl-x64/lib/libvips-cpp.so.8.18.3",
+  "./public/LOGO_YELLOW.png",
+];
+
 const nextConfig: NextConfig = {
   serverExternalPackages: ["pdfkit", "@napi-rs/canvas", "pdfjs-dist"],
   outputFileTracingIncludes: {
@@ -32,6 +43,8 @@ const nextConfig: NextConfig = {
       proofAnalyseTracingIncludes,
     "/api/admin/jobs/[id]/proofs/[proofId]/branded-pdf/generate":
       proofGenerateTracingIncludes,
+    "/api/admin/installations/visits/[visitId]/completion-report":
+      completionReportTracingIncludes,
   },
 };
 

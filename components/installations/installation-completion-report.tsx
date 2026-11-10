@@ -10,6 +10,15 @@ import { isOutstandingInstallationSnag } from "@/lib/installations/job-signal";
 import { PROJECT_STATUS_LABELS, formatLondonWhen } from "@/lib/installations/labels";
 import type { InstallationProjectRecord, InstallationVisitRecord } from "@/lib/installations/queries";
 
+async function readReportError(response: Response) {
+  const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+  if (payload?.error) {
+    return payload.error;
+  }
+
+  return `The report could not be prepared (HTTP ${response.status}).`;
+}
+
 const PHASES = [
   ["before", "Before"],
   ["during", "During"],
@@ -53,8 +62,7 @@ export function InstallationCompletionReport({
         body: JSON.stringify({ photoIds: selected, persist }),
       });
       if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-        setMessage(payload?.error || "The report could not be prepared.");
+        setMessage(await readReportError(response));
         return;
       }
       if (!persist) {

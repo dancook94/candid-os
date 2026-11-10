@@ -114,10 +114,11 @@ describe("proof generator native dependency packaging", () => {
     assert.match(nextConfig, /proofAnalyseTracingIncludes/);
     assert.match(nextConfig, /proofGenerateTracingIncludes/);
     assert.match(nextConfig, /proofAnalyseTracingIncludes[\s\S]*\.\/node_modules\/sharp\/\*\*/);
-    assert.doesNotMatch(
-      nextConfig,
-      /proofGenerateTracingIncludes[\s\S]*\.\/node_modules\/sharp\/\*\*/
+    const generateIncludes = nextConfig.slice(
+      nextConfig.indexOf("const proofGenerateTracingIncludes"),
+      nextConfig.indexOf("const completionReportTracingIncludes")
     );
+    assert.doesNotMatch(generateIncludes, /node_modules\/sharp/);
     assert.match(
       nextConfig,
       /proofGenerateTracingIncludes[\s\S]*\.\/public\/LOGO_YELLOW\.png/

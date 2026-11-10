@@ -11,6 +11,8 @@ import { canManageInstallations } from "@/lib/installations/permissions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
+export const runtime = "nodejs";
+
 type RouteContext = { params: Promise<{ visitId: string }> };
 
 export async function POST(request: Request, context: RouteContext) {
@@ -43,13 +45,15 @@ export async function POST(request: Request, context: RouteContext) {
 
   try {
     if (!persist) {
-      const preview = reportReferenceFromPreview(
-        (
-          await supabase.rpc("installation_completion_report_next", { p_visit_id: visitId })
-        ).data
-      );
+      const previewResult = await supabase.rpc("installation_completion_report_next", {
+        p_visit_id: visitId,
+      });
+      if (previewResult.error) {
+        return NextResponse.json({ error: previewResult.error.message }, { status: 400 });
+      }
+      const preview = reportReferenceFromPreview(previewResult.data);
       if (!preview) {
-        return NextResponse.json({ error: "The report could not be prepared." }, { status: 400 });
+        return NextResponse.json({ error: "The report reference could not be prepared." }, { status: 400 });
       }
       const report = await buildVisitCompletionReport({
         admin,

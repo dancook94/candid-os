@@ -275,7 +275,13 @@ test("completion report permissions and storage stay with managers", async () =>
   );
   assert.match(route, /canManageInstallations/);
   assert.match(route, /assertVisitReadyForOfficialReport/);
+  assert.ok(route.indexOf("if (!persist)") < route.indexOf("await assertVisitReadyForOfficialReport"));
+  assert.match(route, /export const runtime = "nodejs"/);
   assert.doesNotMatch(route, /canOperateInstallations/);
+  const nextConfig = await readFile(new URL("../../next.config.ts", import.meta.url), "utf8");
+  assert.match(nextConfig, /\/api\/admin\/installations\/visits\/\[visitId\]\/completion-report/);
+  assert.match(nextConfig, /completionReportTracingIncludes[\s\S]*libvips-cpp\.so\.8\.18\.3/);
+  assert.match(nextConfig, /completionReportTracingIncludes[\s\S]*LOGO_YELLOW\.png/);
   const screen = await readFile(
     new URL("../../components/installations/installation-completion-report.tsx", import.meta.url),
     "utf8"
