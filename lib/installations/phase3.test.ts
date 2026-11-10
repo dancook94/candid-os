@@ -110,3 +110,37 @@ test("conflict text names the person and the other booking", () => {
     /reason|private/i
   );
 });
+
+const SERVICE_ROLE_SELECT = new URL(
+  "../../supabase/migrations/20270110170000_installation_service_role_select.sql",
+  import.meta.url
+);
+
+const INSTALLATION_TABLES = [
+  "installation_projects",
+  "installation_visits",
+  "installation_visit_assignments",
+  "installation_visit_documents",
+  "installation_visit_photos",
+  "installation_snag_items",
+  "installation_sign_offs",
+  "installation_visit_events",
+] as const;
+
+test("service role can read installation tables and cannot write them", async () => {
+  const sql = await readFile(SERVICE_ROLE_SELECT, "utf8");
+  const grants = sql
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("--"))
+    .join("\n");
+
+  for (const table of INSTALLATION_TABLES) {
+    assert.match(grants, new RegExp(`GRANT SELECT ON TABLE public\\.${table} TO service_role;`));
+  }
+
+  assert.doesNotMatch(grants, /TO anon/i);
+  assert.doesNotMatch(grants, /GRANT INSERT/i);
+  assert.doesNotMatch(grants, /GRANT UPDATE/i);
+  assert.doesNotMatch(grants, /GRANT DELETE/i);
+  assert.doesNotMatch(grants, /TO authenticated/i);
+});

@@ -27,7 +27,19 @@ const PHASE3 = new URL(
   import.meta.url
 );
 
-const SQL_EDITOR_MIGRATIONS = [MIGRATION, HARDENING, HARDENING_REPAIR, PHASE2, PHASE3];
+const SERVICE_ROLE_SELECT = new URL(
+  "../../supabase/migrations/20270110170000_installation_service_role_select.sql",
+  import.meta.url
+);
+
+const SQL_EDITOR_MIGRATIONS = [
+  MIGRATION,
+  HARDENING,
+  HARDENING_REPAIR,
+  PHASE2,
+  PHASE3,
+  SERVICE_ROLE_SELECT,
+];
 
 function assertSqlEditorCompatible(sql: string, label: string) {
   assert.doesNotMatch(sql, /\\set\s/i);
