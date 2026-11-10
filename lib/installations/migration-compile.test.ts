@@ -17,7 +17,12 @@ const HARDENING_REPAIR = new URL(
   import.meta.url
 );
 
-const SQL_EDITOR_MIGRATIONS = [MIGRATION, HARDENING, HARDENING_REPAIR];
+const PHASE2 = new URL(
+  "../../supabase/migrations/20270110168000_installation_phase2_acceptance.sql",
+  import.meta.url
+);
+
+const SQL_EDITOR_MIGRATIONS = [MIGRATION, HARDENING, HARDENING_REPAIR, PHASE2];
 
 function assertSqlEditorCompatible(sql: string, label: string) {
   assert.doesNotMatch(sql, /\\set\s/i);

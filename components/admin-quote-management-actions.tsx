@@ -70,7 +70,10 @@ export function AdminQuoteManagementActions({
 
     try {
       const response = await fetch(endpoint, { method: "POST" });
-      const payload = (await response.json()) as { error?: string };
+      const payload = (await response.json()) as {
+        error?: string;
+        jobWarning?: string | null;
+      };
 
       if (!response.ok) {
         setError(payload.error ?? "Unable to update this quotation.");
@@ -80,6 +83,9 @@ export function AdminQuoteManagementActions({
 
       setConfirmAction(null);
       setIsSubmitting(false);
+      if (payload.jobWarning) {
+        setError(payload.jobWarning);
+      }
       router.refresh();
     } catch {
       setError("Unable to update this quotation. Please try again.");

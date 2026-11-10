@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import {
-  detectInstallationSignals,
-  jobRequiresInstallationProject,
-} from "@/lib/installations/detection";
+import { quoteRequiresInstallation } from "@/lib/installations/classification";
 
 const MIGRATION = new URL(
   "../../supabase/migrations/20270110163000_installation_management_phase1.sql",
@@ -20,23 +17,33 @@ test("reconciliation design creates one project per job with initial unscheduled
   assert.doesNotMatch(sql, /required_date/);
 });
 
-test("quote acceptance is not wired in phase 1 lib", async () => {
+test("quote acceptance calls the service-role reconcile entry and does not insert projects", async () => {
   const createFromQuote = await readFile(
     new URL("../../lib/jobs/create-from-quote.ts", import.meta.url),
     "utf8"
   );
-
-  assert.doesNotMatch(createFromQuote, /reconcileInstallationProjectForJob/);
-  assert.doesNotMatch(createFromQuote, /installation_reconcile/);
-});
-
-test("idempotent reconcile logic only adds visit when project has zero visits", () => {
-  const signals = detectInstallationSignals(
-  [
-      { id: "1", title: "Site installation", is_optional: false },
-    ],
-    []
+  const reconcile = await readFile(
+    new URL("./reconcile.ts", import.meta.url),
+    "utf8"
   );
 
-  assert.equal(jobRequiresInstallationProject(signals), true);
+  assert.match(createFromQuote, /reconcileAcceptedInstallation/);
+  assert.equal(createFromQuote.match(/attachInstallationWarning/g)?.length, 3);
+  assert.doesNotMatch(createFromQuote, /from\("installation_projects"\)/);
+  assert.match(reconcile, /installation_reconcile_accepted_job/);
+  assert.doesNotMatch(reconcile, /from\("installation_projects"\)/);
+  assert.doesNotMatch(reconcile, /from\("installation_visits"\)/);
+});
+
+test("a title containing installation does not by itself require a project", () => {
+  assert.equal(
+    quoteRequiresInstallation([
+      {
+        isOptional: false,
+        isSelected: true,
+        workClass: null,
+      },
+    ]),
+    false
+  );
 });

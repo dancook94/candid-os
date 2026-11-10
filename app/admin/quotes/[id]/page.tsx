@@ -76,6 +76,9 @@ type QuoteVersionRow = {
   vat_rate: number | null;
   vat_amount: number | null;
   total: number | null;
+  installation_auto_reconcile?: boolean | null;
+  installation_reconcile_status?: string | null;
+  installation_reconcile_error?: string | null;
 };
 
 function formatQuotePageTitle(projectName: string) {
@@ -151,7 +154,7 @@ export default async function QuoteDetailPage({
   const { data: allVersions, error: versionsError } = await supabase
     .from("quote_versions")
     .select(
-      "id, version_number, version_status, created_at, expiry_date, payment_terms_days, introduction, customer_notes, internal_notes, subtotal, vat_rate, vat_amount, total"
+      "id, version_number, version_status, created_at, expiry_date, payment_terms_days, introduction, customer_notes, internal_notes, subtotal, vat_rate, vat_amount, total, installation_auto_reconcile, installation_reconcile_status, installation_reconcile_error"
     )
     .eq("quote_id", quote.id)
     .order("version_number", { ascending: false });
@@ -195,7 +198,7 @@ export default async function QuoteDetailPage({
     ? await supabase
         .from("quote_items")
         .select(
-          "id, title, description, quantity, unit_price, is_optional, line_total, sort_order, image_storage_path, image_file_name, image_file_type, image_file_size"
+          "id, title, description, quantity, unit_price, is_optional, is_selected, work_class, work_class_overridden, line_total, sort_order, image_storage_path, image_file_name, image_file_type, image_file_size"
         )
         .eq("quote_version_id", quoteVersion.id)
         .order("sort_order", { ascending: true })
@@ -216,6 +219,14 @@ export default async function QuoteDetailPage({
       quantity: Number(item.quantity),
       unitPrice: Number(item.unit_price),
       isOptional: Boolean(item.is_optional),
+      isSelected: item.is_selected !== false,
+      workClass:
+        item.work_class === "print_supply" ||
+        item.work_class === "delivery" ||
+        item.work_class === "installation"
+          ? item.work_class
+          : null,
+      workClassOverridden: item.work_class_overridden === true,
       imageStoragePath: item.image_storage_path,
       imageFileName: item.image_file_name,
       imageFileType: item.image_file_type,
@@ -505,6 +516,19 @@ export default async function QuoteDetailPage({
           linkedJobId={linkedJob.linkedJobId}
           linkedJobReference={linkedJob.linkedJobReference}
           schemaMissing={linkedJob.schemaMissing}
+          installationReconcileFailed={
+            quote.status === "accepted" &&
+            versions.some(
+              (version) =>
+                version.version_number === quote.current_version &&
+                version.installation_auto_reconcile === true &&
+                version.installation_reconcile_status === "failed"
+            )
+          }
+          installationReconcileError={
+            versions.find((version) => version.version_number === quote.current_version)
+              ?.installation_reconcile_error ?? null
+          }
         />
 
         <AdminQuoteFollowUpTaskPanel

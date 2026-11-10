@@ -11,6 +11,11 @@ import { useEffect, useRef } from "react";
 import { QuoteLineItemImageField } from "@/components/quote-line-item-image-field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  WORK_CLASS_LABELS,
+  WORK_CLASSES,
+  type WorkClass,
+} from "@/lib/installations/classification";
 
 export type QuoteBuilderLineItemState = {
   clientKey: string;
@@ -21,6 +26,8 @@ export type QuoteBuilderLineItemState = {
   unitPrice: string;
   isOptional: boolean;
   isSelected: boolean;
+  workClass: WorkClass | null;
+  workClassOverridden: boolean;
   imageFileName: string | null;
   previewUrl: string | null;
 };
@@ -131,12 +138,28 @@ export function QuoteBuilderLineItemCard({
                 onChange={(event) =>
                   onUpdate(item.clientKey, {
                     isOptional: event.target.checked,
+                    ...(event.target.checked ? {} : { isSelected: true }),
                   })
                 }
                 disabled={fieldDisabled}
                 className="h-3.5 w-3.5 rounded border-neutral-300"
               />
               Optional item
+            </label>
+          )}
+          {item.isOptional && !isReadOnly && (
+            <label className="inline-flex items-center gap-1.5 text-xs text-neutral-600">
+              <input
+                id={`selected-${item.clientKey}`}
+                type="checkbox"
+                checked={item.isSelected}
+                onChange={(event) =>
+                  onUpdate(item.clientKey, { isSelected: event.target.checked })
+                }
+                disabled={fieldDisabled}
+                className="h-3.5 w-3.5 rounded border-neutral-300"
+              />
+              Include in accepted quote
             </label>
           )}
         </div>
@@ -222,6 +245,45 @@ export function QuoteBuilderLineItemCard({
               placeholder="Optional description"
               className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
             />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor={`work-class-${item.clientKey}`} className="text-xs">
+              Work type
+            </Label>
+            {isReadOnly ? (
+              <p className="text-sm text-neutral-950">
+                {item.workClass ? WORK_CLASS_LABELS[item.workClass] : "Not classified"}
+              </p>
+            ) : (
+              <select
+                id={`work-class-${item.clientKey}`}
+                value={item.workClass ?? ""}
+                disabled={fieldDisabled}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  onUpdate(item.clientKey, {
+                    workClass: WORK_CLASSES.find((workClass) => workClass === value) ?? null,
+                    workClassOverridden: true,
+                  });
+                }}
+                className="h-8 w-full rounded-lg border border-neutral-300 bg-white px-2 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
+              >
+                <option value="">Choose work type</option>
+                {WORK_CLASSES.map((workClass) => (
+                  <option key={workClass} value={workClass}>
+                    {WORK_CLASS_LABELS[workClass]}
+                  </option>
+                ))}
+              </select>
+            )}
+            <p className="text-xs text-neutral-500">
+              {item.workClassOverridden
+                ? "Staff classification"
+                : item.workClass
+                  ? "Suggested from costing"
+                  : "Required for every included line before acceptance."}
+            </p>
           </div>
         </div>
 

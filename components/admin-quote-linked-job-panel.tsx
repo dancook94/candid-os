@@ -19,6 +19,8 @@ type AdminQuoteLinkedJobPanelProps = {
   linkedJobId: string | null;
   linkedJobReference: string | null;
   schemaMissing: boolean;
+  installationReconcileFailed?: boolean;
+  installationReconcileError?: string | null;
 };
 
 export function AdminQuoteLinkedJobPanel({
@@ -27,6 +29,8 @@ export function AdminQuoteLinkedJobPanel({
   linkedJobId,
   linkedJobReference,
   schemaMissing,
+  installationReconcileFailed = false,
+  installationReconcileError = null,
 }: AdminQuoteLinkedJobPanelProps) {
   const router = useRouter();
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -111,6 +115,25 @@ export function AdminQuoteLinkedJobPanel({
             </Button>
           </div>
         )}
+
+        {installationReconcileFailed ? (
+          <div className="space-y-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
+            <p className="text-sm font-medium text-amber-950">
+              Installation setup did not finish. The accepted quote and job are unchanged.
+            </p>
+            {installationReconcileError ? (
+              <p className="text-sm text-amber-950">{installationReconcileError}</p>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isSubmitting}
+              onClick={handleEnsureJob}
+            >
+              {isSubmitting ? "Retrying..." : "Retry installation setup"}
+            </Button>
+          </div>
+        ) : null}
 
         {error ? (
           <p className="text-sm text-red-700">{error}</p>

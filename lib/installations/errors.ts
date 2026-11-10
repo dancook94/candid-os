@@ -10,8 +10,14 @@ export class InstallationError extends Error {
 
 export function isMissingInstallationSchemaError(message: string) {
   const lower = message.toLowerCase();
-  return (
-    lower.includes("installation_projects") &&
-    (lower.includes("does not exist") || lower.includes("schema cache"))
-  );
+  const missingObject =
+    lower.includes("installation_projects") ||
+    lower.includes("installation_reconcile_accepted_job") ||
+    lower.includes("installation_auto_reconcile");
+  const missingShape =
+    lower.includes("does not exist") ||
+    lower.includes("schema cache") ||
+    lower.includes("could not find");
+
+  return missingObject && missingShape;
 }

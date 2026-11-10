@@ -1,5 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { acceptanceClassificationError } from "@/lib/installations/acceptance-guard";
+
 export type QuoteResponseAction = "accept" | "decline";
 
 export type QuoteAcceptanceJobInfo = {
@@ -270,6 +272,17 @@ export async function applyQuoteStatusResponse(
   context: QuoteResponseContext,
   action: QuoteResponseAction
 ): Promise<QuoteStatusResponseResult> {
+  if (action === "accept") {
+    const classificationError = await acceptanceClassificationError(
+      supabase,
+      context.version.id
+    );
+
+    if (classificationError) {
+      return responseError(400, classificationError);
+    }
+  }
+
   const now = new Date().toISOString();
   const nextQuoteStatus = action === "accept" ? "accepted" : "declined";
   const nextVersionStatus = action === "accept" ? "accepted" : "declined";
@@ -324,6 +337,7 @@ export async function applyQuoteStatusResponse(
           version_status: "accepted" as const,
           accepted_at: now,
           declined_at: null,
+          installation_auto_reconcile: true,
         }
       : {
           version_status: "declined" as const,
@@ -380,6 +394,15 @@ export async function applyAdminQuoteAcceptance(
     );
   }
 
+  const classificationError = await acceptanceClassificationError(
+    supabase,
+    context.version.id
+  );
+
+  if (classificationError) {
+    return responseError(400, classificationError);
+  }
+
   const now = new Date().toISOString();
 
   const { data: updatedQuote, error: quoteUpdateError } = await supabase
@@ -432,6 +455,7 @@ export async function applyAdminQuoteAcceptance(
       version_status: "accepted",
       accepted_at: now,
       declined_at: null,
+      installation_auto_reconcile: true,
     })
     .eq("id", context.version.id)
     .eq("version_status", sourceVersionStatus)

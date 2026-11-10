@@ -21,6 +21,10 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  suggestWorkClass,
+  type WorkClass,
+} from "@/lib/installations/classification";
 import { createClient } from "@/lib/supabase/client";
 import {
   parsePaymentTermsDays,
@@ -59,6 +63,8 @@ type LineItemFormState = {
   unitPrice: string;
   isOptional: boolean;
   isSelected: boolean;
+  workClass: WorkClass | null;
+  workClassOverridden: boolean;
   imageStoragePath: string | null;
   imageFileName: string | null;
   imageFileType: string | null;
@@ -78,6 +84,8 @@ export type QuoteBuilderLineItem = {
   unitPrice: number;
   isOptional: boolean;
   isSelected?: boolean;
+  workClass?: WorkClass | null;
+  workClassOverridden?: boolean;
   imageStoragePath?: string | null;
   imageFileName?: string | null;
   imageFileType?: string | null;
@@ -229,6 +237,8 @@ function createEmptyLineItem(clientKey: string): LineItemFormState {
     unitPrice: "0.00",
     isOptional: false,
     isSelected: true,
+    workClass: null,
+    workClassOverridden: false,
     imageStoragePath: null,
     imageFileName: null,
     imageFileType: null,
@@ -254,6 +264,8 @@ function toLineItemFormState(
     unitPrice: item.unitPrice.toFixed(2),
     isOptional: item.isOptional,
     isSelected: item.isSelected ?? true,
+    workClass: item.workClass ?? null,
+    workClassOverridden: item.workClassOverridden ?? false,
     imageStoragePath: item.imageStoragePath ?? null,
     imageFileName: item.imageFileName ?? null,
     imageFileType: item.imageFileType ?? null,
@@ -366,6 +378,32 @@ async function syncSavedLineItemImages(
     quoteVersionId,
     syncInputs
   );
+}
+
+function componentTypesFromCost(cost: QuoteLineCostDraft) {
+  const types: string[] = cost.components
+    .filter(
+      (component) =>
+        component.description.trim() !== "" ||
+        component.quantity.trim() !== "" ||
+        component.unitCost.trim() !== ""
+    )
+    .map((component) => component.componentType);
+
+  const hasOneOff = cost.oneOffCosts.some(
+    (entry) =>
+      entry.description.trim() !== "" ||
+      entry.quantity.trim() !== "" ||
+      entry.unitCost.trim() !== "" ||
+      entry.supplierReference.trim() !== "" ||
+      entry.notes.trim() !== ""
+  );
+
+  if (hasOneOff) {
+    types.push("one_off");
+  }
+
+  return types;
 }
 
 function calculateLineTotal(quantity: number, unitPrice: number) {
@@ -563,6 +601,8 @@ export function QuoteBuilderForm({
         unitPrice: source.unitPrice,
         isOptional: source.isOptional,
         isSelected: source.isSelected,
+        workClass: source.workClass,
+        workClassOverridden: source.workClassOverridden,
         imageStoragePath: source.imageStoragePath,
         imageFileName: source.imageFileName,
         imageFileType: source.imageFileType,
@@ -860,7 +900,32 @@ export function QuoteBuilderForm({
           throw savedItemsError;
         }
 
-        return savedItems ?? [];
+        const saved = savedItems ?? [];
+
+        await Promise.all(
+          activeItems.map(async (item, index) => {
+            const row = saved.find((savedItem) => savedItem.sort_order === index + 1);
+
+            if (!row) {
+              return;
+            }
+
+            const { error: classificationError } = await supabase
+              .from("quote_items")
+              .update({
+                work_class: item.workClass,
+                work_class_overridden: item.workClassOverridden,
+                is_selected: item.isOptional ? item.isSelected : true,
+              })
+              .eq("id", row.id);
+
+            if (classificationError) {
+              throw classificationError;
+            }
+          })
+        );
+
+        return saved;
       }
 
       if (mode === "create") {
@@ -1500,7 +1565,14 @@ export function QuoteBuilderForm({
                     isOptional={item.isOptional}
                     materials={materialCatalog}
                     disabled={isBusy || isReadOnly}
-                    onChange={(cost) => updateLineItem(item.clientKey, { cost })}
+                    onChange={(cost) =>
+                      updateLineItem(item.clientKey, {
+                        cost,
+                        ...(item.workClassOverridden
+                          ? {}
+                          : { workClass: suggestWorkClass(componentTypesFromCost(cost)) }),
+                      })
+                    }
                   />
                 ) : null}
               </QuoteBuilderLineItemCard>

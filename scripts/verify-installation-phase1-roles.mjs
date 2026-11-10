@@ -222,9 +222,9 @@ async function seedRollbackReconcileJob(companyId, contactId, adminProfileId) {
     ins_item AS (
       INSERT INTO public.quote_items (
         quote_version_id, sort_order, title, description, quantity, unit_price, line_total,
-        is_optional, is_selected
+        is_optional, is_selected, work_class, work_class_overridden
       )
-      SELECT id, 1, 'Site installation (rollback verify)', 'rollback-only fixture', 1, 0, 0, false, true
+      SELECT id, 1, 'Site installation (rollback verify)', 'rollback-only fixture', 1, 0, 0, false, true, 'installation', true
       FROM ins_ver
       RETURNING quote_version_id
     ),

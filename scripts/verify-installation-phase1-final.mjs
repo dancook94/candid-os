@@ -375,29 +375,30 @@ if (!dbUrl) {
   }
 }
 
-const quoteAcceptSql = readFileSync(
-  `${root}/lib/installations/reconcile-design.test.ts`,
-  "utf8"
+const phase2Wiring = [
+  ["lib/quote-status-response.ts", /installation_auto_reconcile:\s*true/],
+  ["lib/jobs/create-from-quote.ts", /reconcileAcceptedInstallation/],
+  ["lib/installations/reconcile.ts", /installation_reconcile_accepted_job/],
+  ["lib/customer-quote-response.ts", /reconcileJobForAcceptedQuote/],
+  ["lib/admin-quote-actions.ts", /ensureJobForAcceptedQuote/],
+];
+const wiringGaps = [];
+for (const [rel, pattern] of phase2Wiring) {
+  const src = readFileSync(`${root}/${rel}`, "utf8");
+  if (!pattern.test(src)) wiringGaps.push(rel);
+}
+const reconcileSrc = readFileSync(`${root}/lib/installations/reconcile.ts`, "utf8");
+if (/from\("installation_projects"\)/.test(reconcileSrc)) {
+  wiringGaps.push("lib/installations/reconcile.ts inserts projects directly");
+}
+record(
+  "11",
+  "Quote acceptance wired to Phase 2 installation reconcile",
+  wiringGaps.length === 0 ? "PASS" : "FAIL",
+  wiringGaps.length === 0
+    ? "customer and admin acceptance call installation_reconcile_accepted_job"
+    : wiringGaps.join(", ")
 );
-const acceptRoutes = ["lib/quotes/send-quote.ts", "app/api/admin/quotes/[id]/accept/route.ts"];
-let hookAbsent = true;
-for (const rel of acceptRoutes) {
-  const p = `${root}/${rel}`;
-  if (!existsSync(p)) continue;
-  const src = readFileSync(p, "utf8");
-  if (/installation_reconcile|reconcileForJob/i.test(src)) {
-    hookAbsent = false;
-    record("11", "Quote acceptance NOT wired to installation reconcile", "FAIL", `found reference in ${rel}`);
-  }
-}
-if (hookAbsent) {
-  record(
-    "11",
-    "Quote acceptance NOT wired to installation reconcile",
-    quoteAcceptSql.includes("doesNotMatch") ? "PASS" : "PASS",
-    "static: lib/installations/reconcile-design.test.ts + accept/send routes"
-  );
-}
 
 console.log("\n--- JSON ---");
 console.log(JSON.stringify({ testRef: TEST_REF, tableProbe, rpcProbe, checklist }, null, 2));

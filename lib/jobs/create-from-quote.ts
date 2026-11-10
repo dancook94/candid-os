@@ -26,6 +26,7 @@ import type { DropboxSetupStatus, JobRecord } from "@/lib/jobs/types";
 import { resolveJobRequiredDateFromQuoteSources } from "@/lib/jobs/production-deadline";
 import { resolveQuoteRequestIdForQuote } from "@/lib/quote-request-link";
 import { ensureProductionManifestForJob } from "@/lib/manifest/service";
+import { reconcileAcceptedInstallation } from "@/lib/installations/reconcile";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 type QuoteForJob = {
@@ -533,7 +534,12 @@ export async function ensureJobForAcceptedQuote({
       dropboxReady: job.dropbox_setup_status === "ready",
       dropboxSetupStatus: job.dropbox_setup_status,
       schemaMissing: false,
-      warning: null,
+      warning: await attachInstallationWarning(adminClient, {
+        job,
+        quoteId,
+        actorProfileId,
+        warning: null,
+      }),
     };
   }
 
@@ -721,21 +727,59 @@ export async function ensureJobForAcceptedQuote({
     });
   }
 
+  const jobWarning = jobCreatedFromCollision
+    ? `Job created as ${job.job_reference} because ${buildJobReferenceFromNumber(quote.quote_number)} was already in use.`
+    : job.dropbox_setup_status === "failed"
+      ? "Job created but Dropbox folder setup failed. An admin can retry later."
+      : job.dropbox_setup_status === "pending"
+        ? "Job created. Dropbox folder setup is pending."
+        : null;
+
   return {
     job,
     created: true,
     dropboxReady: job.dropbox_setup_status === "ready",
     dropboxSetupStatus: job.dropbox_setup_status,
     schemaMissing: false,
-    warning:
-      jobCreatedFromCollision
-        ? `Job created as ${job.job_reference} because ${buildJobReferenceFromNumber(quote.quote_number)} was already in use.`
-        : job.dropbox_setup_status === "failed"
-          ? "Job created but Dropbox folder setup failed. An admin can retry later."
-          : job.dropbox_setup_status === "pending"
-            ? "Job created. Dropbox folder setup is pending."
-            : null,
+    warning: await attachInstallationWarning(adminClient, {
+      job,
+      quoteId,
+      actorProfileId,
+      warning: jobWarning,
+    }),
   };
+}
+
+async function attachInstallationWarning(
+  adminClient: SupabaseClient,
+  input: {
+    job: JobRecord;
+    quoteId: string;
+    actorProfileId?: string | null;
+    warning: string | null;
+  }
+) {
+  let installationWarning: string | null = null;
+
+  try {
+    installationWarning = await reconcileAcceptedInstallation(adminClient, {
+      jobId: input.job.id,
+      quoteId: input.quoteId,
+      quoteVersionId: input.job.quote_version_id,
+      actorProfileId: input.actorProfileId,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[installations] reconcile failed", {
+      quoteId: input.quoteId,
+      jobId: input.job.id,
+      message,
+    });
+    installationWarning =
+      "The quote and job were saved, but installation setup did not finish. Retry it from this quote.";
+  }
+
+  return [input.warning, installationWarning].filter(Boolean).join(" ") || null;
 }
 
 export async function reconcileJobForAcceptedQuote({
