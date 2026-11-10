@@ -198,6 +198,44 @@ export function QuoteBuilderLineItemCard({
         )}
       </header>
 
+      <fieldset className="mb-3 space-y-1.5">
+        <legend className="text-xs font-medium text-neutral-950">Work type</legend>
+        <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Work type">
+          {WORK_CLASSES.map((workClass) => {
+            const selected = item.workClass === workClass;
+            return (
+              <button
+                key={workClass}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                disabled={fieldDisabled}
+                onClick={() =>
+                  onUpdate(item.clientKey, {
+                    workClass,
+                    workClassOverridden: true,
+                  })
+                }
+                className={`rounded-md border px-3 py-1.5 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                  selected
+                    ? "border-neutral-950 bg-neutral-950 text-white"
+                    : "border-neutral-300 bg-white text-neutral-800 hover:bg-neutral-50"
+                }`}
+              >
+                {WORK_CLASS_LABELS[workClass]}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-xs text-neutral-500">
+          {item.workClassOverridden
+            ? "Staff classification"
+            : item.workClass
+              ? "Suggested from costing"
+              : "Required for every included line before acceptance."}
+        </p>
+      </fieldset>
+
       <div className="grid gap-3 lg:grid-cols-[180px_minmax(0,1fr)_320px] lg:gap-4">
         <div className="min-w-0 w-full overflow-hidden lg:w-[180px] lg:max-w-[180px]">
           <QuoteLineItemImageField
@@ -245,45 +283,6 @@ export function QuoteBuilderLineItemCard({
               placeholder="Optional description"
               className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
             />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor={`work-class-${item.clientKey}`} className="text-xs">
-              Work type
-            </Label>
-            {isReadOnly ? (
-              <p className="text-sm text-neutral-950">
-                {item.workClass ? WORK_CLASS_LABELS[item.workClass] : "Not classified"}
-              </p>
-            ) : (
-              <select
-                id={`work-class-${item.clientKey}`}
-                value={item.workClass ?? ""}
-                disabled={fieldDisabled}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  onUpdate(item.clientKey, {
-                    workClass: WORK_CLASSES.find((workClass) => workClass === value) ?? null,
-                    workClassOverridden: true,
-                  });
-                }}
-                className="h-8 w-full rounded-lg border border-neutral-300 bg-white px-2 text-sm outline-none focus-visible:border-neutral-950 focus-visible:ring-3 focus-visible:ring-neutral-950/10 disabled:opacity-50"
-              >
-                <option value="">Choose work type</option>
-                {WORK_CLASSES.map((workClass) => (
-                  <option key={workClass} value={workClass}>
-                    {WORK_CLASS_LABELS[workClass]}
-                  </option>
-                ))}
-              </select>
-            )}
-            <p className="text-xs text-neutral-500">
-              {item.workClassOverridden
-                ? "Staff classification"
-                : item.workClass
-                  ? "Suggested from costing"
-                  : "Required for every included line before acceptance."}
-            </p>
           </div>
         </div>
 

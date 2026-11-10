@@ -101,3 +101,29 @@ test("customer and admin acceptance set the flag and retry stays on the job path
   assert.match(checklist, /Quote acceptance wired to Phase 2 installation reconcile/);
   assert.doesNotMatch(checklist, /Quote acceptance NOT wired/);
 });
+
+test("every quote line shows the three work classes before costing", async () => {
+  const line = await readFile(
+    new URL("../../components/quote-builder-line-item.tsx", import.meta.url),
+    "utf8"
+  );
+  const form = await readFile(
+    new URL("../../components/quote-builder-form.tsx", import.meta.url),
+    "utf8"
+  );
+  const costing = await readFile(
+    new URL("../../components/quote-line-costing-panel.tsx", import.meta.url),
+    "utf8"
+  );
+  const controlAt = line.indexOf('role="radiogroup"');
+  const gridAt = line.indexOf("lg:grid-cols-");
+
+  assert.ok(controlAt > 0 && controlAt < gridAt);
+  assert.match(line, /WORK_CLASS_LABELS\[workClass\]/);
+  assert.match(line, /workClassOverridden: true/);
+  assert.doesNotMatch(line, /<select/);
+  assert.doesNotMatch(costing, /workClass/);
+  assert.match(form, /work_class: item\.workClass/);
+  assert.match(form, /work_class_overridden: item\.workClassOverridden/);
+  assert.match(form, /item\.workClassOverridden\s*\?\s*\{\}/);
+});
