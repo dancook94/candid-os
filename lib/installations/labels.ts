@@ -35,6 +35,18 @@ export function formatLondonWhen(value: string | null | undefined) {
   }).format(new Date(value));
 }
 
+export function formatLondonTime(value: string | null | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Europe/London",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value));
+}
+
 export function londonDateKey(value: string | null | undefined) {
   if (!value) {
     return null;
