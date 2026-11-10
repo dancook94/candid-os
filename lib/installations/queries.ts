@@ -76,6 +76,16 @@ export type InstallationVisitRecord = {
   signOffCapturedByName: string | null;
   signOffSignatureUrl: string | null;
   signOffChecklist: CompletionChecklistRecord | null;
+  reports: InstallationReportVersion[];
+};
+
+export type InstallationReportVersion = {
+  id: string;
+  reportReference: string;
+  versionNumber: number;
+  generatedAt: string | null;
+  generatedByProfileId: string | null;
+  generatedByName: string | null;
 };
 
 export type InstallationProjectRecord = {
@@ -183,7 +193,8 @@ const PROJECT_DETAIL_SELECT = `
     ${VISIT_SELECT},
     installation_visit_photos(id, phase, file_name, storage_path, snag_id, snag_photo_role, captured_at, uploaded_by_profile_id),
     installation_visit_documents(id, document_kind, file_name, storage_path, created_at, uploaded_by_profile_id),
-    installation_sign_offs(customer_name, signed_at, customer_attendance, decline_reason, signature_storage_path, captured_by_profile_id, checklist)
+    installation_sign_offs(customer_name, signed_at, customer_attendance, decline_reason, signature_storage_path, captured_by_profile_id, checklist),
+    installation_completion_reports(id, report_reference, version_number, generated_at, generated_by_profile_id)
   )
 `;
 
@@ -346,6 +357,25 @@ async function mapVisit(
     signOffCapturedByName: null,
     signOffSignatureUrl: await signedUrl(supabase, signOff?.signature_storage_path || null),
     signOffChecklist: readCompletionChecklist(signOff?.checklist),
+    reports: (Array.isArray(row.installation_completion_reports) ? row.installation_completion_reports : [])
+      .map((report) => {
+        const record = report as {
+          id?: string;
+          report_reference?: string;
+          version_number?: number;
+          generated_at?: string | null;
+          generated_by_profile_id?: string | null;
+        };
+        return {
+          id: String(record.id),
+          reportReference: record.report_reference || "Report",
+          versionNumber: Number(record.version_number) || 0,
+          generatedAt: text(record.generated_at),
+          generatedByProfileId: record.generated_by_profile_id || null,
+          generatedByName: null,
+        };
+      })
+      .sort((left, right) => right.versionNumber - left.versionNumber),
   };
 }
 
@@ -463,6 +493,9 @@ async function enrichInstallationPeople(
       }
     }
     if (visit.signOffCapturedByProfileId) ids.add(visit.signOffCapturedByProfileId);
+    for (const report of visit.reports) {
+      if (report.generatedByProfileId) ids.add(report.generatedByProfileId);
+    }
   }
 
   if (ids.size === 0) {
@@ -489,6 +522,10 @@ async function enrichInstallationPeople(
       photos: visit.photos.map(withName),
       documents: visit.documents.map(withName),
       signOffCapturedByName: nameFor(visit.signOffCapturedByProfileId),
+      reports: visit.reports.map((report) => ({
+        ...report,
+        generatedByName: nameFor(report.generatedByProfileId),
+      })),
       snags: visit.snags.map((snag) => ({
         ...snag,
         reportedByName: nameFor(snag.reportedByProfileId),

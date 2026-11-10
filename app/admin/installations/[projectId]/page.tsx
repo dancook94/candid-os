@@ -33,6 +33,14 @@ export default async function InstallationProjectPage({
     notFound();
   }
 
+  const canManage = canManageInstallations(profile);
+  const visibleProject = canManage
+    ? project
+    : {
+        ...project,
+        visits: project.visits.map((visit) => ({ ...visit, reports: [] })),
+      };
+
   return (
     <AppShell {...shell}>
       <div className="mx-auto max-w-5xl">
@@ -60,9 +68,9 @@ export default async function InstallationProjectPage({
         />
 
         <InstallationProjectPanel
-          project={project}
+          project={visibleProject}
           installers={installers}
-          canManage={canManageInstallations(profile)}
+          canManage={canManage}
           canOperate={canOperateInstallations(profile)}
         />
       </div>

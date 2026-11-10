@@ -61,6 +61,7 @@ export const INSTALLATION_VISIT_EVENT_TYPES = [
   "photo_added",
   "note_added",
   "visit_reopened",
+  "report_generated",
 ] as const;
 
 export type InstallationVisitEventType =

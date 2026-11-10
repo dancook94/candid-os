@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { InstallationCompletionReport } from "@/components/installations/installation-completion-report";
 import { InstallationSignaturePad, type InstallationSignaturePadHandle } from "@/components/installations/installation-signature-pad";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -138,6 +139,8 @@ export function InstallationProjectPanel({
             jobId={project.jobId}
             jobReference={project.jobReference}
             companyName={project.companyName}
+            quoteNumber={project.quoteNumber}
+            projectStatus={project.status}
             unfinishedVisits={project.visits.filter(
               (item) => !["completed", "cancelled"].includes(item.status)
             ).length}
@@ -295,6 +298,8 @@ function VisitCard({
   jobId,
   jobReference,
   companyName,
+  quoteNumber,
+  projectStatus,
   unfinishedVisits,
   canManage,
   canOperate,
@@ -307,6 +312,8 @@ function VisitCard({
   jobId: string | null;
   jobReference: string | null;
   companyName: string;
+  quoteNumber: number | null;
+  projectStatus: string;
   unfinishedVisits: number;
   canManage: boolean;
   canOperate: boolean;
@@ -325,13 +332,14 @@ function VisitCard({
     .filter(Boolean)
     .join(" · ");
   const outstandingSnags = visit.snags.filter((snag) => isOutstandingInstallationSnag(snag.status)).length;
-  const [tab, setTab] = useState<"details" | "photos" | "snagging" | "documents" | "completion">("details");
+  const [tab, setTab] = useState<"details" | "photos" | "snagging" | "documents" | "completion" | "report">("details");
   const tabs = [
     ["details", "Visit Details"],
     ["photos", "Photos"],
     ["snagging", "Snagging"],
     ["documents", "Documents"],
     ["completion", "Completion & Sign-off"],
+    ...(canManage ? [["report", "Completion Report"] as const] : []),
   ] as const;
   const installersLabel =
     visit.assignees.length > 0 ? visit.assignees.map((person) => person.name).join(", ") : "No installers";
@@ -515,6 +523,13 @@ function VisitCard({
           ) : null}
         </div>
       </section>
+      ) : null}
+
+      {tab === "report" && canManage ? (
+        <InstallationCompletionReport
+          visit={visit}
+          project={{ status: projectStatus, companyName, jobReference, quoteNumber }}
+        />
       ) : null}
 
       {tab === "completion" ? (

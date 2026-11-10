@@ -47,6 +47,11 @@ const SIGN_OFF_CHECKLIST = new URL(
   import.meta.url
 );
 
+const COMPLETION_REPORTS = new URL(
+  "../../supabase/migrations/20270110174000_installation_completion_reports.sql",
+  import.meta.url
+);
+
 const SQL_EDITOR_MIGRATIONS = [
   MIGRATION,
   HARDENING,
@@ -57,6 +62,7 @@ const SQL_EDITOR_MIGRATIONS = [
   UX_PERMISSIONS,
   SIGN_OFF_ATTENDANCE,
   SIGN_OFF_CHECKLIST,
+  COMPLETION_REPORTS,
 ];
 
 function assertSqlEditorCompatible(sql: string, label: string) {
