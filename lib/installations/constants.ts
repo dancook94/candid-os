@@ -44,7 +44,7 @@ export const INSTALLATION_PHOTO_PHASES = ["before", "during", "after"] as const;
 
 export type InstallationPhotoPhase = (typeof INSTALLATION_PHOTO_PHASES)[number];
 
-export const INSTALLATION_SNAG_STATUSES = ["open", "resolved", "wont_fix"] as const;
+export const INSTALLATION_SNAG_STATUSES = ["open", "in_progress", "resolved", "wont_fix"] as const;
 
 export type InstallationSnagStatus = (typeof INSTALLATION_SNAG_STATUSES)[number];
 

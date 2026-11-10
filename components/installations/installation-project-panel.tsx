@@ -1,8 +1,9 @@
 "use client";
 
-import { useRef, useState, type PointerEvent } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
+import { InstallationSignaturePad, type InstallationSignaturePadHandle } from "@/components/installations/installation-signature-pad";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +13,12 @@ import {
   INSTALLATION_FILES_BUCKET,
 } from "@/lib/installations/constants";
 import { asConflicts, conflictSummary, type ScheduleConflict } from "@/lib/installations/conflicts";
+import {
+  COMPLETION_CHECKLIST,
+  completionChecklistPayload,
+  completionIssues,
+  type CustomerAttendance,
+} from "@/lib/installations/completion";
 import { isOutstandingInstallationSnag } from "@/lib/installations/job-signal";
 import { PROJECT_STATUS_LABELS, VISIT_STATUS_LABELS, formatLondonWhen } from "@/lib/installations/labels";
 import type {
@@ -129,6 +136,8 @@ export function InstallationProjectPanel({
             installers={installers}
             artwork={project.artwork}
             jobId={project.jobId}
+            jobReference={project.jobReference}
+            companyName={project.companyName}
             unfinishedVisits={project.visits.filter(
               (item) => !["completed", "cancelled"].includes(item.status)
             ).length}
@@ -284,6 +293,8 @@ function VisitCard({
   installers,
   artwork,
   jobId,
+  jobReference,
+  companyName,
   unfinishedVisits,
   canManage,
   canOperate,
@@ -294,6 +305,8 @@ function VisitCard({
   installers: InstallerOption[];
   artwork: InstallationProjectRecord["artwork"];
   jobId: string | null;
+  jobReference: string | null;
+  companyName: string;
   unfinishedVisits: number;
   canManage: boolean;
   canOperate: boolean;
@@ -312,37 +325,72 @@ function VisitCard({
     .filter(Boolean)
     .join(" · ");
   const outstandingSnags = visit.snags.filter((snag) => isOutstandingInstallationSnag(snag.status)).length;
+  const [tab, setTab] = useState<"details" | "photos" | "snagging" | "documents" | "completion">("details");
+  const tabs = [
+    ["details", "Visit Details"],
+    ["photos", "Photos"],
+    ["snagging", "Snagging"],
+    ["documents", "Documents"],
+    ["completion", "Completion & Sign-off"],
+  ] as const;
+  const installersLabel =
+    visit.assignees.length > 0 ? visit.assignees.map((person) => person.name).join(", ") : "No installers";
 
   return (
-    <article className="space-y-6 rounded-xl border border-neutral-200 bg-white p-4">
-      <section className="space-y-3">
+    <article className="space-y-4 rounded-xl border border-neutral-200 bg-white p-4">
+      <header className="space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
+            <p className="text-sm text-neutral-500">
+              {jobReference || "No job number"} · {companyName}
+            </p>
             <h3 className="text-base font-semibold text-neutral-950">
               Visit {visit.visitNumber}: {visit.title}
             </h3>
-            <p className="text-sm text-neutral-600">Visit details and installers</p>
           </div>
           <p className="text-sm font-medium text-neutral-800">{statusLabel}</p>
         </div>
-        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+        <dl className="grid gap-3 text-sm sm:grid-cols-3">
           <div>
             <dt className="text-xs text-neutral-500">Site address</dt>
             <dd className="mt-1 text-neutral-900">{address.join(", ") || "Site not set"}</dd>
           </div>
           <div>
-            <dt className="text-xs text-neutral-500">Site contact</dt>
-            <dd className="mt-1 text-neutral-900">{contact || "Contact not set"}</dd>
-          </div>
-          <div>
-            <dt className="text-xs text-neutral-500">Visit date and time</dt>
+            <dt className="text-xs text-neutral-500">Installation date and time</dt>
             <dd className="mt-1 text-neutral-900">{formatLondonWhen(visit.scheduledStartAt)}</dd>
           </div>
           <div>
             <dt className="text-xs text-neutral-500">Assigned installers</dt>
-            <dd className="mt-1 text-neutral-900">
-              {visit.assignees.length > 0 ? visit.assignees.map((person) => person.name).join(", ") : "No installers"}
-            </dd>
+            <dd className="mt-1 text-neutral-900">{installersLabel}</dd>
+          </div>
+        </dl>
+      </header>
+      <div role="tablist" aria-label="Installation visit" className="-mx-1 flex gap-1 overflow-x-auto border-b border-neutral-200">
+        {tabs.map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={tab === id}
+            className={`min-h-11 shrink-0 border-b-2 px-3 text-sm ${
+              tab === id ? "border-neutral-950 font-semibold text-neutral-950" : "border-transparent text-neutral-600"
+            }`}
+            onClick={() => setTab(id)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "details" ? (
+      <section className="space-y-3">
+        <dl className="grid gap-3 text-sm sm:grid-cols-2">
+          <div>
+            <dt className="text-xs text-neutral-500">Site contact</dt>
+            <dd className="mt-1 text-neutral-900">{contact || "Contact not set"}</dd>
+          </div>
+          <div>
+            <dt className="text-xs text-neutral-500">Address</dt>
+            <dd className="mt-1 text-neutral-900">{address.join(", ") || "Site not set"}</dd>
           </div>
         </dl>
         {visit.accessInstructions ? (
@@ -393,16 +441,20 @@ function VisitCard({
           <ReopenForm visitId={visit.id} busy={busy} onSave={onSave} />
         ) : null}
       </section>
+      ) : null}
 
-      <section className="space-y-3 border-t border-neutral-100 pt-4">
+      {tab === "photos" ? (
+      <section className="space-y-4">
         <h4 className="text-sm font-semibold text-neutral-950">Installation photos</h4>
         {INSTALLATION_PHOTO_PHASES.map((phase) => (
           <PhotoGallery key={phase} phase={phase} photos={visit.photos.filter((photo) => photo.kind === phase)} />
         ))}
         {canOperate ? <PhotoForm visitId={visit.id} busy={busy} onSave={onSave} /> : null}
       </section>
+      ) : null}
 
-      <section className="space-y-3 border-t border-neutral-100 pt-4">
+      {tab === "snagging" ? (
+      <section className="space-y-3">
         <h4 className="text-sm font-semibold text-neutral-950">Snagging</h4>
         {visit.snags.map((snag) => (
           <SnagCard
@@ -417,22 +469,28 @@ function VisitCard({
         ))}
         {canOperate ? <SnagForm visit={visit} installers={installers} busy={busy} onSave={onSave} /> : null}
       </section>
+      ) : null}
 
-      <section className="space-y-3 border-t border-neutral-100 pt-4">
+      {tab === "documents" ? (
+      <section className="space-y-3">
         <h4 className="text-sm font-semibold text-neutral-950">Documents and artwork</h4>
         {canOperate ? <DocumentForm visitId={visit.id} busy={busy} onSave={onSave} /> : null}
         {visit.documents.length > 0 ? (
           <ul className="space-y-2 text-sm">
             {visit.documents.map((document) => (
-              <li key={document.id}>
+              <li key={document.id} className="rounded-lg border border-neutral-200 px-3 py-2">
                 {document.url ? (
-                  <a className="inline-flex min-h-11 items-center underline" href={document.url}>
+                  <a className="inline-flex min-h-11 items-center font-medium underline" href={document.url}>
                     {document.name}
                   </a>
                 ) : (
-                  document.name
+                  <span className="font-medium">{document.name}</span>
                 )}
-                <span className="text-neutral-500"> · {document.kind}</span>
+                <p className="text-xs text-neutral-500">
+                  {document.kind}
+                  {document.capturedAt ? ` · ${formatLondonWhen(document.capturedAt)}` : ""}
+                  {document.uploadedByName ? ` · ${document.uploadedByName}` : ""}
+                </p>
               </li>
             ))}
           </ul>
@@ -457,8 +515,10 @@ function VisitCard({
           ) : null}
         </div>
       </section>
+      ) : null}
 
-      <section className="space-y-3 border-t border-neutral-100 pt-4">
+      {tab === "completion" ? (
+      <section className="space-y-3">
         <h4 className="text-sm font-semibold text-neutral-950">Completion and sign-off</h4>
         {outstandingSnags > 0 || unfinishedVisits > 0 ? (
           <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
@@ -470,18 +530,60 @@ function VisitCard({
               : ""}
             Signing off this visit does not complete the installation project.
           </p>
-        ) : null}
-        {visit.signOffName ? (
-          <p className="text-sm text-neutral-700">
-            Signed by {visit.signOffName}
-            {visit.signOffAt ? ` · ${formatLondonWhen(visit.signOffAt)}` : ""}
+        ) : (
+          <p className="text-sm text-neutral-600">
+            Completing this visit does not complete the installation project.
           </p>
+        )}
+        {visit.signOffName ? (
+          <div className="space-y-2 text-sm text-neutral-700">
+            <p>
+              {visit.signOffAttendance === "absent"
+                ? "Customer not present"
+                : visit.signOffAttendance === "declined"
+                  ? "Customer declined to sign"
+                  : `Signed by ${visit.signOffName}`}
+              {visit.signOffAt ? ` · ${formatLondonWhen(visit.signOffAt)}` : ""}
+            </p>
+            {visit.signOffChecklist ? (
+              <div>
+                <p>
+                  Checklist confirmed by {visit.signOffCapturedByName || "staff"}
+                  {visit.signOffAt ? ` · ${formatLondonWhen(visit.signOffAt)}` : ""}
+                </p>
+                <ul className="mt-1 list-disc pl-5">
+                  {visit.signOffChecklist.siteLeftSafeAndTidy ? <li>{COMPLETION_CHECKLIST[0]}</li> : null}
+                  {visit.signOffChecklist.installationPhotosRecorded ? (
+                    <li>{COMPLETION_CHECKLIST[1]}</li>
+                  ) : null}
+                </ul>
+              </div>
+            ) : visit.signOffCapturedByName ? (
+              <p>Recorded by {visit.signOffCapturedByName}</p>
+            ) : null}
+            {visit.signOffDeclineReason ? <p>Explanation: {visit.signOffDeclineReason}</p> : null}
+            {visit.signOffSignatureUrl ? (
+              <a href={visit.signOffSignatureUrl} target="_blank" rel="noreferrer">
+                <img
+                  src={visit.signOffSignatureUrl}
+                  alt={`Signature for ${visit.signOffName}`}
+                  className="max-h-40 rounded border border-neutral-200 bg-white"
+                />
+              </a>
+            ) : null}
+          </div>
         ) : canOperate ? (
-          <SignOffForm visitId={visit.id} busy={busy} onSave={onSave} />
+          <SignOffForm
+            visitId={visit.id}
+            outstandingSnags={outstandingSnags}
+            busy={busy}
+            onSave={onSave}
+          />
         ) : (
           <p className="text-sm text-neutral-600">No customer sign-off recorded.</p>
         )}
       </section>
+      ) : null}
     </article>
   );
 }
@@ -753,6 +855,9 @@ function snagStatusLabel(status: string) {
 }
 
 function PhotoGallery({ phase, photos }: { phase: string; photos: InstallationFile[] }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  const open = photos.find((photo) => photo.id === openId) ?? null;
+
   return (
     <div className="space-y-2">
       <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">{phase}</p>
@@ -763,17 +868,29 @@ function PhotoGallery({ phase, photos }: { phase: string; photos: InstallationFi
           {photos.map((photo) => (
             <figure key={photo.id} className="overflow-hidden rounded-lg border border-neutral-200">
               {photo.url ? (
-                <a href={photo.url} target="_blank" rel="noreferrer">
+                <button type="button" className="block w-full" onClick={() => setOpenId(photo.id)}>
                   <img src={photo.url} alt={photo.name} className="h-28 w-full object-cover" />
-                </a>
+                </button>
               ) : (
                 <div className="flex h-28 items-center justify-center px-2 text-xs text-neutral-500">{photo.name}</div>
               )}
-              <figcaption className="px-2 py-1 text-xs text-neutral-600">{photo.name}</figcaption>
+              <figcaption className="px-2 py-1 text-xs text-neutral-600">
+                <p className="truncate">{photo.name}</p>
+                <p>
+                  {photo.capturedAt ? formatLondonWhen(photo.capturedAt) : "Time not recorded"}
+                  {photo.uploadedByName ? ` · ${photo.uploadedByName}` : ""}
+                </p>
+              </figcaption>
             </figure>
           ))}
         </div>
       )}
+      {open?.url ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4" role="dialog">
+          <button type="button" className="absolute inset-0" aria-label="Close photo" onClick={() => setOpenId(null)} />
+          <img src={open.url} alt={open.name} className="relative max-h-[85vh] max-w-full rounded bg-white object-contain" />
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -827,7 +944,16 @@ function SnagCard({
         <p className="text-sm text-neutral-950">{snag.description}</p>
         <span className="text-xs font-medium text-neutral-600">{snagStatusLabel(snag.status)}</span>
       </div>
-      <p className="text-xs text-neutral-500">Responsible: {responsible}</p>
+      <p className="text-xs text-neutral-500">
+        Reported by {snag.reportedByName || "staff"}
+        {snag.reportedAt ? ` · ${formatLondonWhen(snag.reportedAt)}` : ""}
+      </p>
+      <p className="text-xs text-neutral-500">Assigned to: {responsible}</p>
+      {snag.resolvedAt ? (
+        <p className="text-xs text-neutral-500">
+          Resolved by {snag.resolvedByName || "staff"} · {formatLondonWhen(snag.resolvedAt)}
+        </p>
+      ) : null}
       <div>
         <p className="text-xs text-neutral-500">Issue photos</p>
         <SnagPhotos photos={snag.issuePhotos} empty="No issue photos." />
@@ -1036,31 +1162,34 @@ function PhotoForm({
       className="flex flex-col gap-2 sm:flex-row sm:items-center"
       onSubmit={(event) => {
         event.preventDefault();
-        const file = (event.currentTarget.elements.namedItem("photo") as HTMLInputElement).files?.[0];
-        if (!file) {
+        const files = Array.from((event.currentTarget.elements.namedItem("photo") as HTMLInputElement).files ?? []);
+        if (files.length === 0) {
           return;
         }
         void onSave(async () => {
           const supabase = createClient();
-          const path = buildInstallationPhotoPath(visitId, phase, file.name);
-          const upload = await supabase.storage.from(INSTALLATION_FILES_BUCKET).upload(path, file, {
-            contentType: file.type,
-          });
-          if (upload.error) {
-            return readResult(null, upload.error);
+          for (const file of files) {
+            const path = buildInstallationPhotoPath(visitId, phase, file.name);
+            const upload = await supabase.storage.from(INSTALLATION_FILES_BUCKET).upload(path, file, {
+              contentType: file.type,
+            });
+            if (upload.error) {
+              return readResult(null, upload.error);
+            }
+            const { error } = await supabase.rpc("installation_register_visit_photo", {
+              p_visit_id: visitId,
+              p_phase: phase,
+              p_storage_path: path,
+              p_file_name: file.name,
+              p_mime_type: file.type,
+              p_byte_size: file.size,
+              p_captured_at: new Date().toISOString(),
+            });
+            if (error) {
+              return readResult(null, error);
+            }
           }
-          const { error } = await supabase.rpc("installation_register_visit_photo", {
-            p_visit_id: visitId,
-            p_phase: phase,
-            p_storage_path: path,
-            p_file_name: file.name,
-            p_mime_type: file.type,
-            p_byte_size: file.size,
-            p_captured_at: new Date().toISOString(),
-          });
-          return error
-            ? readResult(null, error)
-            : { saved: true, conflicts: [], unfinishedVisits: 0, openSnags: 0, error: null };
+          return { saved: true, conflicts: [], unfinishedVisits: 0, openSnags: 0, error: null };
         });
       }}
     >
@@ -1075,9 +1204,9 @@ function PhotoForm({
           </option>
         ))}
       </select>
-      <Input name="photo" type="file" accept="image/*" capture="environment" className="min-h-11" />
+      <Input name="photo" type="file" accept="image/*" capture="environment" multiple className="min-h-11" />
       <Button type="submit" variant="outline" disabled={busy}>
-        Upload photo
+        Upload photos
       </Button>
     </form>
   );
@@ -1133,97 +1262,127 @@ function DocumentForm({
   );
 }
 
-const SIGN_OFF_CHECKS = [
-  "Site left safe",
-  "Installation photos recorded",
-  "Customer present for sign-off",
+async function discardUnlinkedSignature(
+  supabase: ReturnType<typeof createClient>,
+  storagePath: string | null
+) {
+  if (!storagePath?.includes("customer-signature.png")) {
+    return;
+  }
+
+  await supabase.storage.from(INSTALLATION_FILES_BUCKET).remove([storagePath]);
+}
+
+const ATTENDANCE_OPTIONS = [
+  { value: "present", label: "Customer present" },
+  { value: "absent", label: "Customer not present" },
+  { value: "declined", label: "Customer declined to sign" },
 ] as const;
 
 function SignOffForm({
   visitId,
+  outstandingSnags,
   busy,
   onSave,
 }: {
   visitId: string;
+  outstandingSnags: number;
   busy: boolean;
   onSave: (action: () => Promise<CommitResult>) => Promise<CommitResult>;
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const signatureRef = useRef<InstallationSignaturePadHandle>(null);
+  const savingRef = useRef(false);
   const [name, setName] = useState("");
-  const [checks, setChecks] = useState<boolean[]>(SIGN_OFF_CHECKS.map(() => false));
-  const [signed, setSigned] = useState(false);
-
-  function draw(event: PointerEvent<HTMLCanvasElement>) {
-    const canvas = canvasRef.current;
-    if (!canvas) {
-      return;
-    }
-    const context = canvas.getContext("2d");
-    if (!context) {
-      return;
-    }
-    const rect = canvas.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width) * canvas.width;
-    const y = ((event.clientY - rect.top) / rect.height) * canvas.height;
-    if (event.type === "pointerdown") {
-      context.beginPath();
-      context.moveTo(x, y);
-      setSigned(true);
-      return;
-    }
-    if (event.buttons !== 1) {
-      return;
-    }
-    context.lineWidth = 2;
-    context.lineCap = "round";
-    context.strokeStyle = "#171717";
-    context.lineTo(x, y);
-    context.stroke();
-  }
+  const [checks, setChecks] = useState<boolean[]>(COMPLETION_CHECKLIST.map(() => false));
+  const [attendance, setAttendance] = useState<CustomerAttendance | "">("");
+  const [declineReason, setDeclineReason] = useState("");
+  const [signaturePresent, setSignaturePresent] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+  const issues = completionIssues({
+    checklist: checks,
+    attendance,
+    customerName: name,
+    signaturePresent,
+    declineReason,
+    outstandingSnags,
+  });
 
   return (
     <form
       className="grid gap-3"
       onSubmit={(event) => {
         event.preventDefault();
-        const canvas = canvasRef.current;
-        if (!canvas || !signed || checks.some((checked) => !checked)) {
+        if (savingRef.current || busy) {
           return;
         }
+        const current = completionIssues({
+          checklist: checks,
+          attendance,
+          customerName: name,
+          signaturePresent: attendance === "present" ? !(signatureRef.current?.isEmpty() ?? true) : false,
+          declineReason,
+          outstandingSnags,
+        });
+        if (!current.canSave || !attendance) {
+          setFormError(current.errors[0] ?? "Complete the sign-off details.");
+          return;
+        }
+        savingRef.current = true;
         void onSave(async () => {
-          const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-          if (!blob) {
+          const supabase = createClient();
+          let signaturePath: string | null = null;
+          try {
+            if (attendance === "present") {
+              const blob = await signatureRef.current?.toBlob();
+              if (!blob) {
+                return {
+                  saved: false,
+                  conflicts: [],
+                  unfinishedVisits: 0,
+                  openSnags: 0,
+                  error: "A handwritten signature is required when the customer is present.",
+                };
+              }
+              signaturePath = buildInstallationDocumentPath(visitId, "other", "customer-signature.png");
+              const upload = await supabase.storage.from(INSTALLATION_FILES_BUCKET).upload(signaturePath, blob, {
+                contentType: "image/png",
+              });
+              if (upload.error) {
+                return readResult(null, upload.error);
+              }
+            }
+            const { error } = await supabase.rpc("installation_sign_off_capture", {
+              p_visit_id: visitId,
+              p_customer_name: attendance === "present" ? name.trim() : "",
+              p_notes: null,
+              p_signature_storage_path: signaturePath,
+              p_customer_attendance: attendance,
+              p_decline_reason: attendance === "declined" ? declineReason.trim() : null,
+              p_checklist: completionChecklistPayload(checks),
+            });
+            if (error) {
+              await discardUnlinkedSignature(supabase, signaturePath);
+              return readResult(null, error);
+            }
+            return { saved: true, conflicts: [], unfinishedVisits: 0, openSnags: 0, error: null };
+          } catch {
+            await discardUnlinkedSignature(supabase, signaturePath);
             return {
               saved: false,
               conflicts: [],
               unfinishedVisits: 0,
               openSnags: 0,
-              error: "The signature could not be captured.",
+              error: "Sign-off could not be saved.",
             };
+          } finally {
+            savingRef.current = false;
           }
-          const supabase = createClient();
-          const path = buildInstallationDocumentPath(visitId, "other", "customer-signature.png");
-          const upload = await supabase.storage.from(INSTALLATION_FILES_BUCKET).upload(path, blob, {
-            contentType: "image/png",
-          });
-          if (upload.error) {
-            return readResult(null, upload.error);
-          }
-          const { error } = await supabase.rpc("installation_sign_off_capture", {
-            p_visit_id: visitId,
-            p_customer_name: name,
-            p_notes: `Checklist confirmed: ${SIGN_OFF_CHECKS.join(", ")}.`,
-            p_signature_storage_path: path,
-          });
-          return error
-            ? readResult(null, error)
-            : { saved: true, conflicts: [], unfinishedVisits: 0, openSnags: 0, error: null };
         });
       }}
     >
       <fieldset className="space-y-2">
         <legend className="text-sm font-medium text-neutral-800">Completion checklist</legend>
-        {SIGN_OFF_CHECKS.map((label, index) => (
+        {COMPLETION_CHECKLIST.map((label, index) => (
           <label key={label} className="flex min-h-11 items-center gap-2 text-sm">
             <input
               type="checkbox"
@@ -1236,24 +1395,50 @@ function SignOffForm({
           </label>
         ))}
       </fieldset>
-      <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Customer name" />
-      <div>
-        <Label>Customer signature</Label>
-        <canvas
-          ref={canvasRef}
-          width={600}
-          height={180}
-          className="mt-1 h-36 w-full touch-none rounded-lg border border-neutral-300 bg-white"
-          onPointerDown={draw}
-          onPointerMove={draw}
+      {issues.errors.length > 0 || formError ? (
+        <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          {formError || issues.errors[0]}
+        </p>
+      ) : null}
+      {issues.warnings.map((warning) => (
+        <p key={warning} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+          {warning} Signing off this visit does not complete the installation project.
+        </p>
+      ))}
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium text-neutral-800">Customer attendance</legend>
+        {ATTENDANCE_OPTIONS.map((option) => (
+          <label key={option.value} className="flex min-h-11 items-center gap-2 text-sm">
+            <input
+              type="radio"
+              name="customer-attendance"
+              checked={attendance === option.value}
+              onChange={() => setAttendance(option.value)}
+            />
+            {option.label}
+          </label>
+        ))}
+      </fieldset>
+      {attendance === "present" ? (
+        <div className="space-y-3">
+          <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Customer name" />
+          <div>
+            <Label>Customer signature</Label>
+            <InstallationSignaturePad
+              ref={signatureRef}
+              onChange={(empty) => setSignaturePresent(!empty)}
+            />
+          </div>
+        </div>
+      ) : null}
+      {attendance === "declined" ? (
+        <Input
+          value={declineReason}
+          onChange={(event) => setDeclineReason(event.target.value)}
+          placeholder="Why the customer declined to sign"
         />
-      </div>
-      <Button
-        type="submit"
-        variant="outline"
-        className="min-h-11"
-        disabled={busy || name.trim().length === 0 || !signed || checks.some((checked) => !checked)}
-      >
+      ) : null}
+      <Button type="submit" variant="outline" className="min-h-11" disabled={busy || !issues.canSave}>
         Record sign-off
       </Button>
     </form>

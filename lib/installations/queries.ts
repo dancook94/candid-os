@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { INSTALLATION_FILES_BUCKET } from "@/lib/installations/constants";
+import { readCompletionChecklist, type CompletionChecklistRecord } from "@/lib/installations/completion";
 import { isOutstandingInstallationSnag } from "@/lib/installations/job-signal";
 import { londonDateKey } from "@/lib/installations/labels";
 
@@ -20,6 +21,12 @@ export type InstallationSnag = {
   status: string;
   assignedToProfileId: string | null;
   resolutionNotes: string | null;
+  reportedByProfileId: string | null;
+  reportedByName: string | null;
+  reportedAt: string | null;
+  resolvedByProfileId: string | null;
+  resolvedByName: string | null;
+  resolvedAt: string | null;
   issuePhotos: InstallationFile[];
   resolutionPhotos: InstallationFile[];
 };
@@ -29,6 +36,9 @@ export type InstallationFile = {
   name: string;
   kind: string;
   url: string | null;
+  capturedAt: string | null;
+  uploadedByProfileId: string | null;
+  uploadedByName: string | null;
 };
 
 export type InstallationVisitRecord = {
@@ -60,6 +70,12 @@ export type InstallationVisitRecord = {
   documents: InstallationFile[];
   signOffName: string | null;
   signOffAt: string | null;
+  signOffAttendance: string | null;
+  signOffDeclineReason: string | null;
+  signOffCapturedByProfileId: string | null;
+  signOffCapturedByName: string | null;
+  signOffSignatureUrl: string | null;
+  signOffChecklist: CompletionChecklistRecord | null;
 };
 
 export type InstallationProjectRecord = {
@@ -106,12 +122,18 @@ function toInstallationFile(photo: {
   name: string;
   kind: string;
   url: string | null;
+  capturedAt?: string | null;
+  uploadedByProfileId?: string | null;
+  uploadedByName?: string | null;
 }): InstallationFile {
   return {
     id: photo.id,
     name: photo.name,
     kind: photo.kind,
     url: photo.url,
+    capturedAt: photo.capturedAt ?? null,
+    uploadedByProfileId: photo.uploadedByProfileId ?? null,
+    uploadedByName: photo.uploadedByName ?? null,
   };
 }
 
@@ -138,7 +160,10 @@ const VISIT_SELECT = `
     profile_id,
     profiles!installation_visit_assignments_profile_id_fkey(full_name)
   ),
-  installation_snag_items(id, description, status, assigned_to_profile_id, resolution_notes)
+  installation_snag_items(
+    id, description, status, assigned_to_profile_id, resolution_notes,
+    reported_by_profile_id, resolved_by_profile_id, resolved_at, created_at
+  )
 `;
 
 const PROJECT_LIST_SELECT = `
@@ -156,9 +181,9 @@ const PROJECT_DETAIL_SELECT = `
   quotes(quote_number),
   installation_visits(
     ${VISIT_SELECT},
-    installation_visit_photos(id, phase, file_name, storage_path, snag_id, snag_photo_role),
-    installation_visit_documents(id, document_kind, file_name, storage_path),
-    installation_sign_offs(customer_name, signed_at)
+    installation_visit_photos(id, phase, file_name, storage_path, snag_id, snag_photo_role, captured_at, uploaded_by_profile_id),
+    installation_visit_documents(id, document_kind, file_name, storage_path, created_at, uploaded_by_profile_id),
+    installation_sign_offs(customer_name, signed_at, customer_attendance, decline_reason, signature_storage_path, captured_by_profile_id, checklist)
   )
 `;
 
@@ -179,8 +204,24 @@ async function mapVisit(
     : [];
   const signOff = one(
     row.installation_sign_offs as
-      | { customer_name?: string; signed_at?: string }
-      | { customer_name?: string; signed_at?: string }[]
+      | {
+          customer_name?: string;
+          signed_at?: string;
+          customer_attendance?: string | null;
+          decline_reason?: string | null;
+          signature_storage_path?: string | null;
+          captured_by_profile_id?: string | null;
+          checklist?: unknown;
+        }
+      | {
+          customer_name?: string;
+          signed_at?: string;
+          customer_attendance?: string | null;
+          decline_reason?: string | null;
+          signature_storage_path?: string | null;
+          captured_by_profile_id?: string | null;
+          checklist?: unknown;
+        }[]
       | null
   );
   const mappedPhotos = await Promise.all(
@@ -192,6 +233,8 @@ async function mapVisit(
         storage_path?: string;
         snag_id?: string | null;
         snag_photo_role?: string | null;
+        captured_at?: string | null;
+        uploaded_by_profile_id?: string | null;
       };
       return {
         id: String(record.id),
@@ -200,6 +243,8 @@ async function mapVisit(
         url: await signedUrl(supabase, record.storage_path || null),
         snagId: record.snag_id || null,
         role: record.snag_photo_role || null,
+        capturedAt: text(record.captured_at),
+        uploadedByProfileId: record.uploaded_by_profile_id || null,
       };
     })
   );
@@ -244,6 +289,10 @@ async function mapVisit(
         status?: string;
         assigned_to_profile_id?: string | null;
         resolution_notes?: string | null;
+        reported_by_profile_id?: string | null;
+        resolved_by_profile_id?: string | null;
+        resolved_at?: string | null;
+        created_at?: string | null;
       };
       const snagId = String(record.id);
       const snagPhotos = mappedPhotos.filter((photo) => photo.snagId === snagId);
@@ -253,6 +302,12 @@ async function mapVisit(
         status: record.status || "open",
         assignedToProfileId: record.assigned_to_profile_id || null,
         resolutionNotes: record.resolution_notes || null,
+        reportedByProfileId: record.reported_by_profile_id || null,
+        reportedByName: null,
+        reportedAt: text(record.created_at),
+        resolvedByProfileId: record.resolved_by_profile_id || null,
+        resolvedByName: null,
+        resolvedAt: text(record.resolved_at),
         issuePhotos: snagPhotos
           .filter((photo) => photo.role === "issue")
           .map(toInstallationFile),
@@ -269,17 +324,28 @@ async function mapVisit(
           document_kind?: string;
           file_name?: string;
           storage_path?: string | null;
+          created_at?: string | null;
+          uploaded_by_profile_id?: string | null;
         };
         return {
           id: String(record.id),
           name: record.file_name || "Document",
           kind: record.document_kind || "other",
           url: await signedUrl(supabase, record.storage_path || null),
+          capturedAt: text(record.created_at),
+          uploadedByProfileId: record.uploaded_by_profile_id || null,
+          uploadedByName: null,
         };
       })
     ),
     signOffName: signOff?.customer_name || null,
     signOffAt: text(signOff?.signed_at),
+    signOffAttendance: text(signOff?.customer_attendance),
+    signOffDeclineReason: text(signOff?.decline_reason),
+    signOffCapturedByProfileId: signOff?.captured_by_profile_id || null,
+    signOffCapturedByName: null,
+    signOffSignatureUrl: await signedUrl(supabase, signOff?.signature_storage_path || null),
+    signOffChecklist: readCompletionChecklist(signOff?.checklist),
   };
 }
 
@@ -371,7 +437,67 @@ export async function loadInstallationProject(
     });
   }
 
-  return mapProject(data as Record<string, unknown>, reader, true, artwork);
+  return enrichInstallationPeople(
+    admin,
+    await mapProject(data as Record<string, unknown>, reader, true, artwork)
+  );
+}
+
+async function enrichInstallationPeople(
+  admin: SupabaseClient,
+  project: InstallationProjectRecord
+) {
+  const ids = new Set<string>();
+  for (const visit of project.visits) {
+    for (const photo of visit.photos) {
+      if (photo.uploadedByProfileId) ids.add(photo.uploadedByProfileId);
+    }
+    for (const document of visit.documents) {
+      if (document.uploadedByProfileId) ids.add(document.uploadedByProfileId);
+    }
+    for (const snag of visit.snags) {
+      if (snag.reportedByProfileId) ids.add(snag.reportedByProfileId);
+      if (snag.resolvedByProfileId) ids.add(snag.resolvedByProfileId);
+      for (const photo of [...snag.issuePhotos, ...snag.resolutionPhotos]) {
+        if (photo.uploadedByProfileId) ids.add(photo.uploadedByProfileId);
+      }
+    }
+    if (visit.signOffCapturedByProfileId) ids.add(visit.signOffCapturedByProfileId);
+  }
+
+  if (ids.size === 0) {
+    return project;
+  }
+
+  const { data } = await admin.from("profiles").select("id, full_name").in("id", [...ids]);
+  const names = new Map(
+    (data ?? []).map((profile) => {
+      const row = profile as { id?: string; full_name?: string | null };
+      return [String(row.id), row.full_name || "Staff"] as const;
+    })
+  );
+  const nameFor = (id: string | null) => (id ? names.get(id) ?? null : null);
+  const withName = (file: InstallationFile): InstallationFile => ({
+    ...file,
+    uploadedByName: nameFor(file.uploadedByProfileId),
+  });
+
+  return {
+    ...project,
+    visits: project.visits.map((visit) => ({
+      ...visit,
+      photos: visit.photos.map(withName),
+      documents: visit.documents.map(withName),
+      signOffCapturedByName: nameFor(visit.signOffCapturedByProfileId),
+      snags: visit.snags.map((snag) => ({
+        ...snag,
+        reportedByName: nameFor(snag.reportedByProfileId),
+        resolvedByName: nameFor(snag.resolvedByProfileId),
+        issuePhotos: snag.issuePhotos.map(withName),
+        resolutionPhotos: snag.resolutionPhotos.map(withName),
+      })),
+    })),
+  };
 }
 
 export async function loadInstallerOptions(admin: SupabaseClient): Promise<InstallerOption[]> {

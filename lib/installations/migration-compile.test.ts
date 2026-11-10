@@ -37,6 +37,16 @@ const UX_PERMISSIONS = new URL(
   import.meta.url
 );
 
+const SIGN_OFF_ATTENDANCE = new URL(
+  "../../supabase/migrations/20270110172000_installation_sign_off_attendance.sql",
+  import.meta.url
+);
+
+const SIGN_OFF_CHECKLIST = new URL(
+  "../../supabase/migrations/20270110173000_installation_sign_off_checklist.sql",
+  import.meta.url
+);
+
 const SQL_EDITOR_MIGRATIONS = [
   MIGRATION,
   HARDENING,
@@ -45,6 +55,8 @@ const SQL_EDITOR_MIGRATIONS = [
   PHASE3,
   SERVICE_ROLE_SELECT,
   UX_PERMISSIONS,
+  SIGN_OFF_ATTENDANCE,
+  SIGN_OFF_CHECKLIST,
 ];
 
 function assertSqlEditorCompatible(sql: string, label: string) {
