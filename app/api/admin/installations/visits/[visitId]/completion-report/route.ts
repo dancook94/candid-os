@@ -8,6 +8,7 @@ import {
   uploadCompletionReport,
 } from "@/lib/installations/completion-report-service";
 import { canManageInstallations } from "@/lib/installations/permissions";
+import { inlineReportResponse, privateReportPreviewUrl, reportFitsInline } from "@/lib/installations/report-pdf-response";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -62,13 +63,11 @@ export async function POST(request: Request, context: RouteContext) {
         versionNumber: preview.versionNumber,
         reportReference: preview.reportReference,
       });
-      return new NextResponse(Buffer.from(report.bytes), {
-        headers: {
-          "Content-Type": "application/pdf",
-          "Content-Disposition": `inline; filename="${preview.reportReference}.pdf"`,
-          "Cache-Control": "private, no-store",
-        },
-      });
+      if (reportFitsInline(report.bytes.byteLength)) {
+        return inlineReportResponse(report.bytes, `${preview.reportReference}.pdf`, "inline");
+      }
+      const previewUrl = await privateReportPreviewUrl(visitId, report.bytes);
+      return NextResponse.json({ previewUrl });
     }
 
     await assertVisitReadyForOfficialReport(admin, visitId);

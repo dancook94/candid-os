@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -35,6 +35,7 @@ export function InstallationCompletionReport({
   const router = useRouter();
   const [selected, setSelected] = useState<string[]>(visit.photos.map((photo) => photo.id));
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const previewObjectUrl = useRef<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const checklist = checklistReportValues(visit.signOffChecklist);
@@ -66,9 +67,24 @@ export function InstallationCompletionReport({
         return;
       }
       if (!persist) {
+        const contentType = response.headers.get("content-type") ?? "";
+        if (previewObjectUrl.current) {
+          URL.revokeObjectURL(previewObjectUrl.current);
+          previewObjectUrl.current = null;
+        }
+        if (contentType.includes("application/json")) {
+          const payload = (await response.json()) as { previewUrl?: string };
+          if (!payload.previewUrl) {
+            setMessage("The report preview could not be opened.");
+            return;
+          }
+          setPreviewUrl(payload.previewUrl);
+          return;
+        }
         const blob = await response.blob();
-        if (previewUrl) URL.revokeObjectURL(previewUrl);
-        setPreviewUrl(URL.createObjectURL(blob));
+        const objectUrl = URL.createObjectURL(blob);
+        previewObjectUrl.current = objectUrl;
+        setPreviewUrl(objectUrl);
         return;
       }
       const payload = (await response.json()) as { id?: string; reportReference?: string };

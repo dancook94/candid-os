@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { INSTALLATION_FILES_BUCKET } from "@/lib/installations/constants";
 import { canManageInstallations } from "@/lib/installations/permissions";
+import { REPORT_PDF_INLINE_LIMIT, inlineReportResponse } from "@/lib/installations/report-pdf-response";
 import { createClient } from "@/lib/supabase/server";
 
 type RouteContext = { params: Promise<{ reportId: string }> };
@@ -29,7 +30,7 @@ export async function GET(_request: Request, context: RouteContext) {
 
   const { data: report, error } = await supabase
     .from("installation_completion_reports")
-    .select("report_reference, storage_path")
+    .select("report_reference, storage_path, byte_size")
     .eq("id", reportId)
     .maybeSingle();
 
@@ -37,17 +38,21 @@ export async function GET(_request: Request, context: RouteContext) {
     return NextResponse.json({ error: "Report not found." }, { status: 404 });
   }
 
+  if (typeof report.byte_size === "number" && report.byte_size > REPORT_PDF_INLINE_LIMIT) {
+    const signed = await supabase.storage.from(INSTALLATION_FILES_BUCKET).createSignedUrl(report.storage_path, 600, {
+      download: `${report.report_reference}.pdf`,
+    });
+    if (signed.error || !signed.data?.signedUrl) {
+      return NextResponse.json({ error: "Report file is not available." }, { status: 404 });
+    }
+    return NextResponse.redirect(signed.data.signedUrl);
+  }
+
   const downloaded = await supabase.storage.from(INSTALLATION_FILES_BUCKET).download(report.storage_path);
   if (downloaded.error || !downloaded.data) {
     return NextResponse.json({ error: "Report file is not available." }, { status: 404 });
   }
 
-  const bytes = await downloaded.data.arrayBuffer();
-  return new NextResponse(Buffer.from(bytes), {
-    headers: {
-      "Content-Type": "application/pdf",
-      "Content-Disposition": `attachment; filename="${report.report_reference}.pdf"`,
-      "Cache-Control": "private, no-store",
-    },
-  });
+  const bytes = new Uint8Array(await downloaded.data.arrayBuffer());
+  return inlineReportResponse(bytes, `${report.report_reference}.pdf`, "attachment");
 }

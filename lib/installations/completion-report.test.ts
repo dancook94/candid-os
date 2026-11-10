@@ -15,6 +15,14 @@ import {
 } from "@/lib/installations/completion-report";
 import { buildInstallationCompletionReportPdf, type CompletionReportPdfInput } from "@/lib/installations/completion-report-pdf";
 import { canManageInstallations, canOperateInstallations, canReadInstallations } from "@/lib/installations/permissions";
+import {
+  REPORT_PDF_INLINE_LIMIT,
+  REPORT_PREVIEW_KEEP,
+  REPORT_PREVIEW_URL_SECONDS,
+  buildInstallationReportPreviewPath,
+  installationPreviewFilesToRemove,
+  reportFitsInline,
+} from "@/lib/installations/report-pdf-response";
 
 const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
@@ -261,6 +269,8 @@ test("a quotation appendix is reserved and excluded photographs stay out of the 
 });
 
 test("completion report permissions and storage stay with managers", async () => {
+  assert.equal(reportFitsInline(REPORT_PDF_INLINE_LIMIT), true);
+  assert.equal(reportFitsInline(REPORT_PDF_INLINE_LIMIT + 1), false);
   assert.equal(canManageInstallations({ account_status: "approved", user_role: "admin" }), true);
   assert.equal(canManageInstallations({ account_status: "approved", user_role: "production" }), false);
   assert.equal(canOperateInstallations({ account_status: "approved", user_role: "production" }), true);
@@ -276,17 +286,90 @@ test("completion report permissions and storage stay with managers", async () =>
   assert.match(route, /canManageInstallations/);
   assert.match(route, /assertVisitReadyForOfficialReport/);
   assert.ok(route.indexOf("if (!persist)") < route.indexOf("await assertVisitReadyForOfficialReport"));
+  const previewBranch = route.slice(route.indexOf("if (!persist)"), route.indexOf("await assertVisitReadyForOfficialReport"));
+  assert.match(previewBranch, /reportFitsInline/);
+  assert.match(previewBranch, /previewUrl/);
+  assert.doesNotMatch(previewBranch, /installation_register_completion_report/);
+  const previewStorage = await readFile(new URL("./report-pdf-response.ts", import.meta.url), "utf8");
+  assert.match(previewStorage, /crypto\.randomUUID/);
+  assert.match(previewStorage, /upsert: false/);
+  assert.doesNotMatch(previewStorage, /previews\/current\.pdf/);
+  assert.doesNotMatch(previewStorage, /getPublicUrl/);
+  const visitId = "5bd9c78c-6ac9-49b5-8bef-3813453a59ce";
+  const firstPreview = "6f1c2a34-1111-4111-8111-111111111111";
+  const secondPreview = "7a2d3b45-2222-4222-8222-222222222222";
+  assert.notEqual(
+    buildInstallationReportPreviewPath(visitId, firstPreview),
+    buildInstallationReportPreviewPath(visitId, secondPreview)
+  );
+  assert.match(buildInstallationReportPreviewPath(visitId, firstPreview), /\/previews\/6f1c2a34-1111-4111-8111-111111111111\.pdf$/);
+  const now = Date.parse("2026-11-10T21:00:00.000Z");
+  const fresh = (id: string, secondsAgo: number) => ({
+    name: `${id}.pdf`,
+    createdAt: new Date(now - secondsAgo * 1000).toISOString(),
+  });
+  const removed = installationPreviewFilesToRemove(
+    [
+      fresh(firstPreview, 10),
+      fresh(secondPreview, 20),
+      fresh("8b3e4c56-3333-4333-8333-333333333333", 30),
+      fresh("9c4f5d67-4444-4444-8444-444444444444", REPORT_PREVIEW_URL_SECONDS + 30),
+      { name: "current.pdf", createdAt: new Date(now).toISOString() },
+    ],
+    {
+      now,
+      retainName: `${firstPreview}.pdf`,
+      keep: REPORT_PREVIEW_KEEP,
+      lifetimeMs: REPORT_PREVIEW_URL_SECONDS * 1000,
+    }
+  );
+  assert.deepEqual(removed, ["9c4f5d67-4444-4444-8444-444444444444.pdf"]);
+  const crowded = Array.from({ length: REPORT_PREVIEW_KEEP + 2 }, (_, index) =>
+    fresh(`aa000000-0000-4000-8000-${String(index).padStart(12, "0")}`, index + 1)
+  );
+  const crowdedRemoved = installationPreviewFilesToRemove(crowded, {
+    now,
+    retainName: crowded[0].name,
+    keep: REPORT_PREVIEW_KEEP,
+    lifetimeMs: REPORT_PREVIEW_URL_SECONDS * 1000,
+  });
+  assert.equal(crowdedRemoved.length, 2);
+  assert.ok(crowdedRemoved.includes(crowded[REPORT_PREVIEW_KEEP].name));
+  assert.ok(crowdedRemoved.includes(crowded[REPORT_PREVIEW_KEEP + 1].name));
+  assert.ok(!crowdedRemoved.includes(crowded[0].name));
+  const download = await readFile(
+    new URL("../../app/api/admin/installations/reports/[reportId]/route.ts", import.meta.url),
+    "utf8"
+  );
+  assert.ok(download.indexOf("supabase.auth.getUser") < download.indexOf(".download("));
+  assert.match(download, /createSignedUrl/);
+  assert.doesNotMatch(download, /getPublicUrl/);
   assert.match(route, /export const runtime = "nodejs"/);
   assert.doesNotMatch(route, /canOperateInstallations/);
+  assert.ok(route.indexOf("supabase.auth.getUser") < route.indexOf("await buildVisitCompletionReport"));
   const nextConfig = await readFile(new URL("../../next.config.ts", import.meta.url), "utf8");
   assert.match(nextConfig, /\/api\/admin\/installations\/visits\/\[visitId\]\/completion-report/);
-  assert.match(nextConfig, /completionReportTracingIncludes[\s\S]*libvips-cpp\.so\.8\.18\.3/);
-  assert.match(nextConfig, /completionReportTracingIncludes[\s\S]*LOGO_YELLOW\.png/);
+  const reportIncludes = nextConfig.slice(
+    nextConfig.indexOf("const completionReportTracingIncludes"),
+    nextConfig.indexOf("const nextConfig")
+  );
+  assert.match(reportIncludes, /LOGO_YELLOW\.png/);
+  assert.doesNotMatch(reportIncludes, /sharp|libvips/);
+  const pdf = await readFile(new URL("./completion-report-pdf.ts", import.meta.url), "utf8");
+  assert.match(pdf, /prepareReportPhotograph/);
+  assert.match(pdf, /placeOrientedPhotograph/);
+  assert.match(pdf, /embedJpg/);
+  assert.match(pdf, /embedPng/);
+  assert.doesNotMatch(pdf, /import sharp|from "sharp"|require\(["']sharp["']\)/);
+  const service = await readFile(new URL("./completion-report-service.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(service, /import sharp|from "sharp"|require\(["']sharp["']\)/);
+  assert.match(service, /assertReportPhotographCount/);
   const screen = await readFile(
     new URL("../../components/installations/installation-completion-report.tsx", import.meta.url),
     "utf8"
   );
   assert.match(screen, /canSaveOfficialReport/);
+  assert.match(screen, /previewUrl/);
   assert.doesNotMatch(screen, /storage\.remove|\.delete\(/);
   const sql = await readFile(
     new URL("../../supabase/migrations/20270110174000_installation_completion_reports.sql", import.meta.url),

@@ -1,11 +1,17 @@
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
-import sharp from "sharp";
+import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 
 import {
   installationReportScopeStatement,
   installationReportSnagStatement,
 } from "@/lib/installations/completion-report";
 import { COMPLETION_CHECKLIST } from "@/lib/installations/completion";
+import {
+  detectReportImageKind,
+  orientedPixelSize,
+  placeOrientedPhotograph,
+  prepareReportPhotograph,
+  unreadableReportPhotographMessage,
+} from "@/lib/installations/report-image";
 import { embedCandidLogo } from "@/lib/proof-generator/pdf-layout";
 import { sanitizePdfText } from "@/lib/proof-generator/pdf-text";
 
@@ -100,13 +106,17 @@ function wrap(font: PDFFont, text: string, size: number, width: number) {
   return lines.length > 0 ? lines : [""];
 }
 
-async function embedPhotograph(doc: PDFDocument, bytes: Uint8Array) {
-  const jpeg = await sharp(Buffer.from(bytes))
-    .rotate()
-    .resize({ width: 1400, height: 1400, fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 82 })
-    .toBuffer();
-  return doc.embedJpg(jpeg);
+async function embedPhotograph(doc: PDFDocument, image: CompletionReportImage) {
+  const source = image.bytes;
+  image.bytes = new Uint8Array(0);
+  const prepared = await prepareReportPhotograph(source, image.caption);
+  const kind = detectReportImageKind(prepared);
+  try {
+    const embedded = kind === "png" ? await doc.embedPng(prepared) : await doc.embedJpg(prepared);
+    return { image: embedded, orientation: 1 };
+  } catch {
+    throw new Error(unreadableReportPhotographMessage(image.caption));
+  }
 }
 
 export async function buildInstallationCompletionReportPdf(input: CompletionReportPdfInput) {
@@ -329,7 +339,9 @@ async function drawSignOff(
     paragraph(cursor, fonts, input.customerName ? `Customer: ${input.customerName}` : "Customer name was not recorded.", nextPage);
     if (input.signaturePng) {
       ensure(cursor, 110, nextPage);
-      const image = await doc.embedPng(input.signaturePng);
+      const image = await doc.embedPng(input.signaturePng).catch(() => {
+        throw new Error("The customer signature could not be embedded. It must be a PNG.");
+      });
       const maxWidth = 240;
       const maxHeight = 80;
       const scale = Math.min(maxWidth / image.width, maxHeight / image.height);
@@ -460,10 +472,11 @@ async function drawImageGrid(
   for (let index = 0; index < images.length; index += 2) {
     const prepared = [];
     for (const image of images.slice(index, index + 2)) {
-      const embedded = await embedPhotograph(doc, image.bytes);
-      const scale = Math.min(cellWidth / embedded.width, imageMaxHeight / embedded.height);
-      const width = embedded.width * scale;
-      const height = embedded.height * scale;
+      const embedded = await embedPhotograph(doc, image);
+      const visual = orientedPixelSize(embedded.image.width, embedded.image.height, embedded.orientation);
+      const scale = Math.min(cellWidth / visual.width, imageMaxHeight / visual.height);
+      const width = visual.width * scale;
+      const height = visual.height * scale;
       const captionLines = wrap(fonts.regular, image.caption, 8, cellWidth);
       prepared.push({ embedded, width, height, captionLines });
     }
@@ -482,11 +495,16 @@ async function drawImageGrid(
         height: item.height + 4,
         color: panel,
       });
-      cursor.page.drawImage(item.embedded, {
-        x: x + (cellWidth - item.width) / 2,
-        y,
-        width: item.width,
-        height: item.height,
+      const placement = placeOrientedPhotograph(
+        { x: x + (cellWidth - item.width) / 2, y, width: item.width, height: item.height },
+        item.embedded.orientation
+      );
+      cursor.page.drawImage(item.embedded.image, {
+        x: placement.x,
+        y: placement.y,
+        width: placement.width,
+        height: placement.height,
+        rotate: degrees(placement.rotate),
       });
       item.captionLines.forEach((caption, captionIndex) => {
         cursor.page.drawText(caption, {

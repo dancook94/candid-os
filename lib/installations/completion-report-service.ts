@@ -16,6 +16,7 @@ import {
   type CompletionReportPdfInput,
 } from "@/lib/installations/completion-report-pdf";
 import { INSTALLATION_FILES_BUCKET } from "@/lib/installations/constants";
+import { assertReportPhotographCount } from "@/lib/installations/report-image";
 import { isOutstandingInstallationSnag } from "@/lib/installations/job-signal";
 import { PROJECT_STATUS_LABELS, VISIT_STATUS_LABELS, formatLondonWhen } from "@/lib/installations/labels";
 
@@ -54,6 +55,8 @@ export async function buildVisitCompletionReport(input: {
   const loaded = await loadVisitReportSource(input.admin, input.visitId);
   const gallery = (loaded.installation_visit_photos ?? []).filter((photo) => !photo.snag_id);
   const selected = selectInstallationReportPhotos(gallery, input.selectedPhotoIds);
+  const snagPhotographs = (loaded.installation_visit_photos ?? []).filter((photo) => photo.snag_id).length;
+  assertReportPhotographCount(selected.length + snagPhotographs);
   const selectedIds = new Set(selected.map((photo) => photo.id));
   const names = await profileNames(input.admin, collectProfileIds(loaded));
   const generatedAt = input.generatedAt ?? new Date();
@@ -232,10 +235,15 @@ async function profileNames(admin: SupabaseClient, ids: string[]) {
   );
 }
 
-async function downloadImage(admin: SupabaseClient, path: string | null, caption: string, id: string): Promise<CompletionReportImage | null> {
-  if (!path) return null;
+async function downloadImage(admin: SupabaseClient, path: string | null, caption: string, id: string): Promise<CompletionReportImage> {
+  const label = caption.split(" · ")[0]?.trim() || "This photograph";
+  if (!path) {
+    throw new Error(`${label} could not be loaded for the completion report.`);
+  }
   const { data, error } = await admin.storage.from(INSTALLATION_FILES_BUCKET).download(path);
-  if (error || !data) return null;
+  if (error || !data) {
+    throw new Error(`${label} could not be loaded for the completion report.`);
+  }
   return { id, caption, bytes: new Uint8Array(await data.arrayBuffer()) };
 }
 
@@ -304,8 +312,8 @@ async function toPdfInput(input: {
 
   let signaturePng: Uint8Array | null = null;
   if (signOff?.customer_attendance === "present" && signOff.signature_storage_path) {
-    const downloaded = await downloadImage(input.admin, signOff.signature_storage_path, "Signature", "signature");
-    signaturePng = downloaded?.bytes ?? null;
+    const downloaded = await downloadImage(input.admin, signOff.signature_storage_path, "Customer signature", "signature");
+    signaturePng = downloaded.bytes;
   }
 
   const attendance = signOff?.customer_attendance;
@@ -353,8 +361,7 @@ async function imagesFor(admin: SupabaseClient, photos: PhotoRow[], names: Map<s
     const caption = [photo.file_name || "Photograph", photo.captured_at ? formatLondonWhen(photo.captured_at) : null, uploader]
       .filter(Boolean)
       .join(" · ");
-    const image = await downloadImage(admin, photo.storage_path, caption, photo.id);
-    if (image) images.push(image);
+    images.push(await downloadImage(admin, photo.storage_path, caption, photo.id));
   }
   return images;
 }
