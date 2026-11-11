@@ -77,6 +77,7 @@ export type InstallationVisitRecord = {
   signOffSignatureUrl: string | null;
   signOffChecklist: CompletionChecklistRecord | null;
   reports: InstallationReportVersion[];
+  publishedReport: InstallationVisitPublication | null;
 };
 
 export type InstallationReportVersion = {
@@ -86,6 +87,16 @@ export type InstallationReportVersion = {
   generatedAt: string | null;
   generatedByProfileId: string | null;
   generatedByName: string | null;
+  isPublished: boolean;
+  publishedAt: string | null;
+  publishedByName: string | null;
+};
+
+export type InstallationVisitPublication = {
+  reportId: string;
+  publishedAt: string;
+  publishedByProfileId: string;
+  publishedByName: string | null;
 };
 
 export type InstallationProjectRecord = {
@@ -194,7 +205,13 @@ const PROJECT_DETAIL_SELECT = `
     installation_visit_photos(id, phase, file_name, storage_path, snag_id, snag_photo_role, captured_at, uploaded_by_profile_id),
     installation_visit_documents(id, document_kind, file_name, storage_path, created_at, uploaded_by_profile_id),
     installation_sign_offs(customer_name, signed_at, customer_attendance, decline_reason, signature_storage_path, captured_by_profile_id, checklist),
-    installation_completion_reports(id, report_reference, version_number, generated_at, generated_by_profile_id)
+    installation_completion_reports(id, report_reference, version_number, generated_at, generated_by_profile_id),
+    installation_visit_published_reports(
+      installation_completion_report_id,
+      published_at,
+      published_by_profile_id,
+      profiles!installation_visit_published_reports_published_by_profile_id_fkey(full_name)
+    )
   )
 `;
 
@@ -357,25 +374,66 @@ async function mapVisit(
     signOffCapturedByName: null,
     signOffSignatureUrl: await signedUrl(supabase, signOff?.signature_storage_path || null),
     signOffChecklist: readCompletionChecklist(signOff?.checklist),
-    reports: (Array.isArray(row.installation_completion_reports) ? row.installation_completion_reports : [])
-      .map((report) => {
-        const record = report as {
-          id?: string;
-          report_reference?: string;
-          version_number?: number;
-          generated_at?: string | null;
-          generated_by_profile_id?: string | null;
-        };
-        return {
-          id: String(record.id),
-          reportReference: record.report_reference || "Report",
-          versionNumber: Number(record.version_number) || 0,
-          generatedAt: text(record.generated_at),
-          generatedByProfileId: record.generated_by_profile_id || null,
-          generatedByName: null,
-        };
-      })
-      .sort((left, right) => right.versionNumber - left.versionNumber),
+    publishedReport: (() => {
+      const published = one(
+        row.installation_visit_published_reports as
+          | {
+              installation_completion_report_id?: string;
+              published_at?: string;
+              published_by_profile_id?: string;
+              profiles?: NameRow | NameRow[] | null;
+            }
+          | {
+              installation_completion_report_id?: string;
+              published_at?: string;
+              published_by_profile_id?: string;
+              profiles?: NameRow | NameRow[] | null;
+            }[]
+          | null
+      );
+      if (!published?.installation_completion_report_id || !published.published_at) {
+        return null;
+      }
+      const profile = one(published.profiles);
+      return {
+        reportId: String(published.installation_completion_report_id),
+        publishedAt: String(published.published_at),
+        publishedByProfileId: String(published.published_by_profile_id),
+        publishedByName: profile?.full_name || null,
+      };
+    })(),
+    reports: (() => {
+      const published = one(
+        row.installation_visit_published_reports as
+          | { installation_completion_report_id?: string; published_at?: string; profiles?: NameRow | NameRow[] | null }
+          | { installation_completion_report_id?: string; published_at?: string; profiles?: NameRow | NameRow[] | null }[]
+          | null
+      );
+      const publishedProfile = one(published?.profiles);
+      return (Array.isArray(row.installation_completion_reports) ? row.installation_completion_reports : [])
+        .map((report) => {
+          const record = report as {
+            id?: string;
+            report_reference?: string;
+            version_number?: number;
+            generated_at?: string | null;
+            generated_by_profile_id?: string | null;
+          };
+          const isPublished = published?.installation_completion_report_id === record.id;
+          return {
+            id: String(record.id),
+            reportReference: record.report_reference || "Report",
+            versionNumber: Number(record.version_number) || 0,
+            generatedAt: text(record.generated_at),
+            generatedByProfileId: record.generated_by_profile_id || null,
+            generatedByName: null,
+            isPublished,
+            publishedAt: isPublished ? text(published?.published_at) : null,
+            publishedByName: isPublished ? publishedProfile?.full_name || null : null,
+          };
+        })
+        .sort((left, right) => right.versionNumber - left.versionNumber);
+    })(),
   };
 }
 

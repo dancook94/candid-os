@@ -37,6 +37,7 @@ function defaultCustomerToggles(): Record<CustomerNotificationType, boolean> {
     ready_for_collection: true,
     dispatched: true,
     job_completed: true,
+    installation_report_available: true,
     invoice_available: true,
   };
 }

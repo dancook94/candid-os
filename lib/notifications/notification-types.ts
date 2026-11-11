@@ -34,6 +34,7 @@ export const CUSTOMER_NOTIFICATION_TYPES = [
   "ready_for_collection",
   "dispatched",
   "job_completed",
+  "installation_report_available",
   "invoice_available",
 ] as const;
 
@@ -121,6 +122,7 @@ export const CUSTOMER_TYPE_PREFERENCE_KEY: Partial<
   ready_for_collection: "job_ready",
   dispatched: "job_dispatched",
   job_completed: "job_ready",
+  installation_report_available: "installation_reports",
   invoice_available: "invoice_available",
 };
 

@@ -43,6 +43,7 @@ export async function loadCustomerSettingsPayload(
             job_started: true,
             job_ready: true,
             job_dispatched: true,
+            installation_reports: true,
             invoice_available: true,
             marketing: false,
           },

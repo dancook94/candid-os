@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { AppShell } from "@/components/app-shell";
 import { CustomerJobArtworkSection } from "@/components/customer-job-artwork-section";
+import { CustomerJobInstallationReportsSection } from "@/components/customer-job-installation-reports-section";
 import { CustomerJobProofsSection } from "@/components/proofs/customer-job-proofs-section";
 import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
@@ -20,6 +21,8 @@ import {
   buildCustomerAppShellProps,
   requireCustomerPortalUser,
 } from "@/lib/customer-shell-props";
+import { loadCustomerPublishedInstallationReports } from "@/lib/installations/customer-reports";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 type CustomerJobDetailPageProps = {
@@ -80,9 +83,14 @@ export default async function CustomerJobDetailPage({
 
   await requireCustomerSettingsContext(supabase, user);
 
-  const [job, proofing] = await Promise.all([
+  const adminClient = createAdminClient();
+  const [job, proofing, installationReports] = await Promise.all([
     loadCustomerJobDetail(supabase, profile.company_id, id),
     loadCustomerJobProofingContext(id),
+    loadCustomerPublishedInstallationReports(adminClient, {
+      jobId: id,
+      companyId: profile.company_id,
+    }),
   ]);
 
   if (!job) {
@@ -192,6 +200,12 @@ export default async function CustomerJobDetailPage({
               proofs={proofing.proofs}
               schemaMissing={proofing.schemaMissing}
             />
+          </CardContent>
+        </Card>
+
+        <Card className="portal-surface mb-6 overflow-hidden">
+          <CardContent className="pt-6">
+            <CustomerJobInstallationReportsSection jobId={job.id} reports={installationReports} />
           </CardContent>
         </Card>
 

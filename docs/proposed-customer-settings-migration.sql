@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS public.contact_notification_preferences (
   job_started                 boolean NOT NULL DEFAULT true,
   job_ready                   boolean NOT NULL DEFAULT true,
   job_dispatched              boolean NOT NULL DEFAULT true,
+  installation_reports        boolean NOT NULL DEFAULT true,
   invoice_available           boolean NOT NULL DEFAULT true,
   marketing                   boolean NOT NULL DEFAULT false,
   created_at                  timestamptz NOT NULL DEFAULT now(),

@@ -52,6 +52,7 @@ export type SendNotificationInput = {
   invoiceDraftId?: string | null;
   /** Override recipient for test sends */
   recipientEmailOverride?: string | null;
+  attachments?: Array<{ filename: string; content: string }>;
 };
 
 export type SendNotificationResult = {
@@ -319,6 +320,7 @@ async function deliverEmailNotification(
     subject: rendered.subject,
     html: rendered.html,
     replyTo: resolveNotificationReplyTo(input.type),
+    attachments: input.attachments,
   });
 
   logNotificationStage("resend_result", {

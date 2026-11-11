@@ -8,6 +8,8 @@ import { COMPLETION_CHECKLIST } from "@/lib/installations/completion";
 import { checklistReportValues, hasOfficialInstallationSignOff, installationReportScopeStatement, installationReportSnagStatement, quoteReferenceLabel } from "@/lib/installations/completion-report";
 import { isOutstandingInstallationSnag } from "@/lib/installations/job-signal";
 import { PROJECT_STATUS_LABELS, formatLondonWhen } from "@/lib/installations/labels";
+import { InstallationReportCustomerActions } from "@/components/installations/installation-report-customer-actions";
+import { InstallationVisitPublicationHistory } from "@/components/installations/installation-visit-publication-history";
 import type { InstallationProjectRecord, InstallationVisitRecord } from "@/lib/installations/queries";
 
 async function readReportError(response: Response) {
@@ -174,13 +176,10 @@ export function InstallationCompletionReport({
         >
           Save and download
         </Button>
-        <Button type="button" variant="outline" className="min-h-11" disabled>
-          Send to customer
-        </Button>
       </div>
       <p className="text-xs text-neutral-500">
         {canSaveOfficialReport
-          ? "Reports are reviewed before they are sent. Email delivery is not available yet."
+          ? "Publish a saved report before customers can access it. Sending email is a separate manager action."
           : "Record the visit sign-off before saving an official report. Preview remains available."}
       </p>
       {previewUrl ? (
@@ -201,11 +200,20 @@ export function InstallationCompletionReport({
                   Version {report.versionNumber}
                   {report.generatedAt ? ` · ${formatLondonWhen(report.generatedAt)}` : ""}
                   {report.generatedByName ? ` · ${report.generatedByName}` : ""}
+                  {report.isPublished ? " · Published" : ""}
                 </p>
+                <InstallationReportCustomerActions
+                  report={report}
+                  visitPublishedReportId={visit.publishedReport?.reportId ?? null}
+                />
               </li>
             ))}
           </ul>
         )}
+        <InstallationVisitPublicationHistory
+          visitId={visit.id}
+          sampleReportId={visit.reports[0]?.id ?? null}
+        />
       </div>
     </section>
   );

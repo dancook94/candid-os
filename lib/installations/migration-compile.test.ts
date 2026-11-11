@@ -52,6 +52,16 @@ const COMPLETION_REPORTS = new URL(
   import.meta.url
 );
 
+const REPORT_CUSTOMER_DELIVERY = new URL(
+  "../../supabase/migrations/20270110175000_installation_report_customer_delivery.sql",
+  import.meta.url
+);
+
+const REPORT_NOTIFICATION_PREFERENCE = new URL(
+  "../../supabase/migrations/20270110176000_installation_reports_notification_preference.sql",
+  import.meta.url
+);
+
 const SQL_EDITOR_MIGRATIONS = [
   MIGRATION,
   HARDENING,
@@ -63,6 +73,8 @@ const SQL_EDITOR_MIGRATIONS = [
   SIGN_OFF_ATTENDANCE,
   SIGN_OFF_CHECKLIST,
   COMPLETION_REPORTS,
+  REPORT_CUSTOMER_DELIVERY,
+  REPORT_NOTIFICATION_PREFERENCE,
 ];
 
 function assertSqlEditorCompatible(sql: string, label: string) {

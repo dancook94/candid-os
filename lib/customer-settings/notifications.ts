@@ -42,7 +42,7 @@ export async function loadContactNotificationPreferences(
   const { data, error } = await adminClient
     .from("contact_notification_preferences")
     .select(
-      "quote_received, quote_reminder, artwork_approval_required, job_started, job_ready, job_dispatched, invoice_available, marketing, updated_at"
+      "quote_received, quote_reminder, artwork_approval_required, job_started, job_ready, job_dispatched, installation_reports, invoice_available, marketing, updated_at"
     )
     .eq("contact_id", contactId)
     .maybeSingle();

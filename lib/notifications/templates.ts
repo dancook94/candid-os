@@ -4,6 +4,7 @@ import {
   getCandidCreatingArtworkParagraphs,
   getCustomerArtworkUploadConfirmationParagraphs,
 } from "@/lib/notifications/artwork-copy";
+import { renderInstallationReportEmail } from "@/lib/installations/report-delivery-email";
 import {
   normalizeNotificationType,
   type NotificationType,
@@ -772,6 +773,20 @@ export function renderNotificationEmail(
           ctaHref: buildAbsoluteUrl(String(metadata.staffLeaveUrl ?? "/staff/leave")),
         }),
       };
+
+    case "installation_report_available":
+      return renderInstallationReportEmail({
+        customerName: String(metadata.customerName ?? "Customer"),
+        companyName: String(metadata.companyName ?? "Customer"),
+        jobReference: String(metadata.jobReference ?? ""),
+        projectName: String(metadata.projectName ?? "Installation"),
+        reportReference: String(metadata.reportReference ?? "Report"),
+        visitNumber: Number(metadata.visitNumber ?? 0),
+        visitTitle: String(metadata.visitTitle ?? "Installation visit"),
+        portalUrl: String(metadata.reportUrl ?? metadata.jobUrl ?? "/jobs"),
+        customerMessage:
+          typeof metadata.customerMessage === "string" ? metadata.customerMessage : null,
+      });
 
     default:
       return {

@@ -22,7 +22,7 @@ type UpdateNotificationsBody = Partial<
 };
 
 const PREFERENCE_SELECT =
-  "quote_received, quote_reminder, artwork_approval_required, job_started, job_ready, job_dispatched, invoice_available, marketing, updated_at";
+  "quote_received, quote_reminder, artwork_approval_required, job_started, job_ready, job_dispatched, installation_reports, invoice_available, marketing, updated_at";
 
 export async function PATCH(request: Request) {
   try {

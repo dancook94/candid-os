@@ -13,6 +13,7 @@ export type SendEmailInput = {
   html: string;
   text?: string;
   replyTo?: string;
+  attachments?: Array<{ filename: string; content: string }>;
 };
 
 export type SendEmailResult =
@@ -179,6 +180,7 @@ export async function sendEmailThroughResend(
       html: safety.html,
       text: safety.text,
       ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+      ...(input.attachments?.length ? { attachments: input.attachments } : {}),
     });
 
     if (response.error) {

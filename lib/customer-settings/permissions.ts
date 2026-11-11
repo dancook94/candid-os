@@ -41,6 +41,7 @@ export const NOTIFICATION_PREFERENCE_KEYS = [
   "job_started",
   "job_ready",
   "job_dispatched",
+  "installation_reports",
   "invoice_available",
   "marketing",
 ] as const;
@@ -58,6 +59,7 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: Record<
   job_started: true,
   job_ready: true,
   job_dispatched: true,
+  installation_reports: true,
   invoice_available: true,
   marketing: false,
 };

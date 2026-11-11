@@ -49,6 +49,7 @@ const notificationLabels: Record<(typeof NOTIFICATION_PREFERENCE_KEYS)[number], 
     job_started: "Job started",
     job_ready: "Job ready",
     job_dispatched: "Job dispatched",
+    installation_reports: "Installation reports",
     invoice_available: "Invoice available",
     marketing: "Marketing updates",
   };
