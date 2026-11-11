@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { verifyApprovedAdmin } from "@/lib/admin-auth";
-import { buildInvitePasswordSetupRedirect } from "@/lib/auth-invite-redirect";
+import { buildInvitePasswordSetupRedirectForRequest } from "@/lib/auth-invite-redirect";
 import { inviteContactToPortal } from "@/lib/crm/invite-contact-portal";
 import { createClient } from "@/lib/supabase/server";
 
@@ -41,7 +41,7 @@ export async function POST(request: Request) {
   }
 
   const requestUrl = new URL(request.url);
-  const redirectTo = buildInvitePasswordSetupRedirect(requestUrl.origin);
+  const redirectTo = buildInvitePasswordSetupRedirectForRequest(requestUrl.origin);
 
   const result = await inviteContactToPortal(supabase, contactId, redirectTo);
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { verifySuperAdmin } from "@/lib/admin-auth";
+import { resolveAuthRedirectOrigin } from "@/lib/auth-invite-redirect";
 import { sendStaffPasswordSetupLink } from "@/lib/staff-auth-actions";
 import { createClient } from "@/lib/supabase/server";
 
@@ -21,7 +22,10 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   const requestUrl = new URL(request.url);
-  const result = await sendStaffPasswordSetupLink(staffId, requestUrl.origin);
+  const result = await sendStaffPasswordSetupLink(
+    staffId,
+    resolveAuthRedirectOrigin(requestUrl.origin)
+  );
 
   if (!result.ok) {
     return NextResponse.json({ error: result.message }, { status: result.status });

@@ -4,9 +4,6 @@ import {
   isTestCommunicationModePublic,
 } from "@/lib/communications/config";
 
-const SERVER_ENV_KEY = "CANDID_TEST_PORTAL_INVITE_ALLOWLIST";
-const PUBLIC_ENV_KEY = "NEXT_PUBLIC_CANDID_TEST_PORTAL_INVITE_ALLOWLIST";
-
 function parseAllowlist(raw: string | undefined): string[] {
   if (!raw?.trim()) {
     return [];
@@ -18,14 +15,20 @@ function parseAllowlist(raw: string | undefined): string[] {
     .filter(Boolean);
 }
 
-/** Server-side allowlist (Test portal invites only). */
+/**
+ * Server-side allowlist (Test portal invites only).
+ * Use literal `process.env.*` keys so Next.js/Vercel can expose them in server bundles.
+ */
 export function getTestPortalInviteAllowlist(): string[] {
-  return parseAllowlist(process.env[SERVER_ENV_KEY] ?? process.env[PUBLIC_ENV_KEY]);
+  return parseAllowlist(
+    process.env.CANDID_TEST_PORTAL_INVITE_ALLOWLIST ??
+      process.env.NEXT_PUBLIC_CANDID_TEST_PORTAL_INVITE_ALLOWLIST
+  );
 }
 
 /** Client-side allowlist mirror for invite UI (set on candid-os-test only). */
 export function getTestPortalInviteAllowlistPublic(): string[] {
-  return parseAllowlist(process.env[PUBLIC_ENV_KEY]);
+  return parseAllowlist(process.env.NEXT_PUBLIC_CANDID_TEST_PORTAL_INVITE_ALLOWLIST);
 }
 
 export function isTestPortalInviteAllowlisted(email: string): boolean {

@@ -7,7 +7,7 @@ import { AuthPageLayout } from "@/components/auth-page-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { buildInvitePasswordSetupRedirect } from "@/lib/auth-invite-redirect";
+import { buildInvitePasswordSetupRedirectForRequest } from "@/lib/auth-invite-redirect";
 import {
   extractEmailAddress,
   isInternalEmailAddress,
@@ -60,7 +60,7 @@ export default function ForgotPasswordForm() {
 
     setIsSubmitting(true);
 
-    const redirectTo = buildInvitePasswordSetupRedirect(window.location.origin);
+    const redirectTo = buildInvitePasswordSetupRedirectForRequest(window.location.origin);
 
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(
       normalizedEmail,

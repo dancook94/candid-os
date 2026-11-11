@@ -1,8 +1,44 @@
 /**
+ * Canonical app origin for Supabase auth emails (invite, recovery, signup).
+ * Prefer NEXT_PUBLIC_APP_URL so Test/Live links never follow a local dev request host.
+ */
+export function resolveAuthRedirectOrigin(requestOrigin: string): string {
+  const configured = process.env.NEXT_PUBLIC_APP_URL?.trim();
+
+  if (configured) {
+    try {
+      const withScheme = /^https?:\/\//i.test(configured)
+        ? configured
+        : `https://${configured}`;
+      return new URL(withScheme).origin;
+    } catch {
+      // Fall through to request origin when misconfigured.
+    }
+  }
+
+  try {
+    return new URL(requestOrigin).origin;
+  } catch {
+    return requestOrigin.replace(/\/+$/, "");
+  }
+}
+
+/**
  * Supabase redirect target for password setup after invite or recovery email.
  */
 export function buildInvitePasswordSetupRedirect(origin: string) {
-  return `${origin}/auth/callback?next=/set-password`;
+  const normalizedOrigin = origin.replace(/\/+$/, "");
+  return `${normalizedOrigin}/auth/callback?next=/set-password`;
+}
+
+/** Build invite/recovery redirect using canonical origin when configured. */
+export function buildInvitePasswordSetupRedirectForRequest(requestOrigin: string) {
+  return buildInvitePasswordSetupRedirect(resolveAuthRedirectOrigin(requestOrigin));
+}
+
+/** Build registration confirm redirect using canonical origin when configured. */
+export function buildRegistrationConfirmRedirectForRequest(requestOrigin: string) {
+  return buildRegistrationConfirmRedirect(resolveAuthRedirectOrigin(requestOrigin));
 }
 
 /** Self-registration email confirmation returns here after Supabase verifies the link. */

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { assertCustomerSelfSignupAllowed } from "@/lib/communications/auth-guards";
 import { extractEmailAddress } from "@/lib/communications/config";
-import { buildRegistrationConfirmRedirect } from "@/lib/auth-invite-redirect";
+import { buildRegistrationConfirmRedirectForRequest } from "@/lib/auth-invite-redirect";
 import {
   assertPublicRegistrationEnabled,
 } from "@/lib/auth/public-registration";
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
         full_name: fullName,
         company_name: companyName,
       },
-      emailRedirectTo: buildRegistrationConfirmRedirect(requestUrl.origin),
+      emailRedirectTo: buildRegistrationConfirmRedirectForRequest(requestUrl.origin),
     },
   });
 
