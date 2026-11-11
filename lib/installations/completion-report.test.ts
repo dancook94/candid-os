@@ -9,6 +9,7 @@ import {
   customerFacingReportText,
   customerFacingWorkSummary,
   formatInstallationReportReference,
+  planPhotographRows,
   hasOfficialInstallationSignOff,
   installationReportScopeStatement,
   installationReportSnagStatement,
@@ -94,6 +95,40 @@ test("customer reports omit internal values and repeated work titles", () => {
     }).map((item) => item.value),
     ["Supply and install the window vinyls."]
   );
+});
+
+test("photographs share a row unless a panorama needs the full width", () => {
+  const landscape = { width: 1600, height: 1200, group: 0 };
+  const portrait = { width: 1200, height: 1600, group: 0 };
+  const panorama = { width: 1600, height: 360, group: 0 };
+  const paired = planPhotographRows([landscape, portrait], {
+    contentWidth: 515,
+    firstBudget: 640,
+    pageBudget: 640,
+  });
+  assert.equal(paired.length, 1);
+  assert.equal(paired[0].columns, 2);
+  assert.deepEqual(paired[0].indexes, [0, 1]);
+
+  const wide = planPhotographRows([panorama, landscape], {
+    contentWidth: 515,
+    firstBudget: 640,
+    pageBudget: 640,
+  });
+  assert.equal(wide[0].columns, 1);
+  assert.deepEqual(wide[0].indexes, [0]);
+
+  const screenshots = planPhotographRows(
+    [
+      { width: 1082, height: 354, group: 0 },
+      { width: 1600, height: 973, group: 0 },
+      { width: 1082, height: 354, group: 0 },
+      { width: 1600, height: 973, group: 0 },
+    ],
+    { contentWidth: 515, firstBudget: 640, pageBudget: 640 }
+  );
+  assert.equal(screenshots.length, 2);
+  assert.ok(screenshots.every((row) => row.columns === 2 && row.page === 0));
 });
 
 test("report references stay on the visit and do not invent a price", () => {

@@ -145,6 +145,152 @@ export function customerFacingWorkSummary(input: {
   return items;
 }
 
+const PHOTO_GAP = 14;
+const FULL_MAX_HEIGHT = 220;
+const PAIR_MAX_HEIGHT = 190;
+const MIN_PAIR_HEIGHT = 72;
+const PANORAMA_RATIO = 3.4;
+const CAPTION_ALLOWANCE = 40;
+const MIN_PHOTO_SCALE = 0.78;
+
+export type PhotographFrame = {
+  width: number;
+  height: number;
+  group: number;
+};
+
+export type PlannedPhotographRow = {
+  page: number;
+  indexes: number[];
+  columns: 1 | 2;
+  maxHeight: number;
+  showSection: boolean;
+  showPhase: boolean;
+};
+
+function photographCellWidth(contentWidth: number, columns: 1 | 2) {
+  return columns === 1 ? contentWidth : (contentWidth - PHOTO_GAP) / 2;
+}
+
+function containedPhotoHeight(frame: PhotographFrame, cellWidth: number, maxHeight: number) {
+  const scale = Math.min(cellWidth / frame.width, maxHeight / frame.height);
+  return frame.height * scale;
+}
+
+function canSharePhotographRow(left: PhotographFrame, right: PhotographFrame, contentWidth: number) {
+  const cell = photographCellWidth(contentWidth, 2);
+  const readable = (frame: PhotographFrame) => {
+    if (frame.width / frame.height > PANORAMA_RATIO) return false;
+    return containedPhotoHeight(frame, cell, PAIR_MAX_HEIGHT) >= MIN_PAIR_HEIGHT;
+  };
+  return readable(left) && readable(right);
+}
+
+function photographRowHeight(
+  frames: PhotographFrame[],
+  indexes: number[],
+  columns: 1 | 2,
+  contentWidth: number,
+  scale: number,
+  heading: number
+) {
+  const maxHeight = (columns === 1 ? FULL_MAX_HEIGHT : PAIR_MAX_HEIGHT) * scale;
+  const cell = photographCellWidth(contentWidth, columns);
+  const imageHeight = Math.max(...indexes.map((index) => containedPhotoHeight(frames[index], cell, maxHeight)));
+  return imageHeight + CAPTION_ALLOWANCE + heading;
+}
+
+export function planPhotographRows(
+  frames: PhotographFrame[],
+  options: {
+    contentWidth: number;
+    firstBudget: number;
+    pageBudget: number;
+    sectionHeading?: number;
+    phaseHeading?: number;
+  }
+): PlannedPhotographRow[] {
+  const sectionHeading = options.sectionHeading ?? 0;
+  const phaseHeading = options.phaseHeading ?? 0;
+  const logical: { indexes: number[]; columns: 1 | 2; heading: number; phase: boolean; section: boolean }[] = [];
+
+  for (let index = 0; index < frames.length; ) {
+    const current = frames[index];
+    const next = frames[index + 1];
+    const paired = Boolean(next && next.group === current.group && canSharePhotographRow(current, next, options.contentWidth));
+    const indexes = paired ? [index, index + 1] : [index];
+    const previous = logical.at(-1);
+    const newPhase = !previous || frames[previous.indexes[0]].group !== current.group;
+    logical.push({
+      indexes,
+      columns: paired ? 2 : 1,
+      heading: (logical.length === 0 ? sectionHeading : 0) + (newPhase ? phaseHeading : 0),
+      phase: newPhase,
+      section: logical.length === 0,
+    });
+    index += indexes.length;
+  }
+
+  const pages: { rows: typeof logical; scale: number }[] = [];
+  let budget = options.firstBudget;
+  let currentRows: typeof logical = [];
+  let used = 0;
+  let firstPageSkipped = false;
+
+  for (const row of logical) {
+    const cost = photographRowHeight(frames, row.indexes, row.columns, options.contentWidth, 1, row.heading);
+    if (pages.length === 0 && currentRows.length === 0 && cost > budget && cost <= options.pageBudget) {
+      firstPageSkipped = true;
+      budget = options.pageBudget;
+    }
+    if (currentRows.length > 0 && used + cost > budget) {
+      pages.push({ rows: currentRows, scale: 1 });
+      currentRows = [];
+      used = 0;
+      budget = options.pageBudget;
+    }
+    currentRows.push(row);
+    used += cost;
+  }
+  if (currentRows.length > 0) pages.push({ rows: currentRows, scale: 1 });
+
+  while (pages.length > 1 && pages.at(-1)!.rows.length === 1) {
+    const previous = pages.at(-2)!;
+    const previousBudget = pages.length === 2 && !firstPageSkipped ? options.firstBudget : options.pageBudget;
+    const orphan = pages.at(-1)!.rows[0];
+    const combined = [...previous.rows, orphan];
+    let fitted: number | null = null;
+    for (let step = 0; step <= 12; step += 1) {
+      const scale = 1 - step * ((1 - MIN_PHOTO_SCALE) / 12);
+      const cost = combined.reduce(
+        (total, row) =>
+          total + photographRowHeight(frames, row.indexes, row.columns, options.contentWidth, scale, row.heading),
+        0
+      );
+      if (cost <= previousBudget) {
+        fitted = scale;
+        break;
+      }
+    }
+    if (fitted == null) break;
+    previous.rows = combined;
+    previous.scale = Math.min(previous.scale, fitted);
+    pages.pop();
+  }
+
+  const pageOffset = firstPageSkipped ? 1 : 0;
+  return pages.flatMap((page, pageNumber) =>
+    page.rows.map((row) => ({
+      page: pageNumber + pageOffset,
+      indexes: row.indexes,
+      columns: row.columns,
+      maxHeight: (row.columns === 1 ? FULL_MAX_HEIGHT : PAIR_MAX_HEIGHT) * page.scale,
+      showSection: row.section,
+      showPhase: row.phase,
+    }))
+  );
+}
+
 export function quoteReferenceLabel(quoteNumber: number | null | undefined) {
   if (typeof quoteNumber !== "number") {
     return null;

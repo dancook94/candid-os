@@ -51,6 +51,8 @@ test("project completion is separate from visit completion", async () => {
   assert.match(project, /status NOT IN \('completed', 'cancelled'\)/);
   assert.match(project, /s\.status = 'open'/);
   assert.match(project, /p_acknowledge_completion IS NOT TRUE/);
+  assert.ok(project.indexOf("installation_assert_manager()") < project.indexOf("UPDATE public.installation_projects"));
+  assert.match(project, /description = p_description/);
   assert.doesNotMatch(project, /UPDATE public\.installation_visits/);
 });
 

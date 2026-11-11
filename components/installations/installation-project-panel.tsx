@@ -124,7 +124,10 @@ export function InstallationProjectPanel({
       {canManage ? (
         <ProjectDetailsForm project={project} busy={busy} onSave={run} />
       ) : (
-        <p className="text-sm text-neutral-600">{project.description || "No installation instructions yet."}</p>
+        <section className="space-y-1.5 rounded-xl border border-neutral-200 bg-white p-4">
+          <h2 className="text-base font-semibold text-neutral-950">Installation description</h2>
+          <p className="text-sm text-neutral-700">{project.description || "No installation description yet."}</p>
+        </section>
       )}
 
       {canManage ? <CreateVisitForm projectId={project.id} busy={busy} onSave={run} /> : null}
@@ -216,14 +219,16 @@ function ProjectDetailsForm({
         </div>
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="project-instructions">Installation instructions</Label>
+        <Label htmlFor="project-description">Installation description</Label>
         <textarea
-          id="project-instructions"
+          id="project-description"
           value={description}
           onChange={(event) => setDescription(event.target.value)}
           rows={3}
           className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+          placeholder="Describe the installation for the customer report."
         />
+        <p className="text-xs text-neutral-500">This is the Work completed text on the customer report.</p>
       </div>
       {warning && !warning.saved && (warning.unfinishedVisits > 0 || warning.openSnags > 0) ? (
         <div className="space-y-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">

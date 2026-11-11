@@ -109,6 +109,12 @@ test("installation tabs keep scheduling with managers and sign-off separate from
   assert.match(panel, /Customer not present/);
   assert.match(panel, /Customer declined to sign/);
   assert.match(panel, /does not complete the installation project/);
+  assert.match(panel, /Installation description/);
+  assert.match(panel, /project\.description/);
+  const projectForm = panel.slice(panel.indexOf("function ProjectDetailsForm"), panel.indexOf("function CreateVisitForm"));
+  assert.match(projectForm, /installation_project_update_details/);
+  assert.match(projectForm, /p_description/);
+  assert.doesNotMatch(panel.slice(0, panel.indexOf("function ProjectDetailsForm")), /<textarea/);
   const details = panel.slice(panel.indexOf('tab === "details"'), panel.indexOf('tab === "photos"'));
   assert.match(details, /ScheduleForm/);
   assert.match(details, /canManage/);

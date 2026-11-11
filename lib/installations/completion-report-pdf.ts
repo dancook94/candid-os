@@ -3,6 +3,7 @@ import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFImage, 
 import {
   installationReportScopeStatement,
   installationReportSnagStatement,
+  planPhotographRows,
 } from "@/lib/installations/completion-report";
 import { COMPLETION_CHECKLIST } from "@/lib/installations/completion";
 import {
@@ -479,75 +480,63 @@ async function drawPhotographs(
     return;
   }
 
-  let opened = false;
-  for (const group of groups) {
-    await drawImageGrid(doc, cursor, fonts, group.images, nextPage, {
-      section: opened ? null : "Photographic evidence",
-      phase: group.phaseLabel,
-    });
-    opened = true;
+  const prepared = [];
+  for (const [groupIndex, group] of groups.entries()) {
+    for (const image of group.images) {
+      const embedded = await embedPhotograph(doc, image);
+      const visual = orientedPixelSize(embedded.image.width, embedded.image.height, embedded.orientation);
+      prepared.push({
+        embedded,
+        caption: image.caption,
+        width: visual.width,
+        height: visual.height,
+        group: groupIndex,
+        phase: group.phaseLabel,
+      });
+    }
   }
+  await drawPreparedPhotographs(cursor, fonts, prepared, nextPage, "Photographic evidence");
 }
 
-async function drawImageGrid(
-  doc: PDFDocument,
+async function drawPreparedPhotographs(
   cursor: Cursor,
   fonts: Fonts,
-  images: CompletionReportImage[],
+  images: {
+    embedded: Awaited<ReturnType<typeof embedPhotograph>>;
+    caption: string;
+    width: number;
+    height: number;
+    group: number;
+    phase: string;
+  }[],
   nextPage: () => Cursor,
-  heading?: { section?: string | null; phase?: string | null }
+  section: string | null
 ) {
-  const gap = 16;
-  let pendingHeading = heading;
-  let index = 0;
-  let carried: { embedded: Awaited<ReturnType<typeof embedPhotograph>>; caption: string } | null = null;
-
-  while (index < images.length || carried) {
-    const source = carried ? null : images[index];
-    const first = carried ?? {
-      embedded: await embedPhotograph(doc, source!),
-      caption: source!.caption,
-    };
-    if (!carried) index += 1;
-    carried = null;
-    const firstVisual = orientedPixelSize(first.embedded.image.width, first.embedded.image.height, first.embedded.orientation);
-    const firstPortrait = firstVisual.height > firstVisual.width;
-    const prepared = [{ ...first, captionLines: [] as string[] }];
-    if (firstPortrait && index < images.length) {
-      const secondImage = images[index];
-      const second = await embedPhotograph(doc, secondImage);
-      const secondVisual = orientedPixelSize(second.image.width, second.image.height, second.orientation);
-      if (secondVisual.height > secondVisual.width) {
-        prepared.push({ embedded: second, caption: secondImage.caption, captionLines: [] });
-        index += 1;
-      } else {
-        carried = { embedded: second, caption: secondImage.caption };
+  const gap = 14;
+  const rows = planPhotographRows(
+    images.map((image) => ({ width: image.width, height: image.height, group: image.group })),
+    {
+      contentWidth: CONTENT_WIDTH,
+      firstBudget: Math.max(0, cursor.y - CONTENT_BOTTOM),
+      pageBudget: 640,
+      sectionHeading: section ? 34 : 0,
+      phaseHeading: 24,
+    }
+  );
+  let page = -1;
+  for (const row of rows) {
+    if (row.page !== page) {
+      if (page !== -1 || row.page > 0) {
+        const fresh = nextPage();
+        cursor.page = fresh.page;
+        cursor.y = fresh.y;
       }
+      page = row.page;
     }
-    const count = prepared.length;
-    const captionWidth = count === 1 ? CONTENT_WIDTH : (CONTENT_WIDTH - gap) / 2;
-    for (const item of prepared) {
-      item.captionLines = wrap(fonts.regular, item.caption, 8, captionWidth);
-    }
-    const captionHeight = Math.max(...prepared.map((item) => item.captionLines.length * 11 + 12));
-    const headingHeight = (pendingHeading?.section ? 30 : 0) + (pendingHeading?.phase ? 28 : 0);
-    const cellWidth = count === 1 ? CONTENT_WIDTH : (CONTENT_WIDTH - gap) / 2;
-    const naturalHeight = Math.max(
-      ...prepared.map((item) => {
-        const visual = orientedPixelSize(item.embedded.image.width, item.embedded.image.height, item.embedded.orientation);
-        return Math.min(count === 1 ? 520 : 360, visual.height * (cellWidth / visual.width));
-      })
-    );
-    if (cursor.y - (naturalHeight + captionHeight + headingHeight) < CONTENT_BOTTOM) {
-      const fresh = nextPage();
-      cursor.page = fresh.page;
-      cursor.y = fresh.y;
-    }
-    if (pendingHeading?.section) {
-      drawSectionHeading(cursor, fonts, pendingHeading.section);
-    }
-    if (pendingHeading?.phase) {
-      cursor.page.drawText(sanitizePdfText(pendingHeading.phase), {
+    if (row.showSection && section) drawSectionHeading(cursor, fonts, section);
+    if (row.showPhase) {
+      cursor.y -= 4;
+      cursor.page.drawText(sanitizePdfText(images[row.indexes[0]].phase), {
         x: MARGIN,
         y: cursor.y,
         size: 12,
@@ -556,16 +545,16 @@ async function drawImageGrid(
       });
       cursor.y -= 18;
     }
-    pendingHeading = undefined;
-    const available = Math.max(48, cursor.y - CONTENT_BOTTOM - captionHeight - 8);
-    const maxHeight = Math.min(count === 1 ? 520 : 360, available);
-    const fitted = prepared.map((item) => {
-      const visual = orientedPixelSize(item.embedded.image.width, item.embedded.image.height, item.embedded.orientation);
-      const scale = Math.min(cellWidth / visual.width, maxHeight / visual.height);
-      return { ...item, width: visual.width * scale, height: visual.height * scale };
+    const cellWidth = row.columns === 1 ? CONTENT_WIDTH : (CONTENT_WIDTH - gap) / 2;
+    const fitted = row.indexes.map((index) => {
+      const image = images[index];
+      const scale = Math.min(cellWidth / image.width, row.maxHeight / image.height);
+      const width = image.width * scale;
+      const height = image.height * scale;
+      return { image, width, height, captionLines: wrap(fonts.regular, image.caption, 8, cellWidth) };
     });
-    const blockHeight = Math.max(...fitted.map((item) => item.height)) + captionHeight;
-
+    const imageHeight = Math.max(...fitted.map((item) => item.height));
+    const captionHeight = Math.max(...fitted.map((item) => 18 + item.captionLines.length * 12));
     fitted.forEach((item, column) => {
       const x = MARGIN + column * (cellWidth + gap);
       const y = cursor.y - item.height;
@@ -578,9 +567,9 @@ async function drawImageGrid(
       });
       const placement = placeOrientedPhotograph(
         { x: x + (cellWidth - item.width) / 2, y, width: item.width, height: item.height },
-        item.embedded.orientation
+        item.image.embedded.orientation
       );
-      cursor.page.drawImage(item.embedded.image, {
+      cursor.page.drawImage(item.image.embedded.image, {
         x: placement.x,
         y: placement.y,
         width: placement.width,
@@ -597,8 +586,7 @@ async function drawImageGrid(
         });
       });
     });
-
-    cursor.y -= blockHeight;
+    cursor.y -= imageHeight + captionHeight;
   }
 }
 
@@ -611,7 +599,20 @@ async function drawImageRow(
   nextPage: () => Cursor
 ) {
   if (images.length === 0) return;
-  await drawImageGrid(doc, cursor, fonts, images, nextPage, { phase: label });
+  const prepared = [];
+  for (const image of images) {
+    const embedded = await embedPhotograph(doc, image);
+    const visual = orientedPixelSize(embedded.image.width, embedded.image.height, embedded.orientation);
+    prepared.push({
+      embedded,
+      caption: image.caption,
+      width: visual.width,
+      height: visual.height,
+      group: 0,
+      phase: label,
+    });
+  }
+  await drawPreparedPhotographs(cursor, fonts, prepared, nextPage, null);
 }
 
 function sectionHeading(cursor: Cursor, fonts: Fonts, title: string, nextPage: () => Cursor, reserve = 72) {
