@@ -6,6 +6,8 @@ import { extractPdfText } from "@/lib/materials/invoices/extract";
 import {
   buildInstallationReportPath,
   checklistReportValues,
+  customerFacingReportText,
+  customerFacingWorkSummary,
   formatInstallationReportReference,
   hasOfficialInstallationSignOff,
   installationReportScopeStatement,
@@ -38,7 +40,8 @@ function report(overrides: Partial<CompletionReportPdfInput> = {}): CompletionRe
     quoteReference: "Q-7",
     companyName: "Northwind Displays",
     siteAddress: "1 Harbour Street, Bristol, BS1 4QT",
-    installationDateLabel: "10 Nov 2026, 09:00",
+    scheduledAtLabel: "10 Nov 2026, 09:00",
+    completedAtLabel: "10 Nov 2026, 16:30",
     installers: ["Alex Installer"],
     visitStatusLabel: "Completed",
     visitTitle: "Shopfront signs",
@@ -68,6 +71,30 @@ async function textOf(input: CompletionReportPdfInput) {
   const bytes = await buildInstallationCompletionReportPdf(input);
   return { bytes, text: await extractPdfText(bytes) };
 }
+
+test("customer reports omit internal values and repeated work titles", () => {
+  assert.equal(customerFacingReportText("quote_reconcile"), null);
+  assert.equal(customerFacingReportText("5bd9c78c-6ac9-49b5-8bef-3813453a59ce"), null);
+  assert.equal(customerFacingReportText("Vinyls + Installation"), "Vinyls + Installation");
+  assert.deepEqual(
+    customerFacingWorkSummary({
+      projectTitle: "Vinyls + Installation",
+      visitTitle: "Vinyls + Installation",
+      jobName: "Vinyls + Installation",
+      description: null,
+    }),
+    [{ label: "Work completed", value: "Vinyls + Installation" }]
+  );
+  assert.deepEqual(
+    customerFacingWorkSummary({
+      projectTitle: "Vinyls + Installation",
+      jobName: "Vinyls + Installation",
+      description: "Supply and install the window vinyls.",
+      completionNotes: "Supply and install the window vinyls.",
+    }).map((item) => item.value),
+    ["Supply and install the window vinyls."]
+  );
+});
 
 test("report references stay on the visit and do not invent a price", () => {
   assert.equal(formatInstallationReportReference("J-7", 1, 2), "ICR-J-7-V1.2");
@@ -131,6 +158,11 @@ test("a present customer report includes the saved signature and checklist value
   assert.match(text, /Completed/);
   assert.match(text, /Active/);
   assert.match(text, /does not complete the installation project/);
+  assert.match(text, /Scheduled installation/);
+  assert.match(text, /Visit completed/);
+  assert.match(text, /Customer sign-off/);
+  assert.match(text, /Report generated/);
+  assert.doesNotMatch(text, /quote_reconcile|Installation date/);
 });
 
 test("an official report requires a valid visit sign-off", () => {
@@ -221,9 +253,9 @@ test("outstanding and resolved snags stay distinct across photograph pages", asy
         },
       ],
       photos: [
-        { phaseLabel: "Before installation", images: photos.filter((photo) => photo.id.startsWith("before")) },
-        { phaseLabel: "During installation", images: photos.filter((photo) => photo.id.startsWith("during")) },
-        { phaseLabel: "After installation", images: photos.filter((photo) => photo.id.startsWith("after")) },
+        { phaseLabel: "Before Installation", images: photos.filter((photo) => photo.id.startsWith("before")) },
+        { phaseLabel: "During Installation", images: photos.filter((photo) => photo.id.startsWith("during")) },
+        { phaseLabel: "After Installation", images: photos.filter((photo) => photo.id.startsWith("after")) },
       ],
     })
   );
@@ -231,9 +263,9 @@ test("outstanding and resolved snags stay distinct across photograph pages", asy
   assert.match(text, /Scratch on the end cap/);
   assert.match(text, /Loose bracket/);
   assert.match(text, /Bracket tightened/);
-  assert.match(text, /Before installation/);
-  assert.match(text, /During installation/);
-  assert.match(text, /After installation/);
+  assert.match(text, /Before Installation/);
+  assert.match(text, /During Installation/);
+  assert.match(text, /After Installation/);
   assert.match(text, /Page 1 of /);
   assert.match(text, /Page 2 of /);
   const { PDFDocument } = await import("pdf-lib");
@@ -255,7 +287,7 @@ test("a quotation appendix is reserved and excluded photographs stay out of the 
     report({
       photos: [
         {
-          phaseLabel: "Before installation",
+          phaseLabel: "Before Installation",
           images: [{ id: "keep", caption: "Keep this elevation", bytes: PNG }],
         },
       ],
@@ -364,6 +396,8 @@ test("completion report permissions and storage stay with managers", async () =>
   const service = await readFile(new URL("./completion-report-service.ts", import.meta.url), "utf8");
   assert.doesNotMatch(service, /import sharp|from "sharp"|require\(["']sharp["']\)/);
   assert.match(service, /assertReportPhotographCount/);
+  assert.match(service, /customerFacingWorkSummary/);
+  assert.doesNotMatch(service, /\["Purpose"|Site notes|photo\.file_name/);
   const screen = await readFile(
     new URL("../../components/installations/installation-completion-report.tsx", import.meta.url),
     "utf8"

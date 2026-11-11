@@ -4,6 +4,7 @@ import { readCompletionChecklist } from "@/lib/installations/completion";
 import {
   buildInstallationReportPath,
   checklistReportValues,
+  customerFacingWorkSummary,
   formatInstallationReportReference,
   hasOfficialInstallationSignOff,
   OFFICIAL_REPORT_SIGN_OFF_REQUIRED,
@@ -32,9 +33,9 @@ type PhotoRow = {
 };
 
 const PHASE_LABELS: Record<string, string> = {
-  before: "Before installation",
-  during: "During installation",
-  after: "After installation",
+  before: "Before Installation",
+  during: "During Installation",
+  after: "After Installation",
 };
 
 const SNAG_LABELS: Record<string, string> = {
@@ -122,7 +123,7 @@ async function loadVisitReportSource(admin: SupabaseClient, visitId: string) {
   const { data, error } = await admin
     .from("installation_visits")
     .select(`
-      id, visit_number, title, status, purpose, scheduled_start_at,
+      id, visit_number, title, status, purpose, scheduled_start_at, completed_at,
       site_address_line_1, site_address_line_2, site_city, site_county, site_postcode,
       access_instructions, internal_notes, completion_notes,
       on_site_contact_name, on_site_contact_phone,
@@ -153,6 +154,7 @@ type ReportSource = {
   status: string;
   purpose: string | null;
   scheduled_start_at: string | null;
+  completed_at: string | null;
   site_address_line_1: string | null;
   site_address_line_2: string | null;
   site_city: string | null;
@@ -274,28 +276,35 @@ async function toPdfInput(input: {
     input.loaded.site_county,
     input.loaded.site_postcode,
   ].filter(Boolean).join(", ");
-  const workDetails = [
-    ["Installation", project?.title || input.loaded.title],
-    ["Job", job?.project_name],
-    ["Description", project?.description],
-    ["Purpose", input.loaded.purpose],
-    ["Site contact", [input.loaded.on_site_contact_name, input.loaded.on_site_contact_phone].filter(Boolean).join(" · ")],
-    ["Instructions", input.loaded.access_instructions],
-    ["Site notes", input.loaded.internal_notes],
-    ["Completion notes", input.loaded.completion_notes],
-  ]
-    .filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].trim().length > 0)
-    .map(([label, value]) => ({ label, value }));
+  const workDetails = customerFacingWorkSummary({
+    projectTitle: project?.title,
+    visitTitle: input.loaded.title,
+    jobName: job?.project_name,
+    description: project?.description,
+    completionNotes: input.loaded.completion_notes,
+    siteAccess: input.loaded.access_instructions,
+    siteContact: [input.loaded.on_site_contact_name, input.loaded.on_site_contact_phone].filter(Boolean).join(", "),
+  });
 
   const photos = input.loaded.installation_visit_photos ?? [];
   const snagPhotos = photos.filter((photo) => photo.snag_id);
   const snags = [];
   for (const snag of input.loaded.installation_snag_items ?? []) {
-    const issue = await imagesFor(input.admin, snagPhotos.filter((photo) => photo.snag_id === snag.id && photo.snag_photo_role === "issue"), input.names);
-    const resolution = await imagesFor(input.admin, snagPhotos.filter((photo) => photo.snag_id === snag.id && photo.snag_photo_role === "resolution"), input.names);
+    const issue = await imagesFor(
+      input.admin,
+      snagPhotos.filter((photo) => photo.snag_id === snag.id && photo.snag_photo_role === "issue"),
+      input.names,
+      "Issue photograph"
+    );
+    const resolution = await imagesFor(
+      input.admin,
+      snagPhotos.filter((photo) => photo.snag_id === snag.id && photo.snag_photo_role === "resolution"),
+      input.names,
+      "Resolution photograph"
+    );
     snags.push({
       description: snag.description || "Snag",
-      statusLabel: SNAG_LABELS[snag.status] || snag.status,
+      statusLabel: SNAG_LABELS[snag.status] || "Open",
       outstanding: isOutstandingInstallationSnag(snag.status),
       assignee: snag.assigned_to_profile_id ? input.names.get(snag.assigned_to_profile_id) || "Staff" : null,
       resolutionNotes: snag.resolution_notes,
@@ -306,7 +315,12 @@ async function toPdfInput(input: {
 
   const grouped = [];
   for (const phase of ["before", "during", "after"]) {
-    const images = await imagesFor(input.admin, input.selected.filter((photo) => photo.phase === phase), input.names);
+    const images = await imagesFor(
+      input.admin,
+      input.selected.filter((photo) => photo.phase === phase),
+      input.names,
+      PHASE_LABELS[phase]
+    );
     grouped.push({ phaseLabel: PHASE_LABELS[phase], images });
   }
 
@@ -330,12 +344,14 @@ async function toPdfInput(input: {
     quoteReference: quoteReferenceLabel(quoteNumber),
     companyName: company?.company_name || "Customer",
     siteAddress: address || null,
-    installationDateLabel: input.loaded.scheduled_start_at ? formatLondonWhen(input.loaded.scheduled_start_at) : null,
+    scheduledAtLabel: input.loaded.scheduled_start_at ? formatLondonWhen(input.loaded.scheduled_start_at) : null,
+    completedAtLabel: input.loaded.completed_at ? formatLondonWhen(input.loaded.completed_at) : null,
     installers: (input.loaded.installation_visit_assignments ?? []).map((assignment) => one(assignment.profiles)?.full_name || "Installer"),
-    visitStatusLabel: VISIT_STATUS_LABELS[input.loaded.status as keyof typeof VISIT_STATUS_LABELS] || input.loaded.status,
+    visitStatusLabel: VISIT_STATUS_LABELS[input.loaded.status as keyof typeof VISIT_STATUS_LABELS] || "Recorded",
     visitTitle: input.loaded.title || "Visit",
     visitNumber: input.loaded.visit_number,
-    projectStatusLabel: PROJECT_STATUS_LABELS[(project?.status || "active") as keyof typeof PROJECT_STATUS_LABELS] || project?.status || "Active",
+    projectStatusLabel:
+      PROJECT_STATUS_LABELS[(project?.status || "active") as keyof typeof PROJECT_STATUS_LABELS] || "Active",
     workDetails,
     checklist: {
       ...checklist,
@@ -354,13 +370,11 @@ async function toPdfInput(input: {
   };
 }
 
-async function imagesFor(admin: SupabaseClient, photos: PhotoRow[], names: Map<string, string>) {
+async function imagesFor(admin: SupabaseClient, photos: PhotoRow[], names: Map<string, string>, label: string) {
   const images: CompletionReportImage[] = [];
   for (const photo of photos) {
     const uploader = photo.uploaded_by_profile_id ? names.get(photo.uploaded_by_profile_id) : null;
-    const caption = [photo.file_name || "Photograph", photo.captured_at ? formatLondonWhen(photo.captured_at) : null, uploader]
-      .filter(Boolean)
-      .join(" · ");
+    const caption = [label, photo.captured_at ? formatLondonWhen(photo.captured_at) : null, uploader].filter(Boolean).join(" · ");
     images.push(await downloadImage(admin, photo.storage_path, caption, photo.id));
   }
   return images;

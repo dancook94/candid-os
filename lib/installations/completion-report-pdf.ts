@@ -45,7 +45,8 @@ export type CompletionReportPdfInput = {
   quoteReference: string | null;
   companyName: string;
   siteAddress: string | null;
-  installationDateLabel: string | null;
+  scheduledAtLabel: string | null;
+  completedAtLabel: string | null;
   installers: string[];
   visitStatusLabel: string;
   visitTitle: string;
@@ -219,37 +220,49 @@ function drawSummary(
   nextPage: () => Cursor
 ) {
   const rows = [
+    ["Customer", input.companyName],
     ["Job number", input.jobReference || "Not linked"],
     ["Quote reference", input.quoteReference || "Not linked"],
-    ["Customer", input.companyName],
-    ["Site address", input.siteAddress || "Not recorded"],
-    ["Installation date", input.installationDateLabel || "Not scheduled"],
-    ["Assigned installers", input.installers.length > 0 ? input.installers.join(", ") : "Not assigned"],
-    ["Visit status", input.visitStatusLabel],
+    ["Site address", input.siteAddress],
+    ["Scheduled installation", input.scheduledAtLabel],
+    ["Visit completed", input.completedAtLabel],
+    ["Customer sign-off", input.signedAtLabel],
     ["Report generated", input.generatedAtLabel],
-  ];
-  const rowHeight = 18;
-  ensure(cursor, 28 + rows.length * rowHeight + 36, nextPage);
+    ["Installers", input.installers.length > 0 ? input.installers.join(", ") : null],
+    ["Visit status", input.visitStatusLabel],
+  ].filter((row): row is [string, string] => typeof row[1] === "string" && row[1].trim().length > 0);
+  ensure(cursor, 36 + rows.length * 18 + 28, nextPage);
   cursor.page.drawText(sanitizePdfText(`Visit ${input.visitNumber}: ${input.visitTitle}`), {
     x: MARGIN,
     y: cursor.y,
-    size: 12,
+    size: 14,
     font: fonts.bold,
     color: ink,
   });
-  cursor.y -= 18;
+  cursor.y -= 20;
   for (const [label, value] of rows) {
+    const lines = wrap(fonts.regular, value, 10, CONTENT_WIDTH - 156);
+    ensure(cursor, lines.length * 13 + 6, nextPage);
     cursor.page.drawText(label, { x: MARGIN, y: cursor.y, size: 9, font: fonts.bold, color: muted });
-    const lines = wrap(fonts.regular, value, 9, CONTENT_WIDTH - 130);
-    cursor.page.drawText(lines[0], { x: MARGIN + 130, y: cursor.y, size: 9, font: fonts.regular, color: ink });
-    cursor.y -= rowHeight;
+    lines.forEach((textLine, index) => {
+      cursor.page.drawText(textLine, {
+        x: MARGIN + 156,
+        y: cursor.y - index * 13,
+        size: 10,
+        font: fonts.regular,
+        color: ink,
+      });
+    });
+    cursor.y -= lines.length * 13 + 5;
   }
+  cursor.y -= 4;
   const scope = wrap(fonts.regular, installationReportScopeStatement(input.visitNumber, input.projectStatusLabel), 8, CONTENT_WIDTH);
   for (const scopeLine of scope) {
+    ensure(cursor, 12, nextPage);
     cursor.page.drawText(scopeLine, { x: MARGIN, y: cursor.y, size: 8, font: fonts.regular, color: muted });
     cursor.y -= 12;
   }
-  cursor.y -= 8;
+  cursor.y -= 6;
 }
 
 function drawWork(
@@ -258,27 +271,30 @@ function drawWork(
   input: CompletionReportPdfInput,
   nextPage: () => Cursor
 ) {
-  sectionHeading(cursor, fonts, "Work completed", nextPage);
+  sectionHeading(cursor, fonts, "Work completed", nextPage, 48);
   if (input.workDetails.length === 0) {
-    paragraph(cursor, fonts, "No additional work notes were recorded for this visit.", nextPage);
+    paragraph(cursor, fonts, "No work description was recorded for this visit.", nextPage);
     return;
   }
 
   for (const detail of input.workDetails) {
-    const lines = wrap(fonts.regular, detail.value, 10, CONTENT_WIDTH);
-    ensure(cursor, 16 + lines.length * 13, nextPage);
-    cursor.page.drawText(sanitizePdfText(detail.label), {
-      x: MARGIN,
-      y: cursor.y,
-      size: 9,
-      font: fonts.bold,
-      color: muted,
-    });
-    cursor.y -= 14;
+    const lines = wrap(fonts.regular, detail.value, 11, CONTENT_WIDTH);
+    const showLabel = detail.label !== "Work completed";
+    ensure(cursor, (showLabel ? 16 : 0) + lines.length * 14, nextPage);
+    if (showLabel) {
+      cursor.page.drawText(sanitizePdfText(detail.label), {
+        x: MARGIN,
+        y: cursor.y,
+        size: 9,
+        font: fonts.bold,
+        color: muted,
+      });
+      cursor.y -= 14;
+    }
     for (const textLine of lines) {
       ensure(cursor, 14, nextPage);
-      cursor.page.drawText(textLine, { x: MARGIN, y: cursor.y, size: 10, font: fonts.regular, color: ink });
-      cursor.y -= 13;
+      cursor.page.drawText(textLine, { x: MARGIN, y: cursor.y, size: 11, font: fonts.regular, color: ink });
+      cursor.y -= 14;
     }
     cursor.y -= 6;
   }
@@ -290,7 +306,7 @@ function drawChecklist(
   input: CompletionReportPdfInput,
   nextPage: () => Cursor
 ) {
-  sectionHeading(cursor, fonts, "Completion checklist", nextPage);
+  sectionHeading(cursor, fonts, "Completion checklist", nextPage, 56);
   const items = [
     [COMPLETION_CHECKLIST[0], input.checklist.siteLeftSafeAndTidy],
     [COMPLETION_CHECKLIST[1], input.checklist.installationPhotosRecorded],
@@ -313,10 +329,13 @@ function drawChecklist(
     });
     cursor.y -= 18;
   }
-  const recorded =
-    input.checklist.recordedBy && input.checklist.recordedAtLabel
-      ? `Recorded by ${input.checklist.recordedBy} | ${input.checklist.recordedAtLabel}`
-      : "No checklist confirmation was recorded.";
+  const recordedAt =
+    input.checklist.recordedAtLabel && input.checklist.recordedAtLabel !== input.signedAtLabel
+      ? input.checklist.recordedAtLabel
+      : null;
+  const recorded = input.checklist.recordedBy
+    ? `Recorded by ${input.checklist.recordedBy}${recordedAt ? ` | ${recordedAt}` : ""}`
+    : "No checklist confirmation was recorded.";
   paragraph(cursor, fonts, recorded, nextPage);
 }
 
@@ -327,7 +346,7 @@ async function drawSignOff(
   input: CompletionReportPdfInput,
   nextPage: () => Cursor
 ) {
-  sectionHeading(cursor, fonts, "Customer sign-off", nextPage);
+  sectionHeading(cursor, fonts, "Customer sign-off", nextPage, 48);
   if (input.attendance === "absent") {
     paragraph(cursor, fonts, "Customer not present — no signature obtained.", nextPage);
   } else if (input.attendance === "declined") {
@@ -391,34 +410,55 @@ async function drawSnags(
   input: CompletionReportPdfInput,
   nextPage: () => Cursor
 ) {
-  const outstanding = input.snags.filter((snag) => snag.outstanding).length;
-  sectionHeading(cursor, fonts, "Snagging", nextPage);
-  paragraph(cursor, fonts, installationReportSnagStatement(outstanding, input.snags.length), nextPage);
-
-  for (const snag of input.snags) {
-    ensure(cursor, 70, nextPage);
-    cursor.page.drawRectangle({
-      x: MARGIN,
-      y: cursor.y - 4,
-      width: 8,
-      height: 8,
-      color: snag.outstanding ? yellow : rgb(0.75, 0.86, 0.78),
-    });
-    cursor.page.drawText(snag.outstanding ? "Outstanding" : snag.statusLabel, {
-      x: MARGIN + 16,
-      y: cursor.y - 2,
-      size: 8,
-      font: fonts.bold,
-      color: snag.outstanding ? outstandingColor() : resolved,
-    });
-    cursor.y -= 16;
-    paragraph(cursor, fonts, snag.description, nextPage);
-    if (snag.assignee) paragraph(cursor, fonts, `Responsible: ${snag.assignee}`, nextPage);
-    if (snag.resolutionNotes) paragraph(cursor, fonts, `Resolution notes: ${snag.resolutionNotes}`, nextPage);
-    await drawImageRow(doc, cursor, fonts, "Issue photographs", snag.issuePhotos, nextPage);
-    await drawImageRow(doc, cursor, fonts, "Resolution photographs", snag.resolutionPhotos, nextPage);
-    cursor.y -= 6;
+  const openSnags = input.snags.filter((snag) => snag.outstanding);
+  const closedSnags = input.snags.filter((snag) => !snag.outstanding);
+  sectionHeading(cursor, fonts, openSnags.length > 0 ? "Outstanding snags" : "Snagging", nextPage, 56);
+  paragraph(cursor, fonts, installationReportSnagStatement(openSnags.length, input.snags.length), nextPage);
+  for (const snag of openSnags) {
+    await drawSnag(doc, cursor, fonts, snag, nextPage);
   }
+  if (closedSnags.length > 0) {
+    if (openSnags.length > 0) sectionHeading(cursor, fonts, "Resolved snags", nextPage, 56);
+    for (const snag of closedSnags) {
+      await drawSnag(doc, cursor, fonts, snag, nextPage);
+    }
+  }
+}
+
+async function drawSnag(
+  doc: PDFDocument,
+  cursor: Cursor,
+  fonts: Fonts,
+  snag: CompletionReportPdfInput["snags"][number],
+  nextPage: () => Cursor
+) {
+  const description = wrap(fonts.regular, snag.description, 11, CONTENT_WIDTH - 16);
+  ensure(cursor, 36 + description.length * 14, nextPage);
+  cursor.page.drawRectangle({
+    x: MARGIN,
+    y: cursor.y - 14,
+    width: CONTENT_WIDTH,
+    height: 22,
+    color: snag.outstanding ? rgb(0.99, 0.95, 0.86) : rgb(0.93, 0.96, 0.94),
+  });
+  cursor.page.drawText(sanitizePdfText(snag.statusLabel), {
+    x: MARGIN + 8,
+    y: cursor.y - 8,
+    size: 9,
+    font: fonts.bold,
+    color: snag.outstanding ? outstandingColor() : resolved,
+  });
+  cursor.y -= 28;
+  for (const textLine of description) {
+    ensure(cursor, 14, nextPage);
+    cursor.page.drawText(textLine, { x: MARGIN, y: cursor.y, size: 11, font: fonts.regular, color: ink });
+    cursor.y -= 14;
+  }
+  if (snag.assignee) paragraph(cursor, fonts, `Responsible: ${snag.assignee}`, nextPage);
+  if (snag.resolutionNotes) paragraph(cursor, fonts, `Resolution notes: ${snag.resolutionNotes}`, nextPage);
+  await drawImageRow(doc, cursor, fonts, "Issue photographs", snag.issuePhotos, nextPage);
+  await drawImageRow(doc, cursor, fonts, "Resolution photographs", snag.resolutionPhotos, nextPage);
+  cursor.y -= 8;
 }
 
 function outstandingColor() {
@@ -441,20 +481,11 @@ async function drawPhotographs(
 
   let opened = false;
   for (const group of groups) {
-    ensure(cursor, opened ? 210 : 242, nextPage);
-    if (!opened) {
-      sectionHeading(cursor, fonts, "Photographic evidence", nextPage);
-      opened = true;
-    }
-    cursor.page.drawText(sanitizePdfText(group.phaseLabel), {
-      x: MARGIN,
-      y: cursor.y,
-      size: 12,
-      font: fonts.bold,
-      color: ink,
+    await drawImageGrid(doc, cursor, fonts, group.images, nextPage, {
+      section: opened ? null : "Photographic evidence",
+      phase: group.phaseLabel,
     });
-    cursor.y -= 16;
-    await drawImageGrid(doc, cursor, fonts, group.images, nextPage);
+    opened = true;
   }
 }
 
@@ -463,29 +494,79 @@ async function drawImageGrid(
   cursor: Cursor,
   fonts: Fonts,
   images: CompletionReportImage[],
-  nextPage: () => Cursor
+  nextPage: () => Cursor,
+  heading?: { section?: string | null; phase?: string | null }
 ) {
-  const gap = 12;
-  const cellWidth = (CONTENT_WIDTH - gap) / 2;
-  const imageMaxHeight = 150;
+  const gap = 16;
+  let pendingHeading = heading;
+  let index = 0;
+  let carried: { embedded: Awaited<ReturnType<typeof embedPhotograph>>; caption: string } | null = null;
 
-  for (let index = 0; index < images.length; index += 2) {
-    const prepared = [];
-    for (const image of images.slice(index, index + 2)) {
-      const embedded = await embedPhotograph(doc, image);
-      const visual = orientedPixelSize(embedded.image.width, embedded.image.height, embedded.orientation);
-      const scale = Math.min(cellWidth / visual.width, imageMaxHeight / visual.height);
-      const width = visual.width * scale;
-      const height = visual.height * scale;
-      const captionLines = wrap(fonts.regular, image.caption, 8, cellWidth);
-      prepared.push({ embedded, width, height, captionLines });
+  while (index < images.length || carried) {
+    const source = carried ? null : images[index];
+    const first = carried ?? {
+      embedded: await embedPhotograph(doc, source!),
+      caption: source!.caption,
+    };
+    if (!carried) index += 1;
+    carried = null;
+    const firstVisual = orientedPixelSize(first.embedded.image.width, first.embedded.image.height, first.embedded.orientation);
+    const firstPortrait = firstVisual.height > firstVisual.width;
+    const prepared = [{ ...first, captionLines: [] as string[] }];
+    if (firstPortrait && index < images.length) {
+      const secondImage = images[index];
+      const second = await embedPhotograph(doc, secondImage);
+      const secondVisual = orientedPixelSize(second.image.width, second.image.height, second.orientation);
+      if (secondVisual.height > secondVisual.width) {
+        prepared.push({ embedded: second, caption: secondImage.caption, captionLines: [] });
+        index += 1;
+      } else {
+        carried = { embedded: second, caption: secondImage.caption };
+      }
     }
-    const blockHeight = Math.max(
-      ...prepared.map((item) => item.height + 8 + item.captionLines.length * 10 + 12)
+    const count = prepared.length;
+    const captionWidth = count === 1 ? CONTENT_WIDTH : (CONTENT_WIDTH - gap) / 2;
+    for (const item of prepared) {
+      item.captionLines = wrap(fonts.regular, item.caption, 8, captionWidth);
+    }
+    const captionHeight = Math.max(...prepared.map((item) => item.captionLines.length * 11 + 12));
+    const headingHeight = (pendingHeading?.section ? 30 : 0) + (pendingHeading?.phase ? 28 : 0);
+    const cellWidth = count === 1 ? CONTENT_WIDTH : (CONTENT_WIDTH - gap) / 2;
+    const naturalHeight = Math.max(
+      ...prepared.map((item) => {
+        const visual = orientedPixelSize(item.embedded.image.width, item.embedded.image.height, item.embedded.orientation);
+        return Math.min(count === 1 ? 520 : 360, visual.height * (cellWidth / visual.width));
+      })
     );
-    ensure(cursor, blockHeight, nextPage);
+    if (cursor.y - (naturalHeight + captionHeight + headingHeight) < CONTENT_BOTTOM) {
+      const fresh = nextPage();
+      cursor.page = fresh.page;
+      cursor.y = fresh.y;
+    }
+    if (pendingHeading?.section) {
+      drawSectionHeading(cursor, fonts, pendingHeading.section);
+    }
+    if (pendingHeading?.phase) {
+      cursor.page.drawText(sanitizePdfText(pendingHeading.phase), {
+        x: MARGIN,
+        y: cursor.y,
+        size: 12,
+        font: fonts.bold,
+        color: ink,
+      });
+      cursor.y -= 18;
+    }
+    pendingHeading = undefined;
+    const available = Math.max(48, cursor.y - CONTENT_BOTTOM - captionHeight - 8);
+    const maxHeight = Math.min(count === 1 ? 520 : 360, available);
+    const fitted = prepared.map((item) => {
+      const visual = orientedPixelSize(item.embedded.image.width, item.embedded.image.height, item.embedded.orientation);
+      const scale = Math.min(cellWidth / visual.width, maxHeight / visual.height);
+      return { ...item, width: visual.width * scale, height: visual.height * scale };
+    });
+    const blockHeight = Math.max(...fitted.map((item) => item.height)) + captionHeight;
 
-    prepared.forEach((item, column) => {
+    fitted.forEach((item, column) => {
       const x = MARGIN + column * (cellWidth + gap);
       const y = cursor.y - item.height;
       cursor.page.drawRectangle({
@@ -530,14 +611,15 @@ async function drawImageRow(
   nextPage: () => Cursor
 ) {
   if (images.length === 0) return;
-  ensure(cursor, 190, nextPage);
-  cursor.page.drawText(label, { x: MARGIN, y: cursor.y, size: 8, font: fonts.bold, color: muted });
-  cursor.y -= 8;
-  await drawImageGrid(doc, cursor, fonts, images, nextPage);
+  await drawImageGrid(doc, cursor, fonts, images, nextPage, { phase: label });
 }
 
-function sectionHeading(cursor: Cursor, fonts: Fonts, title: string, nextPage: () => Cursor) {
-  ensure(cursor, 32, nextPage);
+function sectionHeading(cursor: Cursor, fonts: Fonts, title: string, nextPage: () => Cursor, reserve = 72) {
+  ensure(cursor, 30 + reserve, nextPage);
+  drawSectionHeading(cursor, fonts, title);
+}
+
+function drawSectionHeading(cursor: Cursor, fonts: Fonts, title: string) {
   cursor.y -= 8;
   cursor.page.drawRectangle({ x: MARGIN, y: cursor.y - 2, width: 18, height: 3, color: yellow });
   cursor.page.drawText(title, { x: MARGIN + 24, y: cursor.y - 4, size: 13, font: fonts.bold, color: ink });
