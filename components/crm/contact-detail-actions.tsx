@@ -7,6 +7,7 @@ import { useState } from "react";
 import { ContactFormDialog } from "@/components/crm/contact-form-dialog";
 import { ResendAccountReadyButton } from "@/components/resend-account-ready-button";
 import { Button } from "@/components/ui/button";
+import { isCustomerPortalInviteAllowedPublic } from "@/lib/communications/portal-invite-allowlist";
 import type { ContactListRow } from "@/lib/crm/contacts";
 
 type ContactDetailActionsProps = {
@@ -24,6 +25,7 @@ export function ContactDetailActions({
   const [editOpen, setEditOpen] = useState(false);
   const [isInviting, setIsInviting] = useState(false);
   const [error, setError] = useState("");
+  const portalInviteAllowed = isCustomerPortalInviteAllowedPublic(contact.email);
 
   async function handleInvite() {
     setIsInviting(true);
@@ -56,7 +58,7 @@ export function ContactDetailActions({
           type="button"
           variant="outline"
           size="sm"
-          disabled={isInviting || !contact.email}
+          disabled={isInviting || !contact.email || !portalInviteAllowed}
           onClick={handleInvite}
         >
           {isInviting ? "Sending..." : "Invite to portal"}
@@ -69,7 +71,7 @@ export function ContactDetailActions({
           type="button"
           variant="outline"
           size="sm"
-          disabled={isInviting}
+          disabled={isInviting || !portalInviteAllowed}
           onClick={handleInvite}
         >
           {isInviting ? "Sending..." : "Resend invitation"}
@@ -96,6 +98,13 @@ export function ContactDetailActions({
       >
         Edit contact
       </Button>
+
+      {!portalInviteAllowed && contact.email ? (
+        <p className="w-full text-sm text-muted-foreground">
+          Portal invitations to external addresses are blocked in test communication mode unless the
+          email is on the Test invite allowlist.
+        </p>
+      ) : null}
 
       {error ? <p className="w-full text-sm text-red-600">{error}</p> : null}
 

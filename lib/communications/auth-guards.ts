@@ -2,6 +2,7 @@ import {
   getCommunicationConfig,
   isInternalEmailAddress,
 } from "@/lib/communications/config";
+import { isTestPortalInviteAllowlisted } from "@/lib/communications/portal-invite-allowlist";
 import { isPublicRegistrationEnabled } from "@/lib/auth/public-registration";
 
 export type ExternalAuthBlockReason =
@@ -26,10 +27,33 @@ export function getExternalCustomerAuthBlockReason(
   return "test_mode_customer_portal_invite_blocked";
 }
 
+/**
+ * Portal invite guard only — honour Test allowlist without opening signup or password reset.
+ */
+export function getExternalCustomerPortalInviteBlockReason(
+  email: string
+): ExternalAuthBlockReason | null {
+  const config = getCommunicationConfig();
+
+  if (config.mode === "live") {
+    return null;
+  }
+
+  if (isInternalEmailAddress(email, config.internalDomains)) {
+    return null;
+  }
+
+  if (isTestPortalInviteAllowlisted(email)) {
+    return null;
+  }
+
+  return "test_mode_customer_portal_invite_blocked";
+}
+
 export function assertCustomerPortalInviteAllowed(email: string):
   | { ok: true }
   | { ok: false; reason: ExternalAuthBlockReason; message: string } {
-  const reason = getExternalCustomerAuthBlockReason(email);
+  const reason = getExternalCustomerPortalInviteBlockReason(email);
 
   if (!reason) {
     return { ok: true };

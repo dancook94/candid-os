@@ -7,6 +7,7 @@ import { useState } from "react";
 import { ContactFormDialog } from "@/components/crm/contact-form-dialog";
 import { ContactPortalStatusBadge } from "@/components/crm/contact-portal-status-badge";
 import { Button } from "@/components/ui/button";
+import { isCustomerPortalInviteAllowedPublic } from "@/lib/communications/portal-invite-allowlist";
 import type { ContactListRow } from "@/lib/crm/contacts";
 
 type CompanyOption = {
@@ -132,7 +133,11 @@ export function ContactsTable({
                           type="button"
                           variant="outline"
                           size="sm"
-                          disabled={isBusy || !contact.email}
+                          disabled={
+                            isBusy ||
+                            !contact.email ||
+                            !isCustomerPortalInviteAllowedPublic(contact.email)
+                          }
                           onClick={() => handleInvite(contact.id)}
                         >
                           {isBusy ? "Sending..." : "Invite to portal"}
@@ -145,7 +150,9 @@ export function ContactsTable({
                           type="button"
                           variant="outline"
                           size="sm"
-                          disabled={isBusy}
+                          disabled={
+                            isBusy || !isCustomerPortalInviteAllowedPublic(contact.email)
+                          }
                           onClick={() => handleInvite(contact.id)}
                         >
                           {isBusy ? "Sending..." : "Resend invitation"}
